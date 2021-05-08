@@ -1,0 +1,45 @@
+ENV_NAME="eeylops_go_venv"
+PARENT_DIR="$(dirname "${PWD}")"
+GOLANG_DIR="${PARENT_DIR}/${ENV_NAME}"
+GOROOT_DIR="${GOLANG_DIR}/go"
+GO_MAJOR_VERSION="1"
+GO_VERSION="${GO_MAJOR_VERSION}.15.7"
+CHECK_IF_GOLANG_IS_INSTALLED="${GOROOT_DIR}/bin/go version | grep ${GO_VERSION} &> /dev/null"
+INSTALL_GOLANG="wget -c https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz && tar -C ${GOLANG_DIR} -xvzf go${GO_VERSION}.linux-amd64.tar.gz && rm -f go${GO_VERSION}.linux-amd64.tar.gz"
+
+# Make env directory.
+mkdir -p ${GOLANG_DIR}
+
+
+# Install golang.
+echo ""
+echo "####################### Installing Golang #######################"
+if eval $CHECK_IF_GOLANG_IS_INSTALLED ; then
+  echo "Required golang version already installed"
+else
+  if eval $INSTALL_GOLANG ; then
+    echo "Required golang version successfully downloaded and installed"
+  else
+    echo "ERROR: Required golang version installation failed"
+    return
+  fi
+fi
+
+# Export GOROOT.
+export GOROOT="${GOROOT_DIR}"
+export GOPATH="${PARENT_DIR}/.go"
+alias go='${GOROOT_DIR}/bin/go'
+BK_PS1=${PS1}
+PS1="(${ENV_NAME}) $PS1"
+
+
+function deactivate {
+	unset GOROOT
+	unset GOPATH
+	unalias go
+	PS1="${BK_PS1}"
+}
+
+echo "GOROOT: ${GOROOT}"
+echo "GOPATH: ${GOPATH}"
+
