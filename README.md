@@ -1,2 +1,2 @@
 # eeylops
-Simple, lightweight and scalable messaging system
+Simple, lightweight, distributed messaging system
