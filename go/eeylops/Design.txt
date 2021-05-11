@@ -73,6 +73,8 @@ current snapshot duration would be once every hour.
 Storage
 --------
 Segment Store:
+Append: Appends records to the segment.
+Scan: Scans records starting from the given offset id. 
 
 
 Topic Store:
