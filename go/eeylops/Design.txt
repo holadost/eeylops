@@ -39,13 +39,12 @@ The partition holds an interval tree that is used to quickly identify(O(log(N)) 
 in. The partition also holds a pointer to the current segment where messages are appended. Two types of segments
 are currently supported: badger and sqlite.
 
+Raft
+-----
 Eeylops holds an instance of raft.RaftNode. The RaftNode exposes the Apply method that can be invoked to start
 and wait for the command to be chosen. Produce, Commit, Connect, Config and Close RPCs will require raft consensus.
 The consume RPC for the most part will not require it since all reads will be served locally.
 
-
-Raft
------
 We currently use the Hashicorp implementation of Raft(hraft). The hashicorp implementation requires us to implement the
 FSM interface that is used by hraft to apply chosen commands to our storage. The topic map will need to be
 passed by Eeylops to the Raft FSM when raft is initialized. The FSM requires us to implement two critical methods
@@ -69,3 +68,14 @@ The persist snapshot method is called concurrently with Apply. When persist is c
 we have already persisted the metadata during Snapshot. Future GC must ensure that even if messages have expired they
 must not be reclaimed if it is recorded in the snapshot store. We will not be keeping more than 1 snapshot and our
 current snapshot duration would be once every hour.
+
+
+Storage
+--------
+Segment Store:
+
+
+Topic Store:
+
+
+Client Store:
