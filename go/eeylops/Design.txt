@@ -1,0 +1,71 @@
+========
+EEYLOPS
+========
+
+
+What is Eeylops?
+=================
+Eeylops is a simple, lightweight, distributed and consistent messaging queue system. A message queue decouples
+components in a distributed system and allows them to communicate in an asynchronous manner.
+Eeylops has two types of users: producers and consumers. Producers enqueue tasks to a specific queue.
+Consumers are worker processes that asynchronously pick up messages from a specific queue and process them.
+The producers publish messages to a particular topic and consumers pick up messages from a given topic.
+Each topic is sub divided into multiple partitions which is configured when the topic is first created with Eeylops.
+Default is a single partition per topic. To allow producers and consumers to scale, multiple partitions can be created
+per topic so that each producer and consumer can work on a disjoint set of messages.
+
+
+Implementation
+===============
+
+Server
+-------
+The launcher is the entry point of eeylops. This will launch the gRPC server(server.go) that will be used by producers
+and consumers to publish and subscribe to message queues(topics). The RPCs are defined in the common directory. The
+server will then instantiate eeylops.go that will handle the user requests(RPCs).
+
+Eeylops(eeylops.go) will first instantiate the topic manager map. The topic manager map is a durable key value store
+that holds all the metadata regarding a topic. Whenever a topic is created, the topic information is replicated by
+all the eeylops nodes and persisted to the topic store. The entire topic store is also kept in memory so
+as to speed up topic lookups for the future. The topic store in memory representation is initialized from the
+underlying topic store(KV store) when eeylops is first initialized. The topic metadata is used to initialize the
+partition manager(in memory representation of all the partitions in a topic). The partition manager tracks the various
+partitions that were created for a given topic. This is configured the first time when a topic is created and cannot be
+changed. The partition manager can be queried to get the partitions of interest.
+
+Each partition is a collection of multiple segments. Each segment will contain at most a 1 million records. The
+number of records could be smaller if a segment is marked as immutable before it has a million records/messages.
+The partition holds an interval tree that is used to quickly identify(O(log(N)) lookup) which segment a message lives
+in. The partition also holds a pointer to the current segment where messages are appended. Two types of segments
+are currently supported: badger and sqlite.
+
+Eeylops holds an instance of raft.RaftNode. The RaftNode exposes the Apply method that can be invoked to start
+and wait for the command to be chosen. Produce, Commit, Connect, Config and Close RPCs will require raft consensus.
+The consume RPC for the most part will not require it since all reads will be served locally.
+
+
+Raft
+-----
+We currently use the Hashicorp implementation of Raft(hraft). The hashicorp implementation requires us to implement the
+FSM interface that is used by hraft to apply chosen commands to our storage. The topic map will need to be
+passed by Eeylops to the Raft FSM when raft is initialized. The FSM requires us to implement two critical methods
+(fsm.go):
+Apply: This will apply the command to the underlying data store.
+Snapshot: This will be called by the same thread/go-routine that calls Apply i.e. Apply and Snapshot will not be called
+          at the same time. Snapshot requires us to snapshot(quickly) the entire data store so that nodes that fall
+          behind can quickly catch up(new node adds requires the same). (snapshot.go)
+The hraft implementation also requires us to implement a log store and index store that is used by hraft for internal
+bookeeping. We will be using raft-boltdb which implements these interfaces using bolt-db as the underlying store.
+
+The Apply method will be fairly simple in implementation: We find the topic and partition of interest and append
+the messages to the latest segment.
+The Snapshot method will do the following:
+1. Close the latest segment in all the partitions and persist all the segment metadata that are currently present
+in all the partitions and persist it in the snapshot store. It will then open new segments for all the partitions for
+future writes. In addition to segments, we will also need to snapshot the topic store, client store(which tracks
+the committed index for clients).
+
+The persist snapshot method is called concurrently with Apply. When persist is called, we need not do anything since
+we have already persisted the metadata during Snapshot. Future GC must ensure that even if messages have expired they
+must not be reclaimed if it is recorded in the snapshot store. We will not be keeping more than 1 snapshot and our
+current snapshot duration would be once every hour.
