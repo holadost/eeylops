@@ -19,8 +19,7 @@ type Segment interface {
 
 // SegmentMetadata holds the metadata of a segment.
 type SegmentMetadata struct {
-	StartOffset uint64
-	LastOffset  uint64
-	DataDir     string
-	Immutable   bool
+	NextOffset uint64
+	DataDir    string
+	Immutable  bool
 }

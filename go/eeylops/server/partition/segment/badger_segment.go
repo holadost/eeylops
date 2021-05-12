@@ -4,24 +4,22 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"github.com/dgraph-io/badger"
+	"github.com/golang/glog"
 	"os"
 	"sync"
 )
 
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	db          *badger.DB
-	ctx         context.Context
-	cancelFunc  context.CancelFunc
-	startOffset uint64
-	lastOffset  uint64
-	// writeLock protects the Append call allowing only one writer to append messages at a time.
-	writeLock sync.Mutex
-	immutable bool
-	closed    bool
-	dataDir   string
+	db         *badger.DB
+	ctx        context.Context
+	cancelFunc context.CancelFunc
+	nextOffSet uint64
+	appendLock sync.Mutex
+	immutable  bool
+	closed     bool
+	dataDir    string
 }
 
 // NewBadgerSegment initializes a new instance of badger segment store.
@@ -33,6 +31,7 @@ func NewBadgerSegment(dataDir string) (*BadgerSegment, error) {
 	bds.dataDir = dataDir
 	err := bds.Initialize()
 	if err != nil {
+		glog.Errorf("Unable to create badger segment due to err: %s", err.Error())
 		return nil, err
 	}
 	return bds, nil
@@ -40,14 +39,16 @@ func NewBadgerSegment(dataDir string) (*BadgerSegment, error) {
 
 // Initialize implements the Segment interface. It initializes the segment store.
 func (bds *BadgerSegment) Initialize() error {
+	glog.Infof("Initializing badger segment")
 	opts := badger.DefaultOptions(bds.dataDir)
 	opts.SyncWrites = true
-	if bds.immutable {
-		opts.ReadOnly = true
-	}
 	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
 	var err error
+	if bds.immutable {
+		glog.Infof("Segment is marked as immutable. Opening DB in read-only mode")
+		opts.ReadOnly = false
+	}
 	bds.db, err = badger.Open(opts)
 	if err != nil {
 		bds.db = nil
@@ -55,13 +56,17 @@ func (bds *BadgerSegment) Initialize() error {
 	}
 	bds.ctx, bds.cancelFunc = context.WithCancel(context.Background())
 	bds.closed = false
-	bds.initializeOffsets()
+	bds.initializeNextOffset()
 	return nil
 }
 
 // Close implements the Segment interface. It closes the connection to the underlying
 // BadgerDB database as well as invoking the context's cancel function.
 func (bds *BadgerSegment) Close() error {
+	if bds.closed {
+		return nil
+	}
+	glog.Infof("Closing segment located at: %s", bds.dataDir)
 	bds.cancelFunc()
 	err := bds.db.Close()
 	bds.db = nil
@@ -77,12 +82,12 @@ func (bds *BadgerSegment) Append(values [][]byte) error {
 	if bds.immutable {
 		return errors.New("segment is immutable. Append is disabled")
 	}
-	bds.writeLock.Lock()
-	defer bds.writeLock.Unlock()
-	keys := bds.generateKeys(bds.startOffset, uint64(len(values)))
+	bds.appendLock.Lock()
+	defer bds.appendLock.Unlock()
+	keys := bds.generateKeys(bds.nextOffSet, uint64(len(values)))
 	err := bds.db.Update(func(txn *badger.Txn) error {
-		for ii, key := range keys {
-			err := txn.Set(key, values[ii])
+		for ii := 0; ii < len(keys); ii++ {
+			err := txn.Set(keys[ii], values[ii])
 			if err != nil {
 				return err
 			}
@@ -90,7 +95,7 @@ func (bds *BadgerSegment) Append(values [][]byte) error {
 		return nil
 	})
 	if err == nil {
-		bds.lastOffset = bds.lastOffset + uint64(len(values)) - 1
+		bds.nextOffSet = bds.nextOffSet + uint64(len(values))
 	}
 	return err
 }
@@ -112,15 +117,21 @@ func (bds *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 		for _, key := range keys {
 			item, err := txn.Get(key)
 			if err != nil {
-				return err
+				errs = append(errs, err)
+				values = append(values, nil)
+				continue
 			}
 			tmpValue, err := item.ValueCopy(nil)
-			errs = append(errs, err)
+			if err != nil {
+				errs = append(errs, err)
+				values = append(values, nil)
+				continue
+			}
+			errs = append(errs, nil)
 			values = append(values, tmpValue)
 		}
 		return nil
 	})
-
 	return
 }
 
@@ -132,10 +143,9 @@ func (bds *BadgerSegment) SetImmutable() {
 // Metadata returns a copy of the metadata associated with the segment.
 func (bds *BadgerSegment) Metadata() SegmentMetadata {
 	m := SegmentMetadata{
-		StartOffset: bds.startOffset,
-		LastOffset:  bds.lastOffset,
-		DataDir:     bds.dataDir,
-		Immutable:   bds.immutable,
+		NextOffset: bds.nextOffSet,
+		DataDir:    bds.dataDir,
+		Immutable:  bds.immutable,
 	}
 	return m
 }
@@ -143,10 +153,7 @@ func (bds *BadgerSegment) Metadata() SegmentMetadata {
 // generateKeys generates keys based on the given startOffset and numMessages.
 func (bds *BadgerSegment) generateKeys(startOffset uint64, numMessages uint64) [][]byte {
 	lastOffset := startOffset + numMessages
-	if bds.lastOffset < lastOffset {
-		lastOffset = bds.lastOffset
-	}
-	keys := make([][]byte, lastOffset-startOffset)
+	var keys [][]byte
 	for ii := startOffset; ii < lastOffset; ii++ {
 		val := make([]byte, 8)
 		binary.BigEndian.PutUint64(val, ii)
@@ -156,31 +163,24 @@ func (bds *BadgerSegment) generateKeys(startOffset uint64, numMessages uint64) [
 }
 
 // initializeOffsets initializes the start and last offset by scanning the underlying DB.
-func (bds *BadgerSegment) initializeOffsets() {
-	txn := bds.db.NewTransaction(false)
+func (bds *BadgerSegment) initializeNextOffset() {
+	glog.Infof("Initializing start and end offset")
+	txn := bds.db.NewTransaction(true)
 	opt := badger.DefaultIteratorOptions
-	itr := txn.NewIterator(opt)
-	for itr.Rewind(); itr.Valid(); itr.Next() {
-		item := itr.Item()
-		val, err := item.ValueCopy(nil)
-		if err != nil {
-			panic(fmt.Sprintf("Unable to fetch the first offset due to err: %v", err.Error()))
-		}
-		bds.startOffset = binary.BigEndian.Uint64(val)
-		break
-	}
-	itr.Close()
-
-	itr = txn.NewIterator(opt)
 	opt.Reverse = true
+	itr := txn.NewIterator(opt)
+	var hasVal bool
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
-		val, err := item.ValueCopy(nil)
-		if err != nil {
-			panic(fmt.Sprintf("Unable to fetch the last offset due to err: %v", err.Error()))
-		}
-		bds.lastOffset = binary.BigEndian.Uint64(val)
+		val := item.KeyCopy(nil)
+		bds.nextOffSet = binary.BigEndian.Uint64(val) + 1
+		hasVal = true
 		break
 	}
+	if !hasVal {
+		bds.nextOffSet = 0
+	}
+	glog.Infof("Next offset: %d", bds.nextOffSet)
 	itr.Close()
+	txn.Discard()
 }
