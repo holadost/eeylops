@@ -1,21 +1,26 @@
 package segment
 
 type SegmentStore interface {
-	// Initialize the segment store.
+	// Initialize the segment.
 	Initialize()
-	// Close the segment store.
+	// Close the segment.
 	Close()
-	// Append values to the segment store.
+	// Append values to the segment.
 	Append([][]byte) error
 	// Scan numMessages values from the segment store from the given start offset.
 	Scan(startOffset uint64, numMessages uint64) ([][]byte, []error)
-	// Stats fetches the stats for this instance of segment store.
+	// Stats fetches the stats for this instance of segment.
 	Stats()
-	// Metadata fetches the metadata of the segment store.
+	// Metadata fetches the metadata of the segment.
 	Metadata() SegmentMetadata
 	// SetImmutable marks the segment store as immutable.
 	SetImmutable()
 }
 
+// SegmentMetadata holds the metadata of a segment.
 type SegmentMetadata struct {
+	StartOffset uint64
+	LastOffset  uint64
+	DataDir     string
+	Immutable   bool
 }
