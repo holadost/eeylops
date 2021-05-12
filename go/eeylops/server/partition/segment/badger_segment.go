@@ -16,7 +16,7 @@ type BadgerSegment struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	nextOffSet uint64
-	appendLock sync.Mutex
+	writeLock  sync.Mutex
 	immutable  bool
 	closed     bool
 	dataDir    string
@@ -82,8 +82,8 @@ func (bds *BadgerSegment) Append(values [][]byte) error {
 	if bds.immutable {
 		return errors.New("segment is immutable. Append is disabled")
 	}
-	bds.appendLock.Lock()
-	defer bds.appendLock.Unlock()
+	bds.writeLock.Lock()
+	defer bds.writeLock.Unlock()
 	keys := bds.generateKeys(bds.nextOffSet, uint64(len(values)))
 	err := bds.db.Update(func(txn *badger.Txn) error {
 		for ii := 0; ii < len(keys); ii++ {
@@ -137,7 +137,9 @@ func (bds *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 
 // SetImmutable marks the segment as immutable.
 func (bds *BadgerSegment) SetImmutable() {
+	bds.writeLock.Lock()
 	bds.immutable = true
+	bds.writeLock.Unlock()
 }
 
 // Metadata returns a copy of the metadata associated with the segment.
