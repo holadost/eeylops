@@ -166,7 +166,7 @@ func (bds *BadgerSegment) generateKeys(startOffset uint64, numMessages uint64) [
 
 // initializeOffsets initializes the start and last offset by scanning the underlying DB.
 func (bds *BadgerSegment) initializeNextOffset() {
-	glog.Infof("Initializing start and end offset")
+	glog.V(1).Infof("Initializing next offset")
 	txn := bds.db.NewTransaction(true)
 	opt := badger.DefaultIteratorOptions
 	opt.Reverse = true
@@ -182,7 +182,6 @@ func (bds *BadgerSegment) initializeNextOffset() {
 	if !hasVal {
 		bds.nextOffSet = 0
 	}
-	glog.Infof("Next offset: %d", bds.nextOffSet)
 	itr.Close()
 	txn.Discard()
 }
