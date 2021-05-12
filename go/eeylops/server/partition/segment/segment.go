@@ -1,6 +1,6 @@
 package segment
 
-type SegmentStore interface {
+type Segment interface {
 	// Initialize the segment.
 	Initialize()
 	// Close the segment.
