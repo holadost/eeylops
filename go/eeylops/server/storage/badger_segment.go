@@ -74,14 +74,16 @@ func (seg *BadgerSegment) Close() error {
 	glog.Infof("Closing segment: %s", seg.logStr)
 	seg.cancelFunc()
 	err := seg.ddb.Close()
+	seg.mdb.Close()
 	seg.ddb = nil
+	seg.mdb = nil
 	seg.closed = true
 	return err
 }
 
 // Append implements the Segment interface. This method appends the given values to the segment.
 func (seg *BadgerSegment) Append(values [][]byte) error {
-	if seg.closed {
+	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable {
 		return errors.New(fmt.Sprintf("segment store: %s is closed", seg.logStr))
 	}
 	seg.writeLock.Lock()
@@ -105,8 +107,8 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 // Scan implements the Segment interface. It attempts to fetch numMessages starting from the given
 // startOffset.
 func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
-	if seg.closed {
-		err := errors.New(fmt.Sprintf("segment: %s is closed", seg.logStr))
+	if seg.closed || seg.metadata.Expired {
+		err := errors.New(fmt.Sprintf("segment: %s is closed/expired", seg.logStr))
 		for ii := 0; ii < int(startOffset+numMessages); ii++ {
 			errs = append(errs, err)
 		}
@@ -146,6 +148,15 @@ func (seg *BadgerSegment) MarkImmutable() {
 	if seg.nextOffSet != 0 {
 		seg.metadata.EndOffset = seg.metadata.StartOffset + seg.nextOffSet - 1
 	}
+	seg.mdb.PutMetadata(seg.metadata)
+}
+
+// MarkExpired marks the segment as immutable.
+func (seg *BadgerSegment) MarkExpired() {
+	seg.writeLock.Lock()
+	defer seg.writeLock.Unlock()
+	seg.metadata.Expired = true
+	seg.metadata.ExpiredTimestamp = time.Now()
 	seg.mdb.PutMetadata(seg.metadata)
 }
 
