@@ -63,7 +63,7 @@ func (sm *SegmentMetadata) Serialize() []byte {
 // Constants.
 const dataDirName = "data"
 const metadataDirName = "metadata"
-const metadataDbName = "metadata.db"
+const metadataDbName = "metadata.ddb"
 const metadataKeyName = "metadata"
 
 // segmentMetadataDB persists the segment metadata.
@@ -87,7 +87,7 @@ func newSegmentMetadataDB(dbRootPath string) *segmentMetadataDB {
 	}
 	db, err := gorm.Open("sqlite3", dbPath)
 	if err != nil {
-		glog.Fatalf("Unable to open metadata db located at: %s", dbPath)
+		glog.Fatalf("Unable to open metadata ddb located at: %s", dbPath)
 		return nil
 	}
 	mdb := new(segmentMetadataDB)
@@ -97,7 +97,7 @@ func newSegmentMetadataDB(dbRootPath string) *segmentMetadataDB {
 	mdbModel := metadataModel{}
 	dbc := mdb.Db.AutoMigrate(&mdbModel)
 	if dbc != nil && dbc.Error != nil {
-		glog.Fatalf("Unable to create and initialize metadata db located at: %s, due to err: %v",
+		glog.Fatalf("Unable to create and initialize metadata ddb located at: %s, due to err: %v",
 			mdb.Path, dbc.Error)
 	}
 	return mdb
