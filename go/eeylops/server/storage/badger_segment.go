@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"time"
 )
 
 // BadgerSegment implements Segment where the data is backed using badger db.
@@ -136,10 +137,16 @@ func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 	return
 }
 
-// SetImmutable marks the segment as immutable.
-func (seg *BadgerSegment) SetImmutable() {
+// MarkImmutable marks the segment as immutable.
+func (seg *BadgerSegment) MarkImmutable() {
 	seg.writeLock.Lock()
-	seg.writeLock.Unlock()
+	defer seg.writeLock.Unlock()
+	seg.metadata.Immutable = true
+	seg.metadata.ImmutableTimestamp = time.Now()
+	if seg.nextOffSet != 0 {
+		seg.metadata.EndOffset = seg.metadata.StartOffset + seg.nextOffSet - 1
+	}
+	seg.mdb.PutMetadata(seg.metadata)
 }
 
 // GetMetadata returns a copy of the metadata associated with the segment.
@@ -156,7 +163,11 @@ func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
 	seg.updateLogStr()
 }
 
-// Updates the logStr of the segment. This function assumes that the write lock has been acquired.
+func (seg *BadgerSegment) Stats() {
+
+}
+
+// updateLogStr updates the logStr of the segment.
 func (seg *BadgerSegment) updateLogStr() {
 	seg.logStr = fmt.Sprintf("(ID: %d, Root Directory: %s)", seg.metadata.ID, seg.rootDir)
 }
