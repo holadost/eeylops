@@ -1,34 +1,36 @@
-package segment
+package storage
 
 import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/dgraph-io/badger"
+	badger "github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
 	"os"
+	"path"
 	"sync"
 )
 
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	db         *badger.DB
+	db         *badger.DB         // Segment data db.
+	mdb        *segmentMetadataDB // Segment metadata db.
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	nextOffSet uint64
-	writeLock  sync.Mutex
-	immutable  bool
+	nextOffSet uint64     // Next start offset for new appends.
+	writeLock  sync.Mutex // Lock to protect all writes to segment data.
 	closed     bool
-	dataDir    string
+	rootDir    string
+	metadata   *SegmentMetadata // Cached segment metadata.
 }
 
 // NewBadgerSegment initializes a new instance of badger segment store.
-func NewBadgerSegment(dataDir string) (*BadgerSegment, error) {
-	if err := os.MkdirAll(dataDir, 0774); err != nil {
+func NewBadgerSegment(rootDir string) (*BadgerSegment, error) {
+	if err := os.MkdirAll(path.Join(rootDir, dataDirName), 0774); err != nil {
 		return nil, err
 	}
 	bds := new(BadgerSegment)
-	bds.dataDir = dataDir
+	bds.rootDir = rootDir
 	err := bds.Initialize()
 	if err != nil {
 		glog.Errorf("Unable to create badger segment due to err: %s", err.Error())
@@ -39,20 +41,24 @@ func NewBadgerSegment(dataDir string) (*BadgerSegment, error) {
 
 // Initialize implements the Segment interface. It initializes the segment store.
 func (bds *BadgerSegment) Initialize() error {
-	glog.Infof("Initializing badger segment")
-	opts := badger.DefaultOptions(bds.dataDir)
+	glog.Infof("Initializing badger segment located at: %s", bds.rootDir)
+	// Initialize metadata db.
+	bds.mdb = newSegmentMetadataDB(bds.rootDir)
+	bds.metadata = bds.mdb.GetMetadata()
+	if bds.metadata.ID == 0 {
+		glog.Infof("Did not find any metadata associated with this segment")
+	}
+	opts := badger.DefaultOptions(path.Join(bds.rootDir, dataDirName))
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
-	var err error
-	if bds.immutable {
-		glog.Infof("Segment is marked as immutable. Opening DB in read-only mode")
-		opts.ReadOnly = false
+	if bds.metadata.Immutable {
+		opts.ReadOnly = true
 	}
+	var err error
 	bds.db, err = badger.Open(opts)
 	if err != nil {
-		bds.db = nil
-		return err
+		glog.Fatalf("Unable to open badger db due to err: %s", err.Error())
 	}
 	bds.ctx, bds.cancelFunc = context.WithCancel(context.Background())
 	bds.closed = false
@@ -66,7 +72,7 @@ func (bds *BadgerSegment) Close() error {
 	if bds.closed {
 		return nil
 	}
-	glog.Infof("Closing segment located at: %s", bds.dataDir)
+	glog.Infof("Closing segment located at: %s", bds.rootDir)
 	bds.cancelFunc()
 	err := bds.db.Close()
 	bds.db = nil
@@ -78,9 +84,6 @@ func (bds *BadgerSegment) Close() error {
 func (bds *BadgerSegment) Append(values [][]byte) error {
 	if bds.closed {
 		return errors.New("segment store is closed")
-	}
-	if bds.immutable {
-		return errors.New("segment is immutable. Append is disabled")
 	}
 	bds.writeLock.Lock()
 	defer bds.writeLock.Unlock()
@@ -138,18 +141,12 @@ func (bds *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 // SetImmutable marks the segment as immutable.
 func (bds *BadgerSegment) SetImmutable() {
 	bds.writeLock.Lock()
-	bds.immutable = true
 	bds.writeLock.Unlock()
 }
 
 // Metadata returns a copy of the metadata associated with the segment.
 func (bds *BadgerSegment) Metadata() SegmentMetadata {
-	m := SegmentMetadata{
-		NextOffset: bds.nextOffSet,
-		DataDir:    bds.dataDir,
-		Immutable:  bds.immutable,
-	}
-	return m
+	return *bds.metadata
 }
 
 // generateKeys generates keys based on the given startOffset and numMessages.
