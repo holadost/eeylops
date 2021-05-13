@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
 	"os"
@@ -11,36 +12,33 @@ import (
 	"sync"
 )
 
-// BadgerSegment implements Segment where the data is backed using badger ddb.
+// BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	ddb        *badger.DB         // Segment data ddb.
+	ddb        *badger.DB         // Segment data db.
 	mdb        *segmentMetadataDB // Segment metadata ddb.
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	nextOffSet uint64     // Next start offset for new appends.
-	writeLock  sync.Mutex // Lock to protect all writes to segment data.
-	closed     bool
-	rootDir    string
+	nextOffSet uint64           // Next start offset for new appends.
+	writeLock  sync.Mutex       // Lock to protect all writes to segment data.
+	closed     bool             // Flag that indicates whether the segment is closed.
+	rootDir    string           // Root directory of this segment.
 	metadata   *SegmentMetadata // Cached segment metadata.
+	logStr     string           // Log string associated with the segment for easy debugging.
 }
 
-// NewBadgerSegment initializes a new instance of badger segment store.
+// NewBadgerSegment initializes a new instance of badger segment.
 func NewBadgerSegment(rootDir string) (*BadgerSegment, error) {
 	if err := os.MkdirAll(path.Join(rootDir, dataDirName), 0774); err != nil {
 		return nil, err
 	}
-	bds := new(BadgerSegment)
-	bds.rootDir = rootDir
-	err := bds.Initialize()
-	if err != nil {
-		glog.Errorf("Unable to create badger segment due to err: %s", err.Error())
-		return nil, err
-	}
-	return bds, nil
+	seg := new(BadgerSegment)
+	seg.rootDir = rootDir
+	seg.Initialize()
+	return seg, nil
 }
 
-// Initialize implements the Segment interface. It initializes the segment store.
-func (seg *BadgerSegment) Initialize() error {
+// Initialize implements the Segment interface. It initializes the segment.
+func (seg *BadgerSegment) Initialize() {
 	glog.Infof("Initializing badger segment located at: %s", seg.rootDir)
 	// Initialize metadata ddb.
 	seg.mdb = newSegmentMetadataDB(seg.rootDir)
@@ -58,12 +56,12 @@ func (seg *BadgerSegment) Initialize() error {
 	var err error
 	seg.ddb, err = badger.Open(opts)
 	if err != nil {
-		glog.Fatalf("Unable to open badger ddb due to err: %s", err.Error())
+		glog.Fatalf("Unable to open segment: %s due to err: %s", seg.logStr, err.Error())
 	}
 	seg.ctx, seg.cancelFunc = context.WithCancel(context.Background())
 	seg.closed = false
 	seg.initializeNextOffset()
-	return nil
+	seg.updateLogStr()
 }
 
 // Close implements the Segment interface. It closes the connection to the underlying
@@ -72,7 +70,7 @@ func (seg *BadgerSegment) Close() error {
 	if seg.closed {
 		return nil
 	}
-	glog.Infof("Closing segment located at: %s", seg.rootDir)
+	glog.Infof("Closing segment: %s", seg.logStr)
 	seg.cancelFunc()
 	err := seg.ddb.Close()
 	seg.ddb = nil
@@ -83,7 +81,7 @@ func (seg *BadgerSegment) Close() error {
 // Append implements the Segment interface. This method appends the given values to the segment.
 func (seg *BadgerSegment) Append(values [][]byte) error {
 	if seg.closed {
-		return errors.New("segment store is closed")
+		return errors.New(fmt.Sprintf("segment store: %s is closed", seg.logStr))
 	}
 	seg.writeLock.Lock()
 	defer seg.writeLock.Unlock()
@@ -107,7 +105,7 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 // startOffset.
 func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
 	if seg.closed {
-		err := errors.New("segment is closed")
+		err := errors.New(fmt.Sprintf("segment: %s is closed", seg.logStr))
 		for ii := 0; ii < int(startOffset+numMessages); ii++ {
 			errs = append(errs, err)
 		}
@@ -144,9 +142,23 @@ func (seg *BadgerSegment) SetImmutable() {
 	seg.writeLock.Unlock()
 }
 
-// Metadata returns a copy of the metadata associated with the segment.
-func (seg *BadgerSegment) Metadata() SegmentMetadata {
+// GetMetadata returns a copy of the metadata associated with the segment.
+func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 	return *seg.metadata
+}
+
+// SetMetadata returns a copy of the metadata associated with the segment.
+func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
+	seg.writeLock.Lock()
+	defer seg.writeLock.Unlock()
+	seg.mdb.PutMetadata(&sm)
+	seg.metadata = &sm
+	seg.updateLogStr()
+}
+
+// Updates the logStr of the segment. This function assumes that the write lock has been acquired.
+func (seg *BadgerSegment) updateLogStr() {
+	seg.logStr = fmt.Sprintf("(ID: %d, Root Directory: %s)", seg.metadata.ID, seg.rootDir)
 }
 
 // generateKeys generates keys based on the given startOffset and numMessages.
@@ -163,7 +175,7 @@ func (seg *BadgerSegment) generateKeys(startOffset uint64, numMessages uint64) [
 
 // initializeOffsets initializes the start and last offset by scanning the underlying DB.
 func (seg *BadgerSegment) initializeNextOffset() {
-	glog.V(1).Infof("Initializing next offset")
+	glog.V(1).Infof("Initializing next offset for segment: %s", seg.logStr)
 	txn := seg.ddb.NewTransaction(true)
 	opt := badger.DefaultIteratorOptions
 	opt.Reverse = true

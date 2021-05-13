@@ -61,7 +61,7 @@ func TestBadgerSegment(t *testing.T) {
 			}
 		}
 	}
-	metadata := bds.Metadata()
+	metadata := bds.GetMetadata()
 	glog.Infof("Metadata: %v", metadata)
 	bds.Close()
 }

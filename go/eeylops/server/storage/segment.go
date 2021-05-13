@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/golang/glog"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
@@ -50,6 +51,12 @@ func newSegmentMetadata(data []byte) *SegmentMetadata {
 		glog.Fatalf("Failed to deserialize segment metadata due to err: %s", err.Error())
 	}
 	return &sm
+}
+
+func (sm *SegmentMetadata) ToString() string {
+	return fmt.Sprintf("ID: %d, Immutable %v, Start offset: %d, End offset: %d, Created At: %v, "+
+		"Immutable At: %v, Immutable Reason: %d", sm.ID, sm.Immutable, sm.StartOffset, sm.EndOffset,
+		sm.CreatedTimestamp, sm.ImmutableTimestamp, sm.ImmutableReason)
 }
 
 func (sm *SegmentMetadata) Serialize() []byte {
@@ -117,7 +124,7 @@ func (mdb *segmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 			tx.Rollback()
 			glog.Fatalf("Unable to get metadata due to err: %s", dbc.Error.Error())
 		} else {
-			glog.Infof("Inserting segment metadata for segment located at: %s", mdb.RootPath)
+			glog.Infof("Inserting metadata for segment located at: %s", mdb.RootPath)
 			dbc = tx.Create(mm)
 			if dbc.Error != nil {
 				tx.Rollback()
@@ -127,7 +134,7 @@ func (mdb *segmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 			return
 		}
 	}
-	glog.Infof("Updating segment metadata located at: %s", mdb.RootPath)
+	glog.Infof("Updating metadata for segment located at: %s", mdb.RootPath)
 	dbc = tx.Model(mm).Where("key = ?", metadataKeyName).Updates(mm)
 	if dbc.Error != nil {
 		tx.Rollback()
