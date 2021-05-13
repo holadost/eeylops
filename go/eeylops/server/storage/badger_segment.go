@@ -117,6 +117,7 @@ func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 	// Compute the keys that need to be fetched.
 	keys := seg.generateKeys(startOffset, numMessages)
 	// Fetch values from DB.
+	// TODO: Test/benchmark using Txn.iterator(itr.Seek(start_key) to get to the key of interest).
 	seg.ddb.View(func(txn *badger.Txn) error {
 		for _, key := range keys {
 			item, err := txn.Get(key)

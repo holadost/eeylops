@@ -140,5 +140,8 @@ func TestBadgerSegment(t *testing.T) {
 	if !now.Before(metadata.ExpiredTimestamp) {
 		t.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
-	bds.Close()
+	err = bds.Close()
+	if err != nil {
+		t.Fatalf("Failed to close segment due to err: %s", err.Error())
+	}
 }
