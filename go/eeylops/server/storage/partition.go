@@ -7,6 +7,7 @@ import (
 type Partition struct {
 	segments     []*segmentEntry // List of segments in the partition.
 	segmentsLock sync.RWMutex    // This mutex guards segments and segmentIntervals slice.
+	cache        *PartitionCache // Partition cache.
 }
 
 type segmentEntry struct {
@@ -35,7 +36,7 @@ func (p *Partition) GetSegments(startOffset uint64, endOffset uint64) []Segment 
 	}
 
 	// Find the end offset segment. Finding the end offset is split into two paths: fast and slow.
-	// This is fast path. For the most part, the endIdx is going to be in the start or the next couple of
+	// Fast Path: For the most part, the endIdx is going to be in the start or the next couple of
 	// segments right after start. So we quickly check that and if it isn't there, we fall back to scanning
 	// all segments.
 	endSegIdx := -1
@@ -90,10 +91,8 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 	if p.offsetInSegment(offset, metadata) {
 		return midIdx
 	} else if offset < metadata.StartOffset {
-		// Search to left tree.
 		return p.findOffset(0, midIdx-1, offset)
 	} else {
-		// Search in right tree.
 		return p.findOffset(midIdx+1, endIdx, offset)
 	}
 }
