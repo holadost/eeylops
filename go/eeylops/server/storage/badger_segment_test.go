@@ -30,10 +30,6 @@ func checkMetadata(t *testing.T, got *SegmentMetadata, expected *SegmentMetadata
 		t.Fatalf("Start offset mismatch. Expected: %d, Got: %d",
 			expected.StartOffset, got.StartOffset)
 	}
-	if got.EndOffset != expected.EndOffset {
-		t.Fatalf("End offset mismatch. Expected: %d, Got: %d",
-			expected.EndOffset, got.EndOffset)
-	}
 	if !got.CreatedTimestamp.Equal(expected.CreatedTimestamp) {
 		t.Fatalf("Time mismatch. Expected: %v, Got: %v",
 			expected.CreatedTimestamp, got.CreatedTimestamp)
@@ -77,6 +73,15 @@ func TestBadgerSegment(t *testing.T) {
 			}
 			got := bds.GetMetadata()
 			checkMetadata(t, &got, &initialMeta)
+			ex := uint64(0)
+			if iter == 0 {
+				ex = initialMeta.StartOffset
+			} else {
+				ex = initialMeta.StartOffset + bds.nextOffSet - 1
+			}
+			if got.EndOffset != ex {
+				t.Fatalf("End offset mismatch. Expected: %d, Got: %d", ex, got.EndOffset)
+			}
 		}
 
 		glog.Infof("Starting iteration: %d", iter)
@@ -143,5 +148,8 @@ func TestBadgerSegment(t *testing.T) {
 	err = bds.Close()
 	if err != nil {
 		t.Fatalf("Failed to close segment due to err: %s", err.Error())
+	}
+	if metadata.EndOffset != expected.EndOffset {
+		t.Fatalf("End offset mismatch. Expected: %d, Got: %d", expected.EndOffset, metadata.EndOffset)
 	}
 }

@@ -163,7 +163,15 @@ func (seg *BadgerSegment) MarkExpired() {
 
 // GetMetadata returns a copy of the metadata associated with the segment.
 func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
-	return *seg.metadata
+	metadata := *seg.metadata
+	if !metadata.Immutable {
+		if seg.nextOffSet != 0 {
+			metadata.EndOffset = metadata.StartOffset + seg.nextOffSet - 1
+		} else {
+			metadata.EndOffset = metadata.StartOffset
+		}
+	}
+	return metadata
 }
 
 // SetMetadata returns a copy of the metadata associated with the segment.
