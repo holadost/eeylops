@@ -1,13 +1,26 @@
 package storage
 
 import (
+	"context"
+	"github.com/golang/glog"
+	"path"
+	"strconv"
 	"sync"
+	"time"
 )
 
+const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
+const KSegmentsDirectoryName = "segments"
+
 type Partition struct {
-	segments     []*segmentEntry // List of segments in the partition.
-	segmentsLock sync.RWMutex    // This mutex guards segments and segmentIntervals slice.
-	cache        *PartitionCache // Partition cache.
+	partitionID  int                // Partition ID.
+	segments     []*segmentEntry    // List of segments in the partition.
+	segmentsLock sync.RWMutex       // This mutex guards segments and segmentIntervals slice.
+	cache        *PartitionCache    // Partition cache.
+	rootDir      string             // Root directory of the partition.
+	gcPeriod     time.Duration      // GC period in seconds.
+	ctx          context.Context    // Context for the partition.
+	cancelFunc   context.CancelFunc // Cancellation function that is invoked when the partition is closed.
 }
 
 type segmentEntry struct {
@@ -15,7 +28,10 @@ type segmentEntry struct {
 	segLock sync.RWMutex // This guards read/write access to the segment.
 }
 
-func NewPartition() (*Partition, error) {
+func NewPartition(id int, rootDir string) (*Partition, error) {
+	p := new(Partition)
+	p.partitionID = id
+	p.rootDir = rootDir
 	return nil, nil
 }
 
@@ -102,4 +118,68 @@ func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) boo
 		return true
 	}
 	return false
+}
+
+func (p *Partition) createNewSegment() {
+	glog.Infof("Creating new segment for partition: %d")
+	// Acquire the segments lock since we are creating a new segment.
+	p.segmentsLock.Lock()
+	defer p.segmentsLock.Unlock()
+
+	// Acquire the lock on the segment entry since we are going to mark the segment immutable.
+	segEntry := p.segments[len(p.segments)-1]
+	segEntry.segLock.Lock()
+	defer segEntry.segLock.Unlock()
+	segEntry.segment.MarkImmutable()
+	prevMetadata := segEntry.segment.GetMetadata()
+
+	newSeg, err := NewBadgerSegment(path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName,
+		strconv.Itoa(int(prevMetadata.ID+1))))
+	if err != nil {
+		glog.Fatalf("Unable to create new segment due to err: %s", err.Error())
+		return
+	}
+	metadata := SegmentMetadata{
+		ID:               prevMetadata.ID + 1,
+		Immutable:        false,
+		Expired:          false,
+		CreatedTimestamp: time.Now(),
+		StartOffset:      prevMetadata.EndOffset + 1,
+	}
+	newSeg.SetMetadata(metadata)
+	newSegEntry := new(segmentEntry)
+	newSegEntry.segment = newSeg
+	p.segments = append(p.segments, newSegEntry)
+}
+
+// monitorExpiredSegments periodically monitors all the segments and marks the out of date segments as expired.
+// It also reclaims/deletes segments after ensuring that the segment is not required by any snapshots.
+func (p *Partition) monitorExpiredSegments() {
+
+}
+
+// monitorLiveSegment monitors the current live segment periodically and if the segment has more records than
+// the threshold, it then marks the segment as immutable and opens a new live segment.
+func (p *Partition) monitorLiveSegment() {
+	for {
+		time.Sleep(time.Second * 60)
+		if p.shouldCreateNewSegment() {
+			p.createNewSegment()
+		}
+	}
+}
+
+func (p *Partition) shouldCreateNewSegment() bool {
+	p.segmentsLock.RLock()
+	defer p.segmentsLock.Unlock()
+	seg := p.segments[len(p.segments)-1].segment
+	metadata := seg.GetMetadata()
+	if (metadata.EndOffset - metadata.StartOffset) > (KNumSegmentRecordsThreshold) {
+		return true
+	}
+	return false
+}
+
+func (p *Partition) getPartitionDirectory() string {
+	return path.Join(p.rootDir, strconv.Itoa(p.partitionID))
 }

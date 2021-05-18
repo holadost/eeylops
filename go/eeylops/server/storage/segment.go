@@ -18,7 +18,7 @@ type Segment interface {
 	// Initialize the segment.
 	Initialize()
 	// Close the segment.
-	Close()
+	Close() error
 	// Append values to the segment.
 	Append([][]byte) error
 	// Scan numMessages values from the segment store from the given start offset.
@@ -28,7 +28,7 @@ type Segment interface {
 	// GetMetadata fetches the metadata of the segment.
 	GetMetadata() SegmentMetadata
 	// SetMetadata sets the metadata. This is updated internally and by the partition when a segment is created.
-	SetMetadata(SegmentMetadata) error
+	SetMetadata(SegmentMetadata)
 	// MarkImmutable marks the segment as immutable.
 	MarkImmutable()
 	// MarkExpired marks the segment as expired.
