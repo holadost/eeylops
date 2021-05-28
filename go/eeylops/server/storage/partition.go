@@ -15,7 +15,6 @@ const KSegmentsDirectoryName = "segments"
 type Partition struct {
 	partitionID      int                // Partition ID.
 	segments         []Segment          // List of segments in the partition.
-	cache            *PartitionCache    // Partition cache.
 	rootDir          string             // Root directory of the partition.
 	gcPeriod         time.Duration      // GC period in seconds.
 	ctx              context.Context    // Context for the partition.
@@ -33,15 +32,22 @@ func NewPartition(id int, rootDir string) (*Partition, error) {
 func (p *Partition) initialize() {
 }
 
+// Append records to the partition.
 func (p *Partition) Append(values [][]byte) {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 }
 
-func (p *Partition) Get(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
+// Scan messages from the partition from the given startOffset up to the numMessages.
+func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	return nil, nil
+}
+
+// Snapshot the partition.
+func (p *Partition) Snapshot() error {
+	return nil
 }
 
 // getSegments returns a list of segments that contains all the elements between the given start and end offsets.
@@ -91,8 +97,8 @@ func (p *Partition) getLiveSegment() Segment {
 	return p.segments[len(p.segments)-1]
 }
 
-// findOffset finds the segment index that contain the given offset. This function assumes that a
-// read lock has been acquired on segments.
+// findOffset finds the segment index that contain the given offset. This function assumes the partitionCfgLock has
+// been acquired.
 func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 	// Base cases.
 	if startIdx > endIdx {
@@ -116,8 +122,37 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 	}
 }
 
+// offsetInSegment checks whether the given offset is in the segment or not.
 func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) bool {
 	if offset >= metadata.StartOffset && offset <= metadata.EndOffset {
+		return true
+	}
+	return false
+}
+
+// monitorExpiredSegments periodically monitors all the segments and marks the out of date segments as expired.
+// It also deletes segments after ensuring that the segment is not required by any snapshots.
+func (p *Partition) monitorExpiredSegments() {
+
+}
+
+// monitorLiveSegment monitors the current live segment periodically and if the segment has more records than
+// the threshold, it then marks the segment as immutable and opens a new live segment.
+func (p *Partition) monitorLiveSegment() {
+	for {
+		time.Sleep(time.Second * 5)
+		if p.shouldCreateNewSegment() {
+			p.createNewSegment()
+		}
+	}
+}
+
+func (p *Partition) shouldCreateNewSegment() bool {
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+	seg := p.segments[len(p.segments)-1]
+	metadata := seg.GetMetadata()
+	if (metadata.EndOffset - metadata.StartOffset) > (KNumSegmentRecordsThreshold) {
 		return true
 	}
 	return false
@@ -149,32 +184,6 @@ func (p *Partition) createNewSegment() {
 	}
 	newSeg.SetMetadata(metadata)
 	p.segments = append(p.segments, newSeg)
-}
-
-// monitorExpiredSegments periodically monitors all the segments and marks the out of date segments as expired.
-// It also reclaims/deletes segments after ensuring that the segment is not required by any snapshots.
-func (p *Partition) monitorExpiredSegments() {
-
-}
-
-// monitorLiveSegment monitors the current live segment periodically and if the segment has more records than
-// the threshold, it then marks the segment as immutable and opens a new live segment.
-func (p *Partition) monitorLiveSegment() {
-	for {
-		time.Sleep(time.Second * 60)
-		if p.shouldCreateNewSegment() {
-			p.createNewSegment()
-		}
-	}
-}
-
-func (p *Partition) shouldCreateNewSegment() bool {
-	seg := p.segments[len(p.segments)-1]
-	metadata := seg.GetMetadata()
-	if (metadata.EndOffset - metadata.StartOffset) > (KNumSegmentRecordsThreshold) {
-		return true
-	}
-	return false
 }
 
 func (p *Partition) getPartitionDirectory() string {
