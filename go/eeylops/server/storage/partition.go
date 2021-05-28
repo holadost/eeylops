@@ -1,9 +1,10 @@
 package storage
 
 import (
-	"context"
 	"github.com/golang/glog"
+	"io/ioutil"
 	"path"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -13,29 +14,67 @@ const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
 const KSegmentsDirectoryName = "segments"
 
 type Partition struct {
-	partitionID      int                // Partition ID.
-	segments         []Segment          // List of segments in the partition.
-	rootDir          string             // Root directory of the partition.
-	gcPeriod         time.Duration      // GC period in seconds.
-	ctx              context.Context    // Context for the partition.
-	cancelFunc       context.CancelFunc // Cancellation function that is invoked when the partition is closed.
-	partitionCfgLock sync.RWMutex       // Lock on the partition configuration.
+	partitionID       int           // Partition ID.
+	segments          []Segment     // List of segments in the partition.
+	rootDir           string        // Root directory of the partition.
+	gcPeriod          time.Duration // GC period in seconds.
+	partitionCfgLock  sync.RWMutex  // Lock on the partition configuration.
+	backgroundJobDone chan bool     // Notification to ask background goroutine to exit.
 }
 
-func NewPartition(id int, rootDir string) (*Partition, error) {
+func NewPartition(id int, rootDir string, gcPeriodSecs uint) *Partition {
 	p := new(Partition)
 	p.partitionID = id
 	p.rootDir = rootDir
-	return nil, nil
+	p.gcPeriod = time.Second * time.Duration(gcPeriodSecs)
+	p.initialize()
+	return p
 }
 
 func (p *Partition) initialize() {
+	p.backgroundJobDone = make(chan bool)
+
+	// Initialize segments.
+	segmentIds := p.getFileSystemSegments()
+	for ii, segmentID := range segmentIds {
+		// TODO: In the future, create a factory func here that will return segment based on type.
+		segment, err := NewBadgerSegment(p.getSegmentDirectory(segmentID))
+		if err != nil {
+			glog.Fatalf("Unable to initialize segment due to err: %s", err.Error())
+			return
+		}
+		if ii < len(segmentIds)-1 {
+			meta := segment.GetMetadata()
+			if !meta.Immutable {
+				glog.Fatalf("Found segment at index: %d(%d), %s to be live", ii, len(segmentIds),
+					meta.ToString())
+			}
+		}
+		p.segments = append(p.segments, segment)
+	}
+
+	// The last segment can be live or immutable. If immutable, create a new segment.
+	lastSeg := p.segments[len(p.segments)-1]
+	lastMeta := lastSeg.GetMetadata()
+	if lastMeta.Immutable {
+		p.createNewSegment()
+	}
+
+	// Start the background goroutine to periodically check live segment and garbage collect expired ones.
+	go p.curator()
 }
 
 // Append records to the partition.
-func (p *Partition) Append(values [][]byte) {
+func (p *Partition) Append(values [][]byte) error {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
+	seg := p.getLiveSegment()
+	err := seg.Append(values)
+	if err != nil {
+		// TODO: Format this error.
+		return err
+	}
+	return nil
 }
 
 // Scan messages from the partition from the given startOffset up to the numMessages.
@@ -130,20 +169,27 @@ func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) boo
 	return false
 }
 
-// monitorExpiredSegments periodically monitors all the segments and marks the out of date segments as expired.
-// It also deletes segments after ensuring that the segment is not required by any snapshots.
-func (p *Partition) monitorExpiredSegments() {
-
+/************************************************ CURATOR *****************************************************/
+// curator monitors the current live segment periodically and if the segment has more records than
+// the threshold, it then marks the segment as immutable and opens a new live segment.
+func (p *Partition) curator() {
+	liveSegTicker := time.NewTicker(10 * time.Second)
+	expTicker := time.NewTicker(300 * time.Second)
+	for {
+		select {
+		case <-liveSegTicker.C:
+			p.maybeCreateNewSegment()
+		case <-expTicker.C:
+			p.maybeReclaimExpiredSegments()
+		case <-p.backgroundJobDone:
+			return
+		}
+	}
 }
 
-// monitorLiveSegment monitors the current live segment periodically and if the segment has more records than
-// the threshold, it then marks the segment as immutable and opens a new live segment.
-func (p *Partition) monitorLiveSegment() {
-	for {
-		time.Sleep(time.Second * 5)
-		if p.shouldCreateNewSegment() {
-			p.createNewSegment()
-		}
+func (p *Partition) maybeCreateNewSegment() {
+	if p.shouldCreateNewSegment() {
+		p.createNewSegment()
 	}
 }
 
@@ -158,19 +204,18 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	return false
 }
 
+// createNewSegment marks the current live segment immutable and creates a new live segment.
 func (p *Partition) createNewSegment() {
-	glog.Infof("Creating new segment for partition: %d", p.partitionID)
 	// Acquire the segments lock since we are creating a new segment.
 	p.partitionCfgLock.Lock()
 	defer p.partitionCfgLock.Unlock()
 
-	// Acquire the lock on the segment entry since we are going to mark the segment immutable.
-	segEntry := p.segments[len(p.segments)-1]
-	segEntry.MarkImmutable()
-	prevMetadata := segEntry.GetMetadata()
+	glog.Infof("Creating new segment for partition: %d", p.partitionID)
+	seg := p.segments[len(p.segments)-1]
+	seg.MarkImmutable()
+	prevMetadata := seg.GetMetadata()
 
-	newSeg, err := NewBadgerSegment(path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName,
-		strconv.Itoa(int(prevMetadata.ID+1))))
+	newSeg, err := NewBadgerSegment(p.getSegmentDirectory(int(prevMetadata.ID + 1)))
 	if err != nil {
 		glog.Fatalf("Unable to create new segment due to err: %s", err.Error())
 		return
@@ -186,6 +231,41 @@ func (p *Partition) createNewSegment() {
 	p.segments = append(p.segments, newSeg)
 }
 
+// maybeReclaimExpiredSegments checks all the segments and marks the out of date segments as expired.
+// It also deletes segments after ensuring that the segment is not required by any snapshots.
+func (p *Partition) maybeReclaimExpiredSegments() {
+	glog.Warningf("maybeReclaimExpiredSegments: Still not implemented!")
+}
+
+/************************************* Helper methods ************************************************/
+// getPartitionDirectory returns the root partition directory.
 func (p *Partition) getPartitionDirectory() string {
 	return path.Join(p.rootDir, strconv.Itoa(p.partitionID))
+}
+
+// getSegmentDirPath returns the segment directory for a given segmentID.
+func (p *Partition) getSegmentDirectory(segmentID int) string {
+	return path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName, strconv.Itoa(segmentID))
+}
+
+// getFileSystemSegments returns all the segments that are currently present in the backing file system.
+func (p *Partition) getFileSystemSegments() []int {
+	fileInfo, err := ioutil.ReadDir(p.getPartitionDirectory())
+	if err != nil {
+		glog.Fatalf("Unable to read partition directory and find segments due to err: %v", err)
+		return nil
+	}
+	var segmentIDs []int
+	for _, file := range fileInfo {
+		if file.IsDir() {
+			segmentID, err := strconv.Atoi(file.Name())
+			if err != nil {
+				glog.Fatalf("Unable to convert segment id to int due to err: %v", err)
+				return nil
+			}
+			segmentIDs = append(segmentIDs, segmentID)
+		}
+	}
+	sort.Ints(segmentIDs)
+	return segmentIDs
 }
