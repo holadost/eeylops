@@ -20,11 +20,12 @@ type BadgerSegment struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	nextOffSet uint64           // Next start offset for new appends.
-	writeLock  sync.Mutex       // Lock to protect all writes to segment data.
+	segLock    sync.RWMutex     // A RW lock for the segment.
 	closed     bool             // Flag that indicates whether the segment is closed.
 	rootDir    string           // Root directory of this segment.
 	metadata   *SegmentMetadata // Cached segment metadata.
 	logStr     string           // Log string associated with the segment for easy debugging.
+	appendLock sync.Mutex       // A lock for appends allowing only one append at a time.
 }
 
 // NewBadgerSegment initializes a new instance of badger segment.
@@ -83,12 +84,20 @@ func (seg *BadgerSegment) Close() error {
 
 // Append implements the Segment interface. This method appends the given values to the segment.
 func (seg *BadgerSegment) Append(values [][]byte) error {
+	// Acquire a read lock on the segment as we are not changing the segment metadata.
+	seg.segLock.RLock()
+	defer seg.segLock.RUnlock()
+
 	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable {
-		return errors.New(fmt.Sprintf("segment store: %s is closed", seg.logStr))
+		return errors.New(fmt.Sprintf("segment store: %s is closed/expired/immutable", seg.logStr))
 	}
-	seg.writeLock.Lock()
-	defer seg.writeLock.Unlock()
+
+	// Acquire the append lock to ensure that only a single producer can append.
+	seg.appendLock.Lock()
+	defer seg.appendLock.Unlock()
+
 	keys := seg.generateKeys(seg.nextOffSet, uint64(len(values)))
+	// TODO: Do this as a batch update.
 	err := seg.ddb.Update(func(txn *badger.Txn) error {
 		for ii := 0; ii < len(keys); ii++ {
 			err := txn.Set(keys[ii], values[ii])
@@ -107,6 +116,9 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 // Scan implements the Segment interface. It attempts to fetch numMessages starting from the given
 // startOffset.
 func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
+	seg.segLock.RLock()
+	defer seg.segLock.RUnlock()
+
 	if seg.closed || seg.metadata.Expired {
 		err := errors.New(fmt.Sprintf("segment: %s is closed/expired", seg.logStr))
 		for ii := 0; ii < int(startOffset+numMessages); ii++ {
@@ -142,8 +154,8 @@ func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 
 // MarkImmutable marks the segment as immutable.
 func (seg *BadgerSegment) MarkImmutable() {
-	seg.writeLock.Lock()
-	defer seg.writeLock.Unlock()
+	seg.segLock.Lock()
+	defer seg.segLock.Unlock()
 	seg.metadata.Immutable = true
 	seg.metadata.ImmutableTimestamp = time.Now()
 	if seg.nextOffSet != 0 {
@@ -154,8 +166,8 @@ func (seg *BadgerSegment) MarkImmutable() {
 
 // MarkExpired marks the segment as immutable.
 func (seg *BadgerSegment) MarkExpired() {
-	seg.writeLock.Lock()
-	defer seg.writeLock.Unlock()
+	seg.segLock.Lock()
+	defer seg.segLock.Unlock()
 	seg.metadata.Expired = true
 	seg.metadata.ExpiredTimestamp = time.Now()
 	seg.mdb.PutMetadata(seg.metadata)
@@ -163,7 +175,10 @@ func (seg *BadgerSegment) MarkExpired() {
 
 // GetMetadata returns a copy of the metadata associated with the segment.
 func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
+	seg.segLock.RLock()
 	metadata := *seg.metadata
+	seg.segLock.RUnlock()
+
 	if !metadata.Immutable {
 		if seg.nextOffSet != 0 {
 			metadata.EndOffset = metadata.StartOffset + seg.nextOffSet - 1
@@ -174,10 +189,10 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 	return metadata
 }
 
-// SetMetadata returns a copy of the metadata associated with the segment.
+// SetMetadata sets the metadata for the segment.
 func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
-	seg.writeLock.Lock()
-	defer seg.writeLock.Unlock()
+	seg.segLock.Lock()
+	defer seg.segLock.Unlock()
 	seg.mdb.PutMetadata(&sm)
 	seg.metadata = &sm
 	seg.updateLogStr()

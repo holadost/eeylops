@@ -13,19 +13,14 @@ const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
 const KSegmentsDirectoryName = "segments"
 
 type Partition struct {
-	partitionID  int                // Partition ID.
-	segments     []*segmentEntry    // List of segments in the partition.
-	segmentsLock sync.RWMutex       // This mutex guards segments and segmentIntervals slice.
-	cache        *PartitionCache    // Partition cache.
-	rootDir      string             // Root directory of the partition.
-	gcPeriod     time.Duration      // GC period in seconds.
-	ctx          context.Context    // Context for the partition.
-	cancelFunc   context.CancelFunc // Cancellation function that is invoked when the partition is closed.
-}
-
-type segmentEntry struct {
-	segment Segment
-	segLock sync.RWMutex // This guards read/write access to the segment.
+	partitionID      int                // Partition ID.
+	segments         []Segment          // List of segments in the partition.
+	cache            *PartitionCache    // Partition cache.
+	rootDir          string             // Root directory of the partition.
+	gcPeriod         time.Duration      // GC period in seconds.
+	ctx              context.Context    // Context for the partition.
+	cancelFunc       context.CancelFunc // Cancellation function that is invoked when the partition is closed.
+	partitionCfgLock sync.RWMutex       // Lock on the partition configuration.
 }
 
 func NewPartition(id int, rootDir string) (*Partition, error) {
@@ -38,10 +33,20 @@ func NewPartition(id int, rootDir string) (*Partition, error) {
 func (p *Partition) initialize() {
 }
 
-// GetSegments returns a list of segments that contains all the elements between the given start and end offsets.
-func (p *Partition) GetSegments(startOffset uint64, endOffset uint64) []Segment {
-	p.segmentsLock.RLock()
-	defer p.segmentsLock.RUnlock()
+func (p *Partition) Append(values [][]byte) {
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+}
+
+func (p *Partition) Get(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+	return nil, nil
+}
+
+// getSegments returns a list of segments that contains all the elements between the given start and end offsets.
+// This function assumes that a partitionCfgLock has been acquired.
+func (p *Partition) getSegments(startOffset uint64, endOffset uint64) []Segment {
 	var segs []Segment
 
 	// Find start offset segment.
@@ -60,7 +65,7 @@ func (p *Partition) GetSegments(startOffset uint64, endOffset uint64) []Segment 
 		if ii >= len(p.segments) {
 			break
 		}
-		if p.offsetInSegment(endOffset, p.segments[ii].segment.GetMetadata()) {
+		if p.offsetInSegment(endOffset, p.segments[ii].GetMetadata()) {
 			endSegIdx = ii
 			break
 		}
@@ -71,21 +76,19 @@ func (p *Partition) GetSegments(startOffset uint64, endOffset uint64) []Segment 
 	}
 
 	// Populate segments.
-	segs = append(segs, p.segments[startSegIdx].segment)
+	segs = append(segs, p.segments[startSegIdx])
 	if endSegIdx == -1 || startSegIdx == endSegIdx {
 		return segs
 	}
 	for ii := startSegIdx + 1; ii <= endSegIdx; ii++ {
-		segs = append(segs, p.segments[ii].segment)
+		segs = append(segs, p.segments[ii])
 	}
 	return segs
 }
 
-// GetLiveSegment returns the current live segment.
-func (p *Partition) GetLiveSegment() Segment {
-	p.segmentsLock.RLock()
-	defer p.segmentsLock.RUnlock()
-	return p.segments[len(p.segments)-1].segment
+// getLiveSegment returns the current live segment. This function assumes that the partitionCfgLock has been acquired.
+func (p *Partition) getLiveSegment() Segment {
+	return p.segments[len(p.segments)-1]
 }
 
 // findOffset finds the segment index that contain the given offset. This function assumes that a
@@ -96,14 +99,14 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 		return -1
 	}
 	if startIdx == endIdx {
-		metadata := p.segments[startIdx].segment.GetMetadata()
+		metadata := p.segments[startIdx].GetMetadata()
 		if p.offsetInSegment(offset, metadata) {
 			return startIdx
 		}
 		return -1
 	}
 	midIdx := startIdx + (endIdx-startIdx)/2
-	metadata := p.segments[midIdx].segment.GetMetadata()
+	metadata := p.segments[midIdx].GetMetadata()
 	if p.offsetInSegment(offset, metadata) {
 		return midIdx
 	} else if offset < metadata.StartOffset {
@@ -121,17 +124,15 @@ func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) boo
 }
 
 func (p *Partition) createNewSegment() {
-	glog.Infof("Creating new segment for partition: %d")
+	glog.Infof("Creating new segment for partition: %d", p.partitionID)
 	// Acquire the segments lock since we are creating a new segment.
-	p.segmentsLock.Lock()
-	defer p.segmentsLock.Unlock()
+	p.partitionCfgLock.Lock()
+	defer p.partitionCfgLock.Unlock()
 
 	// Acquire the lock on the segment entry since we are going to mark the segment immutable.
 	segEntry := p.segments[len(p.segments)-1]
-	segEntry.segLock.Lock()
-	defer segEntry.segLock.Unlock()
-	segEntry.segment.MarkImmutable()
-	prevMetadata := segEntry.segment.GetMetadata()
+	segEntry.MarkImmutable()
+	prevMetadata := segEntry.GetMetadata()
 
 	newSeg, err := NewBadgerSegment(path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName,
 		strconv.Itoa(int(prevMetadata.ID+1))))
@@ -147,9 +148,7 @@ func (p *Partition) createNewSegment() {
 		StartOffset:      prevMetadata.EndOffset + 1,
 	}
 	newSeg.SetMetadata(metadata)
-	newSegEntry := new(segmentEntry)
-	newSegEntry.segment = newSeg
-	p.segments = append(p.segments, newSegEntry)
+	p.segments = append(p.segments, newSeg)
 }
 
 // monitorExpiredSegments periodically monitors all the segments and marks the out of date segments as expired.
@@ -170,9 +169,7 @@ func (p *Partition) monitorLiveSegment() {
 }
 
 func (p *Partition) shouldCreateNewSegment() bool {
-	p.segmentsLock.RLock()
-	defer p.segmentsLock.Unlock()
-	seg := p.segments[len(p.segments)-1].segment
+	seg := p.segments[len(p.segments)-1]
 	metadata := seg.GetMetadata()
 	if (metadata.EndOffset - metadata.StartOffset) > (KNumSegmentRecordsThreshold) {
 		return true
