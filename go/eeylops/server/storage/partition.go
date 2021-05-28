@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"flag"
 	"github.com/golang/glog"
 	"io/ioutil"
@@ -34,6 +35,7 @@ type Partition struct {
 	backgroundJobDone chan bool     // Notification to ask background goroutines to exit.
 	snapshotChan      chan bool     // Snapshot channel
 	gcChan            chan int      // This channel is used by curator to let the GC routines know which segments can be reclaimed.
+	closed            bool          // Flag to indicate whether the partition is open/closed.
 }
 
 func NewPartition(id int, rootDir string, gcPeriodSecs uint) *Partition {
@@ -84,6 +86,9 @@ func (p *Partition) initialize() {
 func (p *Partition) Append(values [][]byte) error {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
+	if p.closed {
+		return errors.New("partition is closed")
+	}
 	seg := p.getLiveSegment()
 	err := seg.Append(values)
 	if err != nil {
@@ -97,12 +102,36 @@ func (p *Partition) Append(values [][]byte) error {
 func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
+	if p.closed {
+		return nil, nil
+	}
 	return nil, nil
 }
 
 // Snapshot the partition.
 func (p *Partition) Snapshot() error {
+	if p.closed {
+		return errors.New("partition is closed")
+	}
 	return nil
+}
+
+// Close the partition.
+func (p *Partition) Close() {
+	p.partitionCfgLock.Lock()
+	defer p.partitionCfgLock.Unlock()
+	if p.closed {
+		return
+	}
+	close(p.backgroundJobDone)
+	for _, seg := range p.segments {
+		meta := seg.GetMetadata()
+		err := seg.Close()
+		if err != nil {
+			glog.Errorf("Failed to close segment: %d due to err: %s", meta.ID, err.Error())
+		}
+	}
+	p.closed = true
 }
 
 // getSegments returns a list of segments that contains all the elements between the given start and end offsets.
