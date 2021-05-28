@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"flag"
 	"github.com/golang/glog"
 	"io/ioutil"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -13,13 +15,25 @@ import (
 const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
 const KSegmentsDirectoryName = "segments"
 
+var (
+	expiredSegmentMonitorIntervalSecs = flag.Int("partition_exp_segment_monitor_interval_seconds", 600,
+		"Expired segment monitor interval seconds")
+	liveSegmentMonitorIntervalSecs = flag.Int("partition_live_seg_monitor_interval_seconds", 5,
+		"Live segment monitor interval seconds")
+	numGCWorkers        = flag.Int("partition_num_gc_workers", 2, "Number of garbage collection workers")
+	numRecordsInSegment = flag.Int64("partition_num_records_per_segment_threshold", KNumSegmentRecordsThreshold,
+		"Number of records in a segment threshold")
+)
+
 type Partition struct {
 	partitionID       int           // Partition ID.
 	segments          []Segment     // List of segments in the partition.
 	rootDir           string        // Root directory of the partition.
 	gcPeriod          time.Duration // GC period in seconds.
 	partitionCfgLock  sync.RWMutex  // Lock on the partition configuration.
-	backgroundJobDone chan bool     // Notification to ask background goroutine to exit.
+	backgroundJobDone chan bool     // Notification to ask background goroutines to exit.
+	snapshotChan      chan bool     // Snapshot channel
+	gcChan            chan int      // This channel is used by curator to let the GC routines know which segments can be reclaimed.
 }
 
 func NewPartition(id int, rootDir string, gcPeriodSecs uint) *Partition {
@@ -33,6 +47,8 @@ func NewPartition(id int, rootDir string, gcPeriodSecs uint) *Partition {
 
 func (p *Partition) initialize() {
 	p.backgroundJobDone = make(chan bool)
+	p.snapshotChan = make(chan bool)
+	p.gcChan = make(chan int, 128)
 
 	// Initialize segments.
 	segmentIds := p.getFileSystemSegments()
@@ -77,7 +93,7 @@ func (p *Partition) Append(values [][]byte) error {
 	return nil
 }
 
-// Scan messages from the partition from the given startOffset up to the numMessages.
+// Scan numMessages messages from the partition from the given startOffset.
 func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
@@ -103,8 +119,8 @@ func (p *Partition) getSegments(startOffset uint64, endOffset uint64) []Segment 
 
 	// Find the end offset segment. Finding the end offset is split into two paths: fast and slow.
 	// Fast Path: For the most part, the endIdx is going to be in the start or the next couple of
-	// segments right after start. So we quickly check that and if it isn't there, we fall back to scanning
-	// all segments.
+	// segments right after start. Check these segments first and if not present, fall back to
+	// scanning all the segments.
 	endSegIdx := -1
 	for ii := startSegIdx; ii < startSegIdx+3; ii++ {
 		if ii >= len(p.segments) {
@@ -136,7 +152,7 @@ func (p *Partition) getLiveSegment() Segment {
 	return p.segments[len(p.segments)-1]
 }
 
-// findOffset finds the segment index that contain the given offset. This function assumes the partitionCfgLock has
+// findOffset finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
 // been acquired.
 func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 	// Base cases.
@@ -170,35 +186,42 @@ func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) boo
 }
 
 /************************************************ CURATOR *****************************************************/
-// curator monitors the current live segment periodically and if the segment has more records than
-// the threshold, it then marks the segment as immutable and opens a new live segment.
+// curator is a long running background routine that performs the following operations:
+//     1. Checks the current live segment and if it has hit a threshold, it creates a new segment.
+//     2. Checks the segments that have expired and marks them for GC. GC is handled by another background goroutine.
+//     3. Checks the snapshotChan and saves the partition configuration when a snapshot is requested.
 func (p *Partition) curator() {
-	liveSegTicker := time.NewTicker(10 * time.Second)
-	expTicker := time.NewTicker(300 * time.Second)
+	p.startGarbageCollectors()
+	liveSegTicker := time.NewTicker(time.Duration(*liveSegmentMonitorIntervalSecs) * time.Second)
+	expTicker := time.NewTicker(time.Duration(*expiredSegmentMonitorIntervalSecs) * time.Second)
 	for {
 		select {
 		case <-liveSegTicker.C:
 			p.maybeCreateNewSegment()
 		case <-expTicker.C:
 			p.maybeReclaimExpiredSegments()
+		case <-p.snapshotChan:
+			p.snapshot()
 		case <-p.backgroundJobDone:
 			return
 		}
 	}
 }
 
+// maybeCreateNewSegment checks if a new segment needs to be created and if so, creates one.
 func (p *Partition) maybeCreateNewSegment() {
 	if p.shouldCreateNewSegment() {
 		p.createNewSegment()
 	}
 }
 
+// shouldCreateNewSegment returns true if a new segment is required. false otherwise.
 func (p *Partition) shouldCreateNewSegment() bool {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	seg := p.segments[len(p.segments)-1]
 	metadata := seg.GetMetadata()
-	if (metadata.EndOffset - metadata.StartOffset) > (KNumSegmentRecordsThreshold) {
+	if (metadata.EndOffset - metadata.StartOffset) > uint64(*numRecordsInSegment) {
 		return true
 	}
 	return false
@@ -232,9 +255,37 @@ func (p *Partition) createNewSegment() {
 }
 
 // maybeReclaimExpiredSegments checks all the segments and marks the out of date segments as expired.
-// It also deletes segments after ensuring that the segment is not required by any snapshots.
+// It also marks these segments for deletion after ensuring that the segment is not required by any
+// snapshots.
 func (p *Partition) maybeReclaimExpiredSegments() {
 	glog.Warningf("maybeReclaimExpiredSegments: Still not implemented!")
+}
+
+// snapshot saves the current partition configuration.
+func (p *Partition) snapshot() {
+
+}
+
+// startGarbageCollectors starts the garbage collectors.
+func (p *Partition) startGarbageCollectors() {
+	glog.Infof("Starting %d garbage collectors", *numGCWorkers)
+	gc := func() {
+		for {
+			select {
+			case segmentID := <-p.gcChan:
+				segmentDir := p.getSegmentDirectory(segmentID)
+				err := os.RemoveAll(segmentDir)
+				if err != nil {
+					glog.Fatalf("Unable to delete segment directory due to err: %v", err)
+				}
+			case <-p.backgroundJobDone:
+				return
+			}
+		}
+	}
+	for ii := 0; ii < *numGCWorkers; ii++ {
+		go gc()
+	}
 }
 
 /************************************* Helper methods ************************************************/
