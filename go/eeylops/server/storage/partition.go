@@ -54,6 +54,12 @@ func (p *Partition) initialize() {
 	p.backgroundJobDone = make(chan bool)
 	p.snapshotChan = make(chan bool)
 	p.gcChan = make(chan int, 128)
+	glog.Infof("Initializing partition: %d", p.partitionID)
+	err := os.MkdirAll(p.getSegmentRootDirectory(), 0774)
+	if err != nil {
+		glog.Fatalf("Unable to create segment root directory due to err: %s", err.Error())
+		return
+	}
 
 	// Initialize segments.
 	segmentIds := p.getFileSystemSegments()
@@ -74,15 +80,20 @@ func (p *Partition) initialize() {
 		p.segments = append(p.segments, segment)
 	}
 
-	// The last segment can be live or immutable. If immutable, create a new segment.
+	// There are no segments in the backing file system. This must be the first time that the partition is being
+	// created.
 	if len(p.segments) == 0 {
+		glog.Infof("Did not find any segment in the backing store. Creating segment for first time")
 		p.createNewSegment()
 	}
+
+	// The last segment can be live or immutable. If immutable, create a new segment.
 	lastSeg := p.segments[len(p.segments)-1]
 	lastMeta := lastSeg.GetMetadata()
 	if lastMeta.Immutable {
 		p.createNewSegment()
 	}
+	p.closed = false
 
 	// Start curator.
 	go p.curator()
@@ -285,6 +296,7 @@ func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) boo
 //     2. Checks the segments that have expired and marks them for GC. GC is handled by another background goroutine.
 //     3. Checks the snapshotChan and saves the partition configuration when a snapshot is requested.
 func (p *Partition) curator() {
+	glog.Infof("Curator for partition ID: %d is now running", p.partitionID)
 	p.startGarbageCollectors()
 	liveSegTicker := time.NewTicker(time.Duration(*liveSegmentMonitorIntervalSecs) * time.Second)
 	expTicker := time.NewTicker(time.Duration(*expiredSegmentMonitorIntervalSecs) * time.Second)
@@ -387,7 +399,7 @@ func (p *Partition) snapshot() {
 
 // startGarbageCollectors starts the garbage collectors.
 func (p *Partition) startGarbageCollectors() {
-	glog.Infof("Starting %d garbage collectors", *numGCWorkers)
+	glog.Infof("Garbage collectors(%d) have started for partition ID: %d", *numGCWorkers, p.partitionID)
 	gc := func() {
 		for {
 			select {
@@ -414,13 +426,18 @@ func (p *Partition) getPartitionDirectory() string {
 }
 
 // getSegmentDirPath returns the segment directory for a given segmentID.
+func (p *Partition) getSegmentRootDirectory() string {
+	return path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName)
+}
+
+// getSegmentDirPath returns the segment directory for a given segmentID.
 func (p *Partition) getSegmentDirectory(segmentID int) string {
-	return path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName, strconv.Itoa(segmentID))
+	return path.Join(p.getSegmentRootDirectory(), strconv.Itoa(segmentID))
 }
 
 // getFileSystemSegments returns all the segments that are currently present in the backing file system.
 func (p *Partition) getFileSystemSegments() []int {
-	fileInfo, err := ioutil.ReadDir(p.getPartitionDirectory())
+	fileInfo, err := ioutil.ReadDir(p.getSegmentRootDirectory())
 	if err != nil {
 		glog.Fatalf("Unable to read partition directory and find segments due to err: %v", err)
 		return nil
