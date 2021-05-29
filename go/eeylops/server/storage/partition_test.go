@@ -201,7 +201,7 @@ func TestPartitionScan(t *testing.T) {
 	}
 
 	startOffset = 221
-	numMsgs = 1000
+	numMsgs = (numSegs * numValsPerSeg) + startOffset
 	expectedNumMsgs := (numSegs * numValsPerSeg) - startOffset
 	values, errs = p.Scan(uint64(startOffset), uint64(numMsgs))
 	if errs == nil || len(errs) != expectedNumMsgs {
