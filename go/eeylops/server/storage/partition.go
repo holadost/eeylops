@@ -75,6 +75,9 @@ func (p *Partition) initialize() {
 	}
 
 	// The last segment can be live or immutable. If immutable, create a new segment.
+	if len(p.segments) == 0 {
+		p.createNewSegment()
+	}
 	lastSeg := p.segments[len(p.segments)-1]
 	lastMeta := lastSeg.GetMetadata()
 	if lastMeta.Immutable {
@@ -325,21 +328,46 @@ func (p *Partition) createNewSegment() {
 	defer p.partitionCfgLock.Unlock()
 
 	glog.Infof("Creating new segment for partition: %d", p.partitionID)
-	seg := p.segments[len(p.segments)-1]
-	seg.MarkImmutable()
-	prevMetadata := seg.GetMetadata()
+	var startOffset uint64
+	var segID uint64
 
-	newSeg, err := NewBadgerSegment(p.getSegmentDirectory(int(prevMetadata.ID + 1)))
+	if len(p.segments) == 0 {
+		// First ever segment in the partition.
+		startOffset = 0
+		segID = 1
+	} else {
+		seg := p.segments[len(p.segments)-1]
+		seg.MarkImmutable()
+		prevMetadata := seg.GetMetadata()
+		err := seg.Close()
+		if err != nil {
+			glog.Fatalf("Failure while closing last segment: %d in partition %d due to err: %s",
+				prevMetadata.ID, p.partitionID, err.Error())
+			return
+		}
+		seg, err = NewBadgerSegment(p.getSegmentDirectory(int(prevMetadata.ID)))
+		if err != nil {
+			glog.Fatalf("Failure while closing and reopening last segment due to err: %s", err.Error())
+			return
+		}
+		p.segments[len(p.segments)-1] = seg
+
+		// Save the segment ID and start offset.
+		segID = prevMetadata.ID + 1
+		startOffset = prevMetadata.EndOffset + 1
+	}
+
+	newSeg, err := NewBadgerSegment(p.getSegmentDirectory(int(segID)))
 	if err != nil {
 		glog.Fatalf("Unable to create new segment due to err: %s", err.Error())
 		return
 	}
 	metadata := SegmentMetadata{
-		ID:               prevMetadata.ID + 1,
+		ID:               segID,
 		Immutable:        false,
 		Expired:          false,
 		CreatedTimestamp: time.Now(),
-		StartOffset:      prevMetadata.EndOffset + 1,
+		StartOffset:      startOffset,
 	}
 	newSeg.SetMetadata(metadata)
 	p.segments = append(p.segments, newSeg)
