@@ -15,6 +15,7 @@ import (
 
 const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
 const KSegmentsDirectoryName = "segments"
+const KMaxScanSizeBytes = 15 * 1000000 // 15MB
 
 var (
 	expiredSegmentMonitorIntervalSecs = flag.Int("partition_exp_segment_monitor_interval_seconds", 600,
@@ -24,6 +25,8 @@ var (
 	numGCWorkers        = flag.Int("partition_num_gc_workers", 2, "Number of garbage collection workers")
 	numRecordsInSegment = flag.Int64("partition_num_records_per_segment_threshold", KNumSegmentRecordsThreshold,
 		"Number of records in a segment threshold")
+	maxScanSizeBytes = flag.Int64("partition_max_scan_size_bytes", KMaxScanSizeBytes,
+		"Max scan size in bytes. Defaults to 16MB")
 )
 
 type Partition struct {
@@ -105,7 +108,63 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 	if p.closed {
 		return nil, nil
 	}
-	return nil, nil
+	endOffset := startOffset + numMessages - 1
+
+	// Get all the segments that contain our desired offsets.
+	segs := p.getSegments(startOffset, endOffset)
+	if segs == nil || len(segs) == 0 {
+		return
+	}
+	var scanSizeBytes int64
+	scanSizeBytes = 0
+
+	// All offsets are present in the same segment.
+	if len(segs) == 1 {
+		segStartOffset := startOffset - segs[0].GetMetadata().StartOffset
+		tmpVals, tmpErrs := segs[0].Scan(segStartOffset, numMessages)
+		for ii, val := range tmpVals {
+			// Ensure that the batch size remains smaller than the max scan size.
+			if int64(len(val))+scanSizeBytes >= *maxScanSizeBytes {
+				break
+			}
+			scanSizeBytes += int64(len(val))
+			values = append(values, val)
+			errs = append(errs, tmpErrs[ii])
+		}
+		return
+	}
+
+	// The values are present across multiple segments. Merge them before returning.
+	glog.V(1).Infof("Gathering values from multiple(%d) segments", len(segs))
+	numPendingMsgs := numMessages
+	var nextStartOffset uint64
+	for ii, seg := range segs {
+		if numPendingMsgs == 0 {
+			return
+		}
+		if ii == 0 {
+			// First segment. Start scanning from the correct offset into the segment.
+			nextStartOffset = startOffset - seg.GetMetadata().StartOffset
+		} else {
+			// Start scanning from the very first offset in the segment.
+			nextStartOffset = 0
+		}
+		partialValues, partialErrs := seg.Scan(nextStartOffset, numPendingMsgs)
+		numPendingMsgs -= uint64(len(partialValues))
+		glog.V(1).Infof("Next start offset: %d, num pending messages: %d", nextStartOffset, numPendingMsgs)
+		for jj, val := range partialValues {
+			// Ensure that the batch size remains smaller than the max scan size.
+			if int64(len(val))+scanSizeBytes >= *maxScanSizeBytes {
+				break
+			}
+			scanSizeBytes += int64(len(val))
+
+			// Merge all partial values into a single list.
+			values = append(values, val)
+			errs = append(errs, partialErrs[jj])
+		}
+	}
+	return
 }
 
 // Snapshot the partition.
