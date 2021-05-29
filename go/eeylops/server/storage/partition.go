@@ -237,14 +237,13 @@ func (p *Partition) getSegments(startOffset uint64, endOffset uint64) []Segment 
 	if endSegIdx == -1 {
 		endSegIdx = p.findOffset(startSegIdx, len(p.segments)-1, endOffset)
 	}
-
 	// Populate segments.
 	segs = append(segs, p.segments[startSegIdx])
 	if startSegIdx == endSegIdx {
 		return segs
 	}
 	if endSegIdx == -1 {
-		endSegIdx = len(segs) - 1
+		endSegIdx = len(p.segments) - 1
 	}
 	for ii := startSegIdx + 1; ii <= endSegIdx; ii++ {
 		segs = append(segs, p.segments[ii])
