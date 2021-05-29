@@ -81,7 +81,7 @@ func (p *Partition) initialize() {
 		p.createNewSegment()
 	}
 
-	// Start the background goroutine to periodically check live segment and garbage collect expired ones.
+	// Start curator.
 	go p.curator()
 }
 
@@ -101,7 +101,7 @@ func (p *Partition) Append(values [][]byte) error {
 	return nil
 }
 
-// Scan numMessages messages from the partition from the given startOffset.
+// Scan numMessages records from the partition from the given startOffset.
 func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
@@ -226,8 +226,11 @@ func (p *Partition) getSegments(startOffset uint64, endOffset uint64) []Segment 
 
 	// Populate segments.
 	segs = append(segs, p.segments[startSegIdx])
-	if endSegIdx == -1 || startSegIdx == endSegIdx {
+	if startSegIdx == endSegIdx {
 		return segs
+	}
+	if endSegIdx == -1 {
+		endSegIdx = len(segs) - 1
 	}
 	for ii := startSegIdx + 1; ii <= endSegIdx; ii++ {
 		segs = append(segs, p.segments[ii])
