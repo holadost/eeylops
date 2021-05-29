@@ -127,6 +127,13 @@ func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 		return
 	}
 	// Compute the keys that need to be fetched.
+	no := seg.nextOffSet
+	if startOffset+numMessages >= no {
+		numMessages = no - startOffset
+	}
+	if no == 0 {
+		return values, errs
+	}
 	keys := seg.generateKeys(startOffset, numMessages)
 	// Fetch values from DB.
 	// TODO: Test/benchmark using Txn.iterator(itr.Seek(start_key) to get to the key of interest).

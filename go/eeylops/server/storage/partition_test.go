@@ -15,53 +15,15 @@ func checkPartitionMetadata(t *testing.T) {
 
 }
 
-func loadDataBasic(p *Partition, numSegments int, numValuesPerSegment int) {
-	for jj := 0; jj < numSegments; jj++ {
-		// Generate values.
-		var values [][]byte
-		for ii := 0; ii < numValuesPerSegment; ii++ {
-			values = append(values, []byte(fmt.Sprintf("value-%d-%d", jj, ii)))
-		}
-
-		// Append values.
-		err := p.Append(values)
-		if err != nil {
-			glog.Fatalf("Append failed due to err: %s", err.Error())
-		}
-
-		// Create new segment.
-		p.createNewSegment()
-		if len(p.segments) != jj+2 {
-			glog.Fatalf("Expected %d segments. Got: %d", jj+2, len(p.segments))
-			return
-		}
-	}
+func testMarker(testName string) {
+	glog.Infof("\n\n============================= %s =============================\n\n", testName)
 }
 
-func TestPartitionInitialize(t *testing.T) {
-	p := NewPartition(0, "/tmp/eeylops/TestPartitionInitialize", 86400*7)
-	glog.Infof("Partition ID: %d", p.partitionID)
-	p.Close()
-	_ = os.RemoveAll("/tmp/eeylops/TestPartitionInitialize")
-}
-
-func TestPartitionReInitialize(t *testing.T) {
-	for ii := 0; ii < 5; ii++ {
-		glog.Infof("\n\n\nIteration: %d", ii)
-		p := NewPartition(0, "/tmp/eeylops/TestPartitionReInitialize", 86400*7)
-		glog.Infof("Partition ID: %d", p.partitionID)
-		p.Close()
-	}
-	_ = os.RemoveAll("/tmp/eeylops/TestPartitionReInitialize")
-}
-
-func TestPartitionAppend(t *testing.T) {
-	testDir := "/tmp/eeylops/TestPartitionAppend"
-	defer func() { _ = os.RemoveAll(testDir) }()
-	p := NewPartition(0, testDir, 86400*7)
+func singleProduce(startIdx int, p *Partition, numValues int) {
 	var values [][]byte
-	for ii := 0; ii < 20; ii++ {
-		values = append(values, []byte(fmt.Sprintf("value-%d", ii)))
+	for ii := 0; ii < numValues; ii++ {
+		values = append(values, []byte(fmt.Sprintf("value-%d", startIdx)))
+		startIdx += 1
 	}
 	err := p.Append(values)
 	if err != nil {
@@ -69,11 +31,51 @@ func TestPartitionAppend(t *testing.T) {
 	}
 }
 
-func TestPartitionScan(t *testing.T) {
+func loadDataBasic(p *Partition, numSegments int, numValuesPerSegment int) {
+	for jj := 0; jj < numSegments; jj++ {
+		// Produce values.
+		startIdx := jj * numValuesPerSegment
+		singleProduce(startIdx, p, numValuesPerSegment)
 
+		if numSegments != 1 {
+			// Create new segment.
+			p.createNewSegment()
+		}
+	}
+}
+
+func TestPartitionInitialize(t *testing.T) {
+	testMarker("TestPartitionInitialize")
+	p := NewPartition(0, "/tmp/eeylops/TestPartitionInitialize", 86400*7)
+	glog.Infof("Partition ID: %d", p.partitionID)
+	p.Close()
+	_ = os.RemoveAll("/tmp/eeylops/TestPartitionInitialize")
+	glog.Infof("TestPartitionInitialize finished successfully")
+}
+
+func TestPartitionReInitialize(t *testing.T) {
+	testMarker("TestPartitionReInitialize")
+	for ii := 0; ii < 5; ii++ {
+		glog.Infof("\n\n\nIteration: %d", ii)
+		p := NewPartition(0, "/tmp/eeylops/TestPartitionReInitialize", 86400*7)
+		glog.Infof("Partition ID: %d", p.partitionID)
+		p.Close()
+	}
+	_ = os.RemoveAll("/tmp/eeylops/TestPartitionReInitialize")
+	glog.Infof("TestPartitionReInitialize finished successfully")
+}
+
+func TestPartitionAppend(t *testing.T) {
+	testMarker("TestPartitionAppend")
+	testDir := "/tmp/eeylops/TestPartitionAppend"
+	defer func() { _ = os.RemoveAll(testDir) }()
+	p := NewPartition(0, testDir, 86400*7)
+	loadDataBasic(p, 1, 100)
+	glog.Infof("TestPartitionAppend finished successfully")
 }
 
 func TestPartitionNewSegmentCreation(t *testing.T) {
+	testMarker("TestPartitionNewSegmentCreation")
 	testDir := "/tmp/eeylops/TestPartitionNewSegmentCreation"
 	_ = os.RemoveAll(testDir)
 	p := NewPartition(0, testDir, 86400*7)
@@ -145,6 +147,83 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 	if !(segs == nil || len(segs) == 0) {
 		glog.Fatalf("Got %d segment(s) even though it does not contain our record", len(segs))
 	}
+	glog.Infof("TestPartitionNewSegmentCreation finished successfully")
+}
+
+func TestPartitionScan(t *testing.T) {
+	testMarker("TestPartitionScan")
+	testDir := "/tmp/eeylops/TestPartitionScan"
+	_ = os.RemoveAll(testDir)
+	p := NewPartition(0, testDir, 86400*7)
+	loadDataBasic(p, 10, 100)
+	values, errs := p.Scan(0, 1)
+	if errs == nil || len(errs) == 0 {
+		glog.Fatalf("Did not receive any error codes for scan")
+		return
+	}
+	if len(errs) != 1 {
+		glog.Fatalf("Expected 1 value, got: %d", len(errs))
+		return
+	}
+	if errs[0] != nil {
+		glog.Fatalf("Unable to scan first offset due to err: %s", errs[0].Error())
+		return
+	}
+	if string(values[0]) != "value-0" {
+		glog.Fatalf("Value mismatch. Expected: value-0-0, got: %s", string(values[0]))
+	}
+
+	startOffset := 121
+	numMsgs := 100
+	values, errs = p.Scan(uint64(startOffset), uint64(numMsgs))
+	if errs == nil || len(errs) != numMsgs {
+		if errs != nil {
+			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
+		}
+		glog.Fatalf("Got nil errs")
+		return
+	}
+	for ii, err := range errs {
+		if err != nil {
+			glog.Fatalf("Unexpected error while scanning offset: %d. Error: %s", ii+startOffset, err.Error())
+			return
+		}
+
+		expectedVal := fmt.Sprintf("value-%d", ii+startOffset)
+		gotVal := string(values[ii])
+
+		if expectedVal != gotVal {
+			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
+			return
+		}
+	}
+
+	startOffset = 221
+	numMsgs = 1000
+	expectedNumMsgs := 1000 - startOffset // This comes from the num segments and num values per segment which was 1000.
+	values, errs = p.Scan(uint64(startOffset), uint64(numMsgs))
+	if errs == nil || len(errs) != expectedNumMsgs {
+		if errs != nil {
+			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
+		}
+		glog.Fatalf("Got nil errs")
+		return
+	}
+	for ii, err := range errs {
+		if err != nil {
+			glog.Fatalf("Unexpected error while scanning offset: %d. Error: %s", ii+startOffset, err.Error())
+			return
+		}
+
+		expectedVal := fmt.Sprintf("value-%d", ii+startOffset)
+		gotVal := string(values[ii])
+
+		if expectedVal != gotVal {
+			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
+			return
+		}
+	}
+	glog.Infof("TestPartitionScan finished successfully")
 }
 
 func TestStress(t *testing.T) {
