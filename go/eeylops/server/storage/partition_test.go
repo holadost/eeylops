@@ -155,7 +155,9 @@ func TestPartitionScan(t *testing.T) {
 	testDir := "/tmp/eeylops/TestPartitionScan"
 	_ = os.RemoveAll(testDir)
 	p := NewPartition(0, testDir, 86400*7)
-	loadDataBasic(p, 10, 100)
+	numSegs := 10
+	numValsPerSeg := 100
+	loadDataBasic(p, numSegs, numValsPerSeg)
 	values, errs := p.Scan(0, 1)
 	if errs == nil || len(errs) == 0 {
 		glog.Fatalf("Did not receive any error codes for scan")
@@ -200,7 +202,7 @@ func TestPartitionScan(t *testing.T) {
 
 	startOffset = 221
 	numMsgs = 1000
-	expectedNumMsgs := 1000 - startOffset // This comes from the num segments and num values per segment which was 1000.
+	expectedNumMsgs := (numSegs * numValsPerSeg) - startOffset
 	values, errs = p.Scan(uint64(startOffset), uint64(numMsgs))
 	if errs == nil || len(errs) != expectedNumMsgs {
 		if errs != nil {
