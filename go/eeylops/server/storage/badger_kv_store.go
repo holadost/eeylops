@@ -84,7 +84,10 @@ func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
 		err := txn.Set(key, value)
 		return err
 	})
-	return fmt.Errorf("unable to put key due to err: %w", err)
+	if err != nil {
+		return fmt.Errorf("unable to put key due to err: %w", err)
+	}
+	return nil
 }
 
 // PutS puts a key value pair in the DB. If the key already exists, it would be updated.
