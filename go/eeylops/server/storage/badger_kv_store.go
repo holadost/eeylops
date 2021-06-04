@@ -10,6 +10,7 @@ import (
 type BadgerKVStore struct {
 	db      *badger.DB
 	rootDir string
+	closed  bool
 }
 
 func NewBadgerKVStore(rootDir string, opts badger.Options) *BadgerKVStore {
@@ -34,6 +35,7 @@ func (kvStore *BadgerKVStore) initialize(opts badger.Options) {
 	glog.Infof("Initializing badger KV store located at: %s", kvStore.rootDir)
 	var err error
 	kvStore.db, err = badger.Open(opts)
+	kvStore.closed = false
 	if err != nil {
 		glog.Fatalf("Unable to open consumer store due to err: %s", err.Error())
 	}
@@ -183,6 +185,19 @@ func (kvStore *BadgerKVStore) BatchDeleteS(keys []string) error {
 		bkeys = append(bkeys, []byte(keys[ii]))
 	}
 	return kvStore.BatchDelete(bkeys)
+}
+
+// Close implements the Segment interface. It closes the connection to the underlying
+// BadgerDB database as well as invoking the context's cancel function.
+func (kvStore *BadgerKVStore) Close() error {
+	glog.Infof("Closing KV store located at: %s", kvStore.rootDir)
+	if kvStore.closed {
+		return nil
+	}
+	err := kvStore.db.Close()
+	kvStore.db = nil
+	kvStore.closed = true
+	return err
 }
 
 func generatePrefixKey(key []byte, prefix string) []byte {
