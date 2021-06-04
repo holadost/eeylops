@@ -45,6 +45,10 @@ func (cs *ConsumerStore) initialize() {
 	cs.kvStore = NewBadgerKVStore(cs.csDir, opts)
 }
 
+func (cs *ConsumerStore) Close() error {
+	return cs.kvStore.Close()
+}
+
 func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, partitionID uint) error {
 	glog.Infof("Registering new consumer for topic: %s, partition: %d. Consumer ID: %s",
 		topicName, partitionID, consumerID)

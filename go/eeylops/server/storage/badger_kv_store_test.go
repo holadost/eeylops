@@ -24,7 +24,7 @@ func createBadgerKVStoreTestDir(t *testing.T, testName string) string {
 func TestBadgerKVStore(t *testing.T) {
 	glog.Infof("*******************************************************************************************\n\n")
 	glog.Infof("Starting TestBadgerKVStore")
-	testDir := createTestDir(t, "TestBadgerKVStore")
+	testDir := createBadgerKVStoreTestDir(t, "TestBadgerKVStore")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 1
 	opts.NumMemtables = 2
