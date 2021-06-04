@@ -1,15 +1,13 @@
 package storage
 
 import (
-	"bytes"
-	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/golang/glog"
 	"os"
 	"path"
-	"sync"
 )
 
 const topicStoreDirectory = "topic_store"
@@ -21,15 +19,16 @@ type Topic struct {
 	ToRemove     bool   `json:"to_remove"`
 }
 
-// TopicStore holds all the topics for eeylops. TopicStore is not thread-safe and need not be since
-// all callers will modify topics through raft and Raft will not allow multiple commands to be
-// executed in parallel.
+func (topic *Topic) ToString() string {
+	return fmt.Sprintf("\nTopic Name: %s\nPartition IDs: %v\nTTL Seconds: %d\nTo Remove: %v",
+		topic.Name, topic.PartitionIDs, topic.TTLSeconds, topic.ToRemove)
+}
+
+// TopicStore holds all the topics for eeylops.
 type TopicStore struct {
-	kvStore  *BadgerKVStore
-	topicMap map[string]*Topic
-	rootDir  string
-	tsDir    string
-	lock     sync.RWMutex
+	kvStore *BadgerKVStore
+	rootDir string
+	tsDir   string
 }
 
 func NewTopicStore(rootDir string) *TopicStore {
@@ -45,21 +44,23 @@ func NewTopicStore(rootDir string) *TopicStore {
 }
 
 func (ts *TopicStore) initialize() {
-	glog.Infof("Initializing consumer store located at: %s", ts.tsDir)
+	glog.Infof("Initializing topic store located at: %s", ts.tsDir)
 	opts := badger.DefaultOptions(ts.tsDir)
 	opts.SyncWrites = true
 	opts.NumCompactors = 2
 	opts.NumMemtables = 2
 	opts.BlockCacheSize = 0
 	opts.Compression = options.None
-	opts.MaxLevels = 1
 	opts.VerifyValueChecksum = true
 	ts.kvStore = NewBadgerKVStore(ts.tsDir, opts)
 }
 
+func (ts *TopicStore) Close() error {
+	return ts.kvStore.Close()
+}
+
 func (ts *TopicStore) AddTopic(topic Topic) error {
-	ts.lock.Lock()
-	defer ts.lock.Unlock()
+	glog.Infof("Adding new topic: %s", topic.ToString())
 	key := []byte(topic.Name)
 	val := ts.marshalTopic(&topic)
 	err := ts.kvStore.Put(key, val)
@@ -70,61 +71,51 @@ func (ts *TopicStore) AddTopic(topic Topic) error {
 }
 
 func (ts *TopicStore) MarkTopicForRemoval(topicName string) error {
-	ts.lock.Lock()
-	defer ts.lock.Unlock()
+	glog.Infof("Marking topic: %s for removal", topicName)
 	key := []byte(topicName)
-	topic, exists := ts.topicMap[topicName]
-	if !exists {
-		return fmt.Errorf("unable to find topic in the topic map")
+	topic, err := ts.GetTopic(topicName)
+	if err != nil {
+		glog.Errorf("Unable to fetch topic info to mark it for removal due to err: %s", err.Error())
+		return fmt.Errorf("unable to find topic to mark it for removal")
 	}
 	topic.ToRemove = true
-	val := ts.marshalTopic(topic)
-	err := ts.kvStore.Put(key, val)
-	if err != nil {
+	val := ts.marshalTopic(&topic)
+	if err = ts.kvStore.Put(key, val); err != nil {
 		return fmt.Errorf("unable to mark topic for removal due to err: %w", err)
 	}
-	topic.ToRemove = true
 	return nil
 }
 
 func (ts *TopicStore) RemoveTopic(topicName string) error {
-	ts.lock.Lock()
-	defer ts.lock.Unlock()
+	glog.Infof("Removing topic: %s from topic store", topicName)
 	key := []byte(topicName)
-	topic, exists := ts.topicMap[topicName]
-	if !exists {
-		return fmt.Errorf("unable to find topic in the topic map")
+	topic, err := ts.GetTopic(topicName)
+	if err != nil {
+		glog.Errorf("Unable to fetch topic info to mark it for removal due to err: %s", err.Error())
+		return fmt.Errorf("unable to find topic to mark it for removal")
 	}
 	if !topic.ToRemove {
 		glog.Errorf("Cannot remove topic as it was not previously marked for removal.")
 		return fmt.Errorf("unable to remove topic as it is not marked for removal")
 	}
-	err := ts.kvStore.Delete(key)
+	err = ts.kvStore.Delete(key)
 	if err != nil {
 		glog.Errorf("Unable to delete topic due to err: %s", err.Error())
 		return fmt.Errorf("unable to remove topic due to err: %w", err)
 	}
-	delete(ts.topicMap, topicName)
 	return nil
 }
 
 func (ts *TopicStore) GetTopic(topicName string) (Topic, error) {
-	ts.lock.RLock()
-	defer ts.lock.RUnlock()
-	topic, exists := ts.topicMap[topicName]
-	if !exists {
-		return Topic{}, fmt.Errorf("unable to find topic in the topic map")
+	key := []byte(topicName)
+	var topic Topic
+	topicVal, err := ts.kvStore.Get(key)
+	if err != nil {
+		glog.Errorf("Unable to get topic: %s due to err: %s", topicName, err.Error())
+		return topic, fmt.Errorf("unable to get topic: %s due to err: %w", topicName, err)
 	}
-	return *topic, nil
-}
-
-func (ts *TopicStore) GetAllTopicNames() (topics []string) {
-	ts.lock.RLock()
-	defer ts.lock.RUnlock()
-	for key, _ := range ts.topicMap {
-		topics = append(topics, key)
-	}
-	return
+	topic = *ts.unmarshalTopic(topicVal)
+	return topic, nil
 }
 
 func (ts *TopicStore) Snapshot() error {
@@ -136,22 +127,20 @@ func (ts *TopicStore) Restore() error {
 }
 
 func (ts *TopicStore) marshalTopic(topic *Topic) []byte {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	var topicBytes []byte
-	if err := enc.Encode(topic); err != nil {
-		glog.Fatalf("Unable to serialize topic due to err: %s", err.Error())
+	data, err := json.Marshal(topic)
+	if err != nil {
+		glog.Fatalf("Unable to marshal topic to JSON due to err: %s", err.Error())
+		return []byte{}
 	}
-	buf.Write(topicBytes)
-	return topicBytes
+	return data
 }
 
 func (ts *TopicStore) unmarshalTopic(data []byte) *Topic {
-	buf := bytes.NewBuffer(data)
-	dec := gob.NewDecoder(buf)
-	var t Topic
-	if err := dec.Decode(&t); err != nil {
+	var topic Topic
+	err := json.Unmarshal(data, &topic)
+	if err != nil {
 		glog.Fatalf("Unable to deserialize topic due to err: %s", err.Error())
+		return nil
 	}
-	return &t
+	return &topic
 }
