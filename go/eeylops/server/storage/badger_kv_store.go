@@ -7,6 +7,7 @@ import (
 	"os"
 )
 
+// BadgerKVStore implements a simple KV store interface using badger.
 type BadgerKVStore struct {
 	db      *badger.DB
 	rootDir string
@@ -48,6 +49,9 @@ func (kvStore *BadgerKVStore) GetDataDir() string {
 // Get gets the value associated with the key.
 func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
 	var val []byte
+	if kvStore.closed {
+		return val, fmt.Errorf("kv store is closed")
+	}
 	err := kvStore.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(key)
 		if err != nil {
@@ -73,6 +77,9 @@ func (kvStore *BadgerKVStore) GetS(key string) (string, error) {
 
 // Put puts a key value pair in the DB. If the key already exists, it would be updated.
 func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
+	if kvStore.closed {
+		return fmt.Errorf("kv store is closed")
+	}
 	err := kvStore.db.Update(func(txn *badger.Txn) error {
 		err := txn.Set(key, value)
 		return err
@@ -97,6 +104,14 @@ func (kvStore *BadgerKVStore) DeleteS(key string) error {
 
 // MultiGet gets the values associated with multiple keys.
 func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []error) {
+	if kvStore.closed {
+		err := fmt.Errorf("kv store is closed")
+		for ii := 0; ii < len(keys); ii++ {
+			values = append(values, []byte{})
+			errs = append(errs, err)
+		}
+		return
+	}
 	kvStore.db.View(func(txn *badger.Txn) error {
 		for _, key := range keys {
 			item, err := txn.Get(key)
@@ -145,6 +160,9 @@ func (kvStore *BadgerKVStore) MultiGetS(keys []string) ([]string, []error) {
 
 // BatchPut sets/updates multiple key value pairs in the DB.
 func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
+	if kvStore.closed {
+		return fmt.Errorf("kv store is closed")
+	}
 	wb := kvStore.db.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
@@ -195,8 +213,8 @@ func (kvStore *BadgerKVStore) Close() error {
 		return nil
 	}
 	err := kvStore.db.Close()
-	kvStore.db = nil
 	kvStore.closed = true
+	kvStore.db = nil
 	return err
 }
 
