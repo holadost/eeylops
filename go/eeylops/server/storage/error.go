@@ -37,7 +37,7 @@ type StoreError struct {
 	ec  StoreErrorCode
 }
 
-func NewStorageError(msg string, ec StoreErrorCode) *StoreError {
+func NewStoreError(msg string, ec StoreErrorCode) *StoreError {
 	se := &StoreError{}
 	se.msg = msg
 	se.ec = ec
