@@ -55,11 +55,17 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, p
 	key := generateConsumerKey(consumerID, topicName, partitionID)
 	_, err := cs.kvStore.Get(key)
 	if err != nil {
-		// Mostly the key does not exist and so we got an error. We should check this error. but for
-		// now, just move on.
+		serr := err.(*StoreError)
+		if serr.ErrorCode() != KVStoreKeyNotFoundErr {
+			return NewStoreError(
+				fmt.Sprintf("unable to register consumer due to err: %s", err.Error()),
+				ConsumerStoreErr)
+		}
 		err = cs.kvStore.Put(key, []byte("nil"))
 		if err != nil {
-			return fmt.Errorf("unable to register consumer due to err: %w", err)
+			return NewStoreError(
+				fmt.Sprintf("unable to register consumer due to err: %s", err.Error()),
+				ConsumerStoreErr)
 		}
 	}
 	// The consumer is already registered.
@@ -74,14 +80,18 @@ func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID
 	if err != nil {
 		glog.Errorf("Attempting to commit an offset even though consumer: %s is not registered for "+
 			"topic: %s, partition: %d", consumerID, topicName, partitionID)
-		return fmt.Errorf("unable to commit due to err: %w", err)
+		return NewStoreError(
+			fmt.Sprintf("unable to commit due to err: %s", err.Error()),
+			ConsumerStoreErr)
 	}
 	val := make([]byte, 8)
 	binary.BigEndian.PutUint64(val, offsetNum)
 	err = cs.kvStore.Put(key, val)
 	if err != nil {
 		glog.Errorf("Unable to commit an offset due to err: %s", err.Error())
-		return fmt.Errorf("unable to commit due to err: %w", err)
+		return NewStoreError(
+			fmt.Sprintf("unable to commit due to err: %s", err.Error()),
+			ConsumerStoreErr)
 	}
 	return nil
 }
@@ -92,7 +102,9 @@ func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicName string, p
 	if err != nil {
 		glog.Errorf("Did not find any offset committed by consumer: %s for topic: %s and partition: %d",
 			consumerID, topicName, partitionID)
-		return 0, fmt.Errorf("unable to get last committed offset due to err: %w", err)
+		return 0, NewStoreError(
+			fmt.Sprintf("unable to get last committed offset due to err: %s", err.Error()),
+			ConsumerStoreErr)
 	}
 	lastCommitted := binary.BigEndian.Uint64(val)
 	return lastCommitted, nil

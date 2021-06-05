@@ -47,3 +47,11 @@ func NewStoreError(msg string, ec StoreErrorCode) *StoreError {
 func (se *StoreError) Error() string {
 	return fmt.Sprintf("storage error[%s]: %s ", se.ec.ToString(), se.msg)
 }
+
+func (se *StoreError) Msg() string {
+	return se.msg
+}
+
+func (se *StoreError) ErrorCode() StoreErrorCode {
+	return se.ec
+}

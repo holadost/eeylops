@@ -50,19 +50,24 @@ func (kvStore *BadgerKVStore) GetDataDir() string {
 func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
 	var val []byte
 	if kvStore.closed {
-		return val, fmt.Errorf("kv store is closed")
+		return val, NewStoreError("kv store is closed", KVStoreErr)
 	}
 	err := kvStore.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(key)
 		if err != nil {
-			return fmt.Errorf("unable to get key due to err: %w", err)
+			return err
 		}
 		val, err = item.ValueCopy(nil)
 		if err != nil {
-			return fmt.Errorf("unable to copy value due to err: %w", err)
+			return err
 		}
 		return nil
 	})
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return val, NewStoreError("key not found", KVStoreKeyNotFoundErr)
+		}
+	}
 	return val, err
 }
 
@@ -85,7 +90,9 @@ func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("unable to put key due to err: %w", err)
+		return NewStoreError(
+			fmt.Sprintf("unable to put key due to err: %s", err.Error()),
+			KVStoreKeyNotFoundErr)
 	}
 	return nil
 }
@@ -108,7 +115,9 @@ func (kvStore *BadgerKVStore) DeleteS(key string) error {
 // MultiGet gets the values associated with multiple keys.
 func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []error) {
 	if kvStore.closed {
-		err := fmt.Errorf("kv store is closed")
+		err := NewStoreError(
+			fmt.Sprintf("kv store is closed"),
+			KVStoreErr)
 		for ii := 0; ii < len(keys); ii++ {
 			values = append(values, []byte{})
 			errs = append(errs, err)
@@ -119,13 +128,22 @@ func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []e
 		for _, key := range keys {
 			item, err := txn.Get(key)
 			if err != nil {
+				if err == badger.ErrKeyNotFound {
+					errs = append(errs, NewStoreError("key not found", KVStoreKeyNotFoundErr))
+				} else {
+					errs = append(
+						errs,
+						NewStoreError(fmt.Sprintf("unable to get key due to err: %s", err.Error()), KVStoreErr))
+				}
 				errs = append(errs, err)
 				values = append(values, nil)
 				continue
 			}
 			tmpValue, err := item.ValueCopy(nil)
 			if err != nil {
-				errs = append(errs, err)
+				errs = append(
+					errs,
+					NewStoreError(fmt.Sprintf("unable to get key due to err: %s", err.Error()), KVStoreErr))
 				values = append(values, nil)
 				continue
 			}
@@ -164,16 +182,22 @@ func (kvStore *BadgerKVStore) MultiGetS(keys []string) ([]string, []error) {
 // BatchPut sets/updates multiple key value pairs in the DB.
 func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
 	if kvStore.closed {
-		return fmt.Errorf("kv store is closed")
+		return NewStoreError(
+			fmt.Sprintf("kv store is closed"),
+			KVStoreErr)
 	}
 	wb := kvStore.db.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
-			return fmt.Errorf("unable to put batch due to err: %w", err)
+			return NewStoreError(
+				fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
+				KVStoreErr)
 		}
 	}
 	if err := wb.Flush(); err != nil {
-		return fmt.Errorf("unable to put batch due to flush err: %w", err)
+		return NewStoreError(
+			fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
+			KVStoreErr)
 	}
 	return nil
 }
