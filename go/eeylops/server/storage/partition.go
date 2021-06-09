@@ -301,14 +301,14 @@ func (p *Partition) curator() {
 	expTicker := time.NewTicker(time.Duration(*expiredSegmentMonitorIntervalSecs) * time.Second)
 	for {
 		select {
+		case <-p.backgroundJobDone:
+			return
 		case <-liveSegTicker.C:
 			p.maybeCreateNewSegment()
 		case <-expTicker.C:
 			p.maybeReclaimExpiredSegments()
 		case <-p.snapshotChan:
 			p.snapshot()
-		case <-p.backgroundJobDone:
-			return
 		}
 	}
 }
