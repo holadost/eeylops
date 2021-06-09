@@ -1,4 +1,4 @@
-package raft
+package replication
 
 type RaftNode struct {
 }

@@ -92,25 +92,22 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 		return errors.New(fmt.Sprintf("segment store: %s is closed/expired/immutable", seg.logStr))
 	}
 
-	// Acquire the append lock to ensure that only a single producer can append.
-	seg.appendLock.Lock()
-	defer seg.appendLock.Unlock()
-
 	keys := seg.generateKeys(seg.nextOffSet, uint64(len(values)))
-	// TODO: Do this as a batch update.
-	err := seg.ddb.Update(func(txn *badger.Txn) error {
-		for ii := 0; ii < len(keys); ii++ {
-			err := txn.Set(keys[ii], values[ii])
-			if err != nil {
-				return err
-			}
+	wb := seg.ddb.NewWriteBatch()
+	for ii := 0; ii < len(keys); ii++ {
+		if err := wb.Set(keys[ii], values[ii]); err != nil {
+			return NewStoreError(
+				fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
+				SegmentErr)
 		}
-		return nil
-	})
-	if err == nil {
-		seg.nextOffSet = seg.nextOffSet + uint64(len(values))
 	}
-	return err
+	if err := wb.Flush(); err != nil {
+		return NewStoreError(
+			fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
+			SegmentErr)
+	}
+	seg.nextOffSet = seg.nextOffSet + uint64(len(values))
+	return nil
 }
 
 // Scan implements the Segment interface. It attempts to fetch numMessages starting from the given
