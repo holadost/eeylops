@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -32,7 +33,7 @@ func TestTopicStore(t *testing.T) {
 	for ii := 0; ii < numTopics; ii++ {
 
 		// Add a new topic.
-		var topic Topic
+		var topic base.Topic
 		topic.Name = fmt.Sprintf("topic-%d", ii)
 		topic.ToRemove = false
 		topic.PartitionIDs = []uint{0, 1, 2, 3}

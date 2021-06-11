@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"encoding/json"
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
@@ -11,18 +12,6 @@ import (
 )
 
 const topicStoreDirectory = "topic_store"
-
-type Topic struct {
-	Name         string `json:"name"`
-	PartitionIDs []uint `json:"partition_ids"`
-	TTLSeconds   int    `json:"ttl_seconds"`
-	ToRemove     bool   `json:"to_remove"`
-}
-
-func (topic *Topic) ToString() string {
-	return fmt.Sprintf("\nTopic Name: %s\nPartition IDs: %v\nTTL Seconds: %d\nTo Remove: %v",
-		topic.Name, topic.PartitionIDs, topic.TTLSeconds, topic.ToRemove)
-}
 
 // TopicStore holds all the topics for eeylops.
 type TopicStore struct {
@@ -59,7 +48,7 @@ func (ts *TopicStore) Close() error {
 	return ts.kvStore.Close()
 }
 
-func (ts *TopicStore) AddTopic(topic Topic) error {
+func (ts *TopicStore) AddTopic(topic base.Topic) error {
 	glog.Infof("Adding new topic: %s", topic.ToString())
 	key := []byte(topic.Name)
 	val := ts.marshalTopic(&topic)
@@ -114,9 +103,9 @@ func (ts *TopicStore) RemoveTopic(topicName string) error {
 	return nil
 }
 
-func (ts *TopicStore) GetTopic(topicName string) (Topic, error) {
+func (ts *TopicStore) GetTopic(topicName string) (base.Topic, error) {
 	key := []byte(topicName)
-	var topic Topic
+	var topic base.Topic
 	topicVal, err := ts.kvStore.Get(key)
 	if err != nil {
 		glog.Errorf("Unable to get topic: %s due to err: %s", topicName, err.Error())
@@ -136,7 +125,7 @@ func (ts *TopicStore) Restore() error {
 	return nil
 }
 
-func (ts *TopicStore) marshalTopic(topic *Topic) []byte {
+func (ts *TopicStore) marshalTopic(topic *base.Topic) []byte {
 	data, err := json.Marshal(topic)
 	if err != nil {
 		glog.Fatalf("Unable to marshal topic to JSON due to err: %s", err.Error())
@@ -145,8 +134,8 @@ func (ts *TopicStore) marshalTopic(topic *Topic) []byte {
 	return data
 }
 
-func (ts *TopicStore) unmarshalTopic(data []byte) *Topic {
-	var topic Topic
+func (ts *TopicStore) unmarshalTopic(data []byte) *base.Topic {
+	var topic base.Topic
 	err := json.Unmarshal(data, &topic)
 	if err != nil {
 		glog.Fatalf("Unable to deserialize topic due to err: %s", err.Error())
