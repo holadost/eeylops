@@ -1,4 +1,4 @@
-package server
+package hedwig
 
 import (
 	"eeylops/server/base"
@@ -14,11 +14,15 @@ type HedwigTopicManager struct {
 
 func NewTopicManager(rootDir string) *HedwigTopicManager {
 	tm := &HedwigTopicManager{}
+	tm.store = storage.NewTopicStore(rootDir)
+	tm.topicMap = make(map[string]*hedwigTopicEntry)
+	tm.initialize()
 	return tm
 }
 
 func (tm *HedwigTopicManager) initialize() {
-
+	// Read all the topics from the topic store and check if the topic directories
+	// exist under the given directory.
 }
 
 func (tm *HedwigTopicManager) GetTopic(topicName string) {
