@@ -169,7 +169,7 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 		for jj, val := range partialValues {
 			// Ensure that the batch size remains smaller than the max scan size.
 			if int64(len(val))+scanSizeBytes >= *maxScanSizeBytes {
-				break
+				return
 			}
 			scanSizeBytes += int64(len(val))
 
@@ -453,5 +453,16 @@ func (p *Partition) getFileSystemSegments() []int {
 		}
 	}
 	sort.Ints(segmentIDs)
+	if segmentIDs == nil || len(segmentIDs) == 0 || len(segmentIDs) == 1 {
+		return segmentIDs
+	}
+	// Sanity check the segments to make sure that there are no holes.
+	for ii := 1; ii < len(segmentIDs); ii++ {
+		id := segmentIDs[ii]
+		prevID := segmentIDs[ii-1]
+		if prevID+1 != id {
+			glog.Fatalf("Found hole in segments. Prev Seg ID: %d, Curr Seg ID: %d", prevID, id)
+		}
+	}
 	return segmentIDs
 }
