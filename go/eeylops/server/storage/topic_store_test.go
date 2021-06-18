@@ -36,7 +36,7 @@ func TestTopicStore(t *testing.T) {
 		var topic base.Topic
 		topic.Name = fmt.Sprintf("topic-%d", ii)
 		topic.ToRemove = false
-		topic.PartitionIDs = []uint{0, 1, 2, 3}
+		topic.PartitionIDs = []int{0, 1, 2, 3}
 		topic.TTLSeconds = 86400
 		if err := ts.AddTopic(topic); err != nil {
 			glog.Fatalf("Unable to add topic due to err: %s", err.Error())

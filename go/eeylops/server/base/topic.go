@@ -4,7 +4,7 @@ import "fmt"
 
 type Topic struct {
 	Name         string `json:"name"`
-	PartitionIDs []uint `json:"partition_ids"`
+	PartitionIDs []int  `json:"partition_ids"`
 	TTLSeconds   int    `json:"ttl_seconds"`
 	ToRemove     bool   `json:"to_remove"`
 }

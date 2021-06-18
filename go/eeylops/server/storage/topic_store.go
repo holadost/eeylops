@@ -113,8 +113,21 @@ func (ts *TopicStore) GetTopic(topicName string) (base.Topic, error) {
 			fmt.Sprintf("unable to get topic: %s due to err: %s", topicName, err.Error()),
 			TopicStoreErr)
 	}
-	topic = *ts.unmarshalTopic(topicVal)
+	topic = ts.unmarshalTopic(topicVal)
 	return topic, nil
+}
+
+func (ts *TopicStore) GetAllTopics() ([]base.Topic, error) {
+	_, values, _, err := ts.kvStore.Scan(nil, -1)
+	if err != nil {
+		glog.Errorf("Unable to get all topics in topic store due to err: %s", err.Error())
+		return nil, err
+	}
+	var topics []base.Topic
+	for ii := 0; ii < len(values); ii++ {
+		topics = append(topics, ts.unmarshalTopic(values[ii]))
+	}
+	return topics, nil
 }
 
 func (ts *TopicStore) Snapshot() error {
@@ -134,12 +147,11 @@ func (ts *TopicStore) marshalTopic(topic *base.Topic) []byte {
 	return data
 }
 
-func (ts *TopicStore) unmarshalTopic(data []byte) *base.Topic {
+func (ts *TopicStore) unmarshalTopic(data []byte) base.Topic {
 	var topic base.Topic
 	err := json.Unmarshal(data, &topic)
 	if err != nil {
 		glog.Fatalf("Unable to deserialize topic due to err: %s", err.Error())
-		return nil
 	}
-	return &topic
+	return topic
 }

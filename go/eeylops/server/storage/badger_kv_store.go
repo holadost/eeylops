@@ -112,6 +112,54 @@ func (kvStore *BadgerKVStore) DeleteS(key string) error {
 	return kvStore.Put([]byte(key), []byte(""))
 }
 
+// Scan scans the DB in ascending order from the given start key. if numValues is < 0, the entire DB is scanned.
+func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int) (keys [][]byte, values [][]byte, nextKey []byte, retErr error) {
+	txn := kvStore.db.NewTransaction(false)
+	defer txn.Discard()
+	itr := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer itr.Close()
+
+	// Seek to the correct entry.
+	if (startKey == nil) || len(startKey) == 0 {
+		itr.Rewind()
+	} else {
+		itr.Seek(startKey)
+	}
+	for ; itr.Valid(); itr.Next() {
+		item := itr.Item()
+		key := item.KeyCopy(nil)
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			glog.Errorf("Unable to scan KV store due to err: %s", err)
+			return nil, nil, nil, err
+		}
+		if numValues >= 0 && len(keys) == numValues {
+			return keys, values, key, nil
+		}
+		keys = append(keys, key)
+		values = append(values, val)
+	}
+	// We have reached the end of the DB and there are no more keys.
+	return keys, values, nil, nil
+}
+
+// ScanS scans the DB in ascending order from the given start key.
+func (kvStore *BadgerKVStore) ScanS(startKey string, numValues int) (keys []string, values []string, nextKey string, retErr error) {
+	keysByte, valuesByte, nextKeyByte, retErrByte := kvStore.Scan([]byte(startKey), numValues)
+	if retErrByte != nil {
+		return nil, nil, "", retErrByte
+	}
+	for ii := 0; ii < len(keysByte); ii++ {
+		keys = append(keys, string(keysByte[ii]))
+		values = append(values, string(valuesByte[ii]))
+	}
+	nextKey = ""
+	if nextKeyByte != nil {
+		nextKey = string(nextKeyByte)
+	}
+	return keys, values, nextKey, nil
+}
+
 // MultiGet gets the values associated with multiple keys.
 func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []error) {
 	if kvStore.closed {
