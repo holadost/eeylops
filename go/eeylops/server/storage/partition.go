@@ -424,12 +424,12 @@ func (p *Partition) getPartitionDirectory() string {
 	return path.Join(p.rootDir, strconv.Itoa(p.partitionID))
 }
 
-// getSegmentDirPath returns the segment directory for a given segmentID.
+// getSegmentRootDirectory returns the segment directory for a given segmentID.
 func (p *Partition) getSegmentRootDirectory() string {
 	return path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName)
 }
 
-// getSegmentDirPath returns the segment directory for a given segmentID.
+// getSegmentDirectory returns the segment directory for a given segmentID.
 func (p *Partition) getSegmentDirectory(segmentID int) string {
 	return path.Join(p.getSegmentRootDirectory(), strconv.Itoa(segmentID))
 }
