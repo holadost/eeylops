@@ -3,7 +3,6 @@ package hedwig
 import (
 	"eeylops/server/base"
 	"eeylops/server/storage"
-	"fmt"
 	"github.com/golang/glog"
 	"path"
 	"sync"
@@ -39,34 +38,34 @@ func (tm *InstanceTopicManager) GetTopic(topicName string) (base.Topic, error) {
 	defer tm.topicMapLock.RUnlock()
 	val, exists := tm.topicMap[topicName]
 	if !exists {
-		return base.Topic{}, fmt.Errorf("no topic named: %s found in topic map", topicName)
+		glog.Errorf("Did not find any topic named: %s", topicName)
+		return base.Topic{}, ErrTopicNotFound
 	}
 	return *val.topic, nil
 }
 
 func (tm *InstanceTopicManager) AddTopic(topic base.Topic) error {
-	tm.topicMapLock.RLock()
+	tm.topicMapLock.Lock()
+	defer tm.topicMapLock.Unlock()
 	_, exists := tm.topicMap[topic.Name]
-	tm.topicMapLock.RUnlock()
 	if exists {
-		// TODO: Create error codes. This error can actually be safely ignored by all FSMs and we need not crash.
-		return fmt.Errorf("topic named: %s already exists", topic.Name)
+		glog.Errorf("Topic: %s already exists", topic.Name)
+		return ErrTopicExists
 	}
 	err := tm.store.AddTopic(topic)
 	if err != nil {
-		return err
+		glog.Errorf("Unable to add topic to topic: %s store due to err: %s", topic.Name, err.Error())
+		return ErrInstanceTopicManager
 	}
 	partMap := make(map[int]*storage.Partition)
 	for _, elem := range topic.PartitionIDs {
-		part := storage.NewPartition(int(elem), tm.getTopicRootDirectory(topic.Name), 86400*7)
-		partMap[int(elem)] = part
+		part := storage.NewPartition(elem, tm.getTopicRootDirectory(topic.Name), topic.TTLSeconds)
+		partMap[elem] = part
 	}
 	entry := &hedwigTopicEntry{
 		topic:        &topic,
 		partitionMap: partMap,
 	}
-	tm.topicMapLock.Lock()
-	defer tm.topicMapLock.Unlock()
 	tm.topicMap[topic.Name] = entry
 	return nil
 }
@@ -76,10 +75,12 @@ func (tm *InstanceTopicManager) RemoveTopic(topicName string) error {
 	defer tm.topicMapLock.Unlock()
 	_, exists := tm.topicMap[topicName]
 	if !exists {
-		return fmt.Errorf("cannot remove topic: %s as it does not exist", topicName)
+		glog.Errorf("Topic: %s does not exist. Cannot remove topic", topicName)
+		return ErrTopicNotFound
 	}
 	if err := tm.store.MarkTopicForRemoval(topicName); err != nil {
-		return fmt.Errorf("unable to mark topic for removal due to err: %w", err)
+		glog.Errorf("Unable to mark topic: %s for removal due to err: %s", topicName, err.Error())
+		return ErrInstanceTopicManager
 	}
 	delete(tm.topicMap, topicName)
 	return nil
@@ -90,11 +91,13 @@ func (tm *InstanceTopicManager) GetPartition(topicName string, partitionID int) 
 	defer tm.topicMapLock.RUnlock()
 	entry, exists := tm.topicMap[topicName]
 	if !exists {
-		return nil, fmt.Errorf("cannot find topic: %s", topicName)
+		glog.Errorf("Unable to find topic: %s", topicName)
+		return nil, ErrTopicNotFound
 	}
 	partition, exists := entry.partitionMap[partitionID]
 	if !exists {
-		return nil, fmt.Errorf("cannot find partition: %d for topic: %s", partitionID, topicName)
+		glog.Errorf("Unable to find partition: %d for topic: %s", partitionID, topicName)
+		return nil, ErrPartitionNotFound
 	}
 	return partition, nil
 }

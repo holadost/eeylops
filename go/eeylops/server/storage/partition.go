@@ -41,7 +41,7 @@ type Partition struct {
 	closed            bool          // Flag to indicate whether the partition is open/closed.
 }
 
-func NewPartition(id int, rootDir string, gcPeriodSecs uint) *Partition {
+func NewPartition(id int, rootDir string, gcPeriodSecs int) *Partition {
 	p := new(Partition)
 	p.partitionID = id
 	p.rootDir = rootDir
