@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-type InstanceTopicManager struct {
+type TopicController struct {
 	store        *storage.TopicStore          // Backing store for topics registered with eeylops.
 	topicMap     map[string]*hedwigTopicEntry // In memory map that holds the topics and partitions.
 	topicMapLock sync.RWMutex                 // Read-write lock to protect access to topicMap.
@@ -18,25 +18,25 @@ type InstanceTopicManager struct {
 	disposedChan chan string
 }
 
-func NewTopicManager(rootDir string) *InstanceTopicManager {
-	tm := &InstanceTopicManager{}
-	tm.rootDir = rootDir
-	tm.store = storage.NewTopicStore(tm.rootDir)
-	tm.topicMap = make(map[string]*hedwigTopicEntry)
-	tm.disposedChan = make(chan string, 200)
-	tm.initialize()
-	return tm
+func NewTopicController(rootDir string) *TopicController {
+	tc := &TopicController{}
+	tc.rootDir = rootDir
+	tc.store = storage.NewTopicStore(tc.rootDir)
+	tc.topicMap = make(map[string]*hedwigTopicEntry)
+	tc.disposedChan = make(chan string, 200)
+	tc.initialize()
+	return tc
 }
 
-func (tm *InstanceTopicManager) initialize() {
+func (tc *TopicController) initialize() {
 	// Read all the topics from the topic store and check if the topic directories
 	// exist under the given directory.
 }
 
-func (tm *InstanceTopicManager) GetTopic(topicName string) (base.Topic, error) {
-	tm.topicMapLock.RLock()
-	defer tm.topicMapLock.RUnlock()
-	val, exists := tm.topicMap[topicName]
+func (tc *TopicController) GetTopic(topicName string) (base.Topic, error) {
+	tc.topicMapLock.RLock()
+	defer tc.topicMapLock.RUnlock()
+	val, exists := tc.topicMap[topicName]
 	if !exists {
 		glog.Errorf("Did not find any topic named: %s", topicName)
 		return base.Topic{}, ErrTopicNotFound
@@ -44,52 +44,52 @@ func (tm *InstanceTopicManager) GetTopic(topicName string) (base.Topic, error) {
 	return *val.topic, nil
 }
 
-func (tm *InstanceTopicManager) AddTopic(topic base.Topic) error {
-	tm.topicMapLock.Lock()
-	defer tm.topicMapLock.Unlock()
-	_, exists := tm.topicMap[topic.Name]
+func (tc *TopicController) AddTopic(topic base.Topic) error {
+	tc.topicMapLock.Lock()
+	defer tc.topicMapLock.Unlock()
+	_, exists := tc.topicMap[topic.Name]
 	if exists {
 		glog.Errorf("Topic: %s already exists", topic.Name)
 		return ErrTopicExists
 	}
-	err := tm.store.AddTopic(topic)
+	err := tc.store.AddTopic(topic)
 	if err != nil {
 		glog.Errorf("Unable to add topic to topic: %s store due to err: %s", topic.Name, err.Error())
 		return ErrInstanceTopicManager
 	}
 	partMap := make(map[int]*storage.Partition)
 	for _, elem := range topic.PartitionIDs {
-		part := storage.NewPartition(elem, tm.getTopicRootDirectory(topic.Name), topic.TTLSeconds)
+		part := storage.NewPartition(elem, tc.getTopicRootDirectory(topic.Name), topic.TTLSeconds)
 		partMap[elem] = part
 	}
 	entry := &hedwigTopicEntry{
 		topic:        &topic,
 		partitionMap: partMap,
 	}
-	tm.topicMap[topic.Name] = entry
+	tc.topicMap[topic.Name] = entry
 	return nil
 }
 
-func (tm *InstanceTopicManager) RemoveTopic(topicName string) error {
-	tm.topicMapLock.Lock()
-	defer tm.topicMapLock.Unlock()
-	_, exists := tm.topicMap[topicName]
+func (tc *TopicController) RemoveTopic(topicName string) error {
+	tc.topicMapLock.Lock()
+	defer tc.topicMapLock.Unlock()
+	_, exists := tc.topicMap[topicName]
 	if !exists {
 		glog.Errorf("Topic: %s does not exist. Cannot remove topic", topicName)
 		return ErrTopicNotFound
 	}
-	if err := tm.store.MarkTopicForRemoval(topicName); err != nil {
+	if err := tc.store.MarkTopicForRemoval(topicName); err != nil {
 		glog.Errorf("Unable to mark topic: %s for removal due to err: %s", topicName, err.Error())
 		return ErrInstanceTopicManager
 	}
-	delete(tm.topicMap, topicName)
+	delete(tc.topicMap, topicName)
 	return nil
 }
 
-func (tm *InstanceTopicManager) GetPartition(topicName string, partitionID int) (*storage.Partition, error) {
-	tm.topicMapLock.RLock()
-	defer tm.topicMapLock.RUnlock()
-	entry, exists := tm.topicMap[topicName]
+func (tc *TopicController) GetPartition(topicName string, partitionID int) (*storage.Partition, error) {
+	tc.topicMapLock.RLock()
+	defer tc.topicMapLock.RUnlock()
+	entry, exists := tc.topicMap[topicName]
 	if !exists {
 		glog.Errorf("Unable to find topic: %s", topicName)
 		return nil, ErrTopicNotFound
@@ -102,22 +102,22 @@ func (tm *InstanceTopicManager) GetPartition(topicName string, partitionID int) 
 	return partition, nil
 }
 
-func (tm *InstanceTopicManager) getTopicRootDirectory(topicName string) string {
+func (tc *TopicController) getTopicRootDirectory(topicName string) string {
 	return path.Join(base.GetDataDirectory(), "topics", topicName)
 }
 
 /********************************************** TOPICS JANITOR ********************************************************/
 // janitor is a long running background goroutine that periodically checks which topics have been marked for removal and
 // removes those topics from the underlying storage.
-func (tm *InstanceTopicManager) janitor() {
+func (tc *TopicController) janitor() {
 	disposeTicker := time.NewTicker(60 * time.Second)
 	for {
 		select {
 		case <-disposeTicker.C:
-			tm.disposeTopics()
-		case topicName := <-tm.disposedChan:
+			tc.disposeTopics()
+		case topicName := <-tc.disposedChan:
 			// The topic was disposed. Remove it from the store.
-			serr := tm.store.RemoveTopic(topicName)
+			serr := tc.store.RemoveTopic(topicName)
 			if serr != nil {
 				glog.Fatalf("Unable to remove topic from topic store due to err: %s", serr.Error())
 			}
@@ -125,26 +125,26 @@ func (tm *InstanceTopicManager) janitor() {
 	}
 }
 
-func (tm *InstanceTopicManager) disposeTopics() {
-	topics, err := tm.store.GetAllTopics()
+func (tc *TopicController) disposeTopics() {
+	topics, err := tc.store.GetAllTopics()
 	if err != nil {
 		glog.Fatalf("Unable to fetch all topics from topic store due to err: %s", err.Error())
 	}
 	for _, topic := range topics {
 		if topic.ToRemove {
 			ds := storage.DefaultDisposer()
-			ds.Dispose(tm.getTopicRootDirectory(topic.Name), tm.createDisposeCb(topic.Name))
+			ds.Dispose(tc.getTopicRootDirectory(topic.Name), tc.createDisposeCb(topic.Name))
 		}
 	}
 }
 
-func (tm *InstanceTopicManager) createDisposeCb(topicName string) func(error) {
+func (tc *TopicController) createDisposeCb(topicName string) func(error) {
 	cb := func(err error) {
 		if err != nil {
 			return
 		}
 		glog.Infof("Topic: %s has been successfully disposed", topicName)
-		tm.disposedChan <- topicName
+		tc.disposedChan <- topicName
 	}
 	return cb
 }
