@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-type HedwigTopicManager struct {
+type InstanceTopicManager struct {
 	store        *storage.TopicStore          // Backing store for topics registered with eeylops.
 	topicMap     map[string]*hedwigTopicEntry // In memory map that holds the topics and partitions.
 	topicMapLock sync.RWMutex                 // Read-write lock to protect access to topicMap.
@@ -19,8 +19,8 @@ type HedwigTopicManager struct {
 	disposedChan chan string
 }
 
-func NewTopicManager(rootDir string) *HedwigTopicManager {
-	tm := &HedwigTopicManager{}
+func NewTopicManager(rootDir string) *InstanceTopicManager {
+	tm := &InstanceTopicManager{}
 	tm.rootDir = rootDir
 	tm.store = storage.NewTopicStore(tm.rootDir)
 	tm.topicMap = make(map[string]*hedwigTopicEntry)
@@ -29,12 +29,12 @@ func NewTopicManager(rootDir string) *HedwigTopicManager {
 	return tm
 }
 
-func (tm *HedwigTopicManager) initialize() {
+func (tm *InstanceTopicManager) initialize() {
 	// Read all the topics from the topic store and check if the topic directories
 	// exist under the given directory.
 }
 
-func (tm *HedwigTopicManager) GetTopic(topicName string) (base.Topic, error) {
+func (tm *InstanceTopicManager) GetTopic(topicName string) (base.Topic, error) {
 	tm.topicMapLock.RLock()
 	defer tm.topicMapLock.RUnlock()
 	val, exists := tm.topicMap[topicName]
@@ -44,7 +44,7 @@ func (tm *HedwigTopicManager) GetTopic(topicName string) (base.Topic, error) {
 	return *val.topic, nil
 }
 
-func (tm *HedwigTopicManager) AddTopic(topic base.Topic) error {
+func (tm *InstanceTopicManager) AddTopic(topic base.Topic) error {
 	tm.topicMapLock.RLock()
 	_, exists := tm.topicMap[topic.Name]
 	tm.topicMapLock.RUnlock()
@@ -71,7 +71,7 @@ func (tm *HedwigTopicManager) AddTopic(topic base.Topic) error {
 	return nil
 }
 
-func (tm *HedwigTopicManager) RemoveTopic(topicName string) error {
+func (tm *InstanceTopicManager) RemoveTopic(topicName string) error {
 	tm.topicMapLock.Lock()
 	defer tm.topicMapLock.Unlock()
 	_, exists := tm.topicMap[topicName]
@@ -85,7 +85,7 @@ func (tm *HedwigTopicManager) RemoveTopic(topicName string) error {
 	return nil
 }
 
-func (tm *HedwigTopicManager) GetPartition(topicName string, partitionID int) (*storage.Partition, error) {
+func (tm *InstanceTopicManager) GetPartition(topicName string, partitionID int) (*storage.Partition, error) {
 	tm.topicMapLock.RLock()
 	defer tm.topicMapLock.RUnlock()
 	entry, exists := tm.topicMap[topicName]
@@ -99,14 +99,14 @@ func (tm *HedwigTopicManager) GetPartition(topicName string, partitionID int) (*
 	return partition, nil
 }
 
-func (tm *HedwigTopicManager) getTopicRootDirectory(topicName string) string {
+func (tm *InstanceTopicManager) getTopicRootDirectory(topicName string) string {
 	return path.Join(base.GetDataDirectory(), "topics", topicName)
 }
 
 /********************************************** TOPICS JANITOR ********************************************************/
 // janitor is a long running background goroutine that periodically checks which topics have been marked for removal and
 // removes those topics from the underlying storage.
-func (tm *HedwigTopicManager) janitor() {
+func (tm *InstanceTopicManager) janitor() {
 	disposeTicker := time.NewTicker(60 * time.Second)
 	for {
 		select {
@@ -122,7 +122,7 @@ func (tm *HedwigTopicManager) janitor() {
 	}
 }
 
-func (tm *HedwigTopicManager) disposeTopics() {
+func (tm *InstanceTopicManager) disposeTopics() {
 	topics, err := tm.store.GetAllTopics()
 	if err != nil {
 		glog.Fatalf("Unable to fetch all topics from topic store due to err: %s", err.Error())
@@ -135,7 +135,7 @@ func (tm *HedwigTopicManager) disposeTopics() {
 	}
 }
 
-func (tm *HedwigTopicManager) createDisposeCb(topicName string) func(error) {
+func (tm *InstanceTopicManager) createDisposeCb(topicName string) func(error) {
 	cb := func(err error) {
 		if err != nil {
 			return
