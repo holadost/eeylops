@@ -4,8 +4,10 @@ import (
 	"eeylops/server/base"
 	"eeylops/server/storage"
 	"fmt"
+	"github.com/golang/glog"
 	"path"
 	"sync"
+	"time"
 )
 
 type HedwigTopicManager struct {
@@ -13,6 +15,8 @@ type HedwigTopicManager struct {
 	topicMap     map[string]*hedwigTopicEntry // In memory map that holds the topics and partitions.
 	topicMapLock sync.RWMutex                 // Read-write lock to protect access to topicMap.
 	rootDir      string
+	disposer     *storage.StorageDisposer
+	disposedChan chan string
 }
 
 func NewTopicManager(rootDir string) *HedwigTopicManager {
@@ -20,6 +24,7 @@ func NewTopicManager(rootDir string) *HedwigTopicManager {
 	tm.rootDir = rootDir
 	tm.store = storage.NewTopicStore(tm.rootDir)
 	tm.topicMap = make(map[string]*hedwigTopicEntry)
+	tm.disposedChan = make(chan string, 200)
 	tm.initialize()
 	return tm
 }
@@ -99,10 +104,46 @@ func (tm *HedwigTopicManager) getTopicRootDirectory(topicName string) string {
 }
 
 /********************************************** TOPICS JANITOR ********************************************************/
-// janitor is a long running background goroutine that checks which topics have been marked for removal and
-// periodically clears all the partitions of that topic from the underlying storage.
+// janitor is a long running background goroutine that periodically checks which topics have been marked for removal and
+// removes those topics from the underlying storage.
 func (tm *HedwigTopicManager) janitor() {
+	disposeTicker := time.NewTicker(60 * time.Second)
+	for {
+		select {
+		case <-disposeTicker.C:
+			tm.disposeTopics()
+		case topicName := <-tm.disposedChan:
+			// The topic was disposed. Remove it from the store.
+			serr := tm.store.RemoveTopic(topicName)
+			if serr != nil {
+				glog.Fatalf("Unable to remove topic from topic store due to err: %s", serr.Error())
+			}
+		}
+	}
+}
 
+func (tm *HedwigTopicManager) disposeTopics() {
+	topics, err := tm.store.GetAllTopics()
+	if err != nil {
+		glog.Fatalf("Unable to fetch all topics from topic store due to err: %s", err.Error())
+	}
+	for _, topic := range topics {
+		if topic.ToRemove {
+			ds := storage.DefaultDisposer()
+			ds.Dispose(tm.getTopicRootDirectory(topic.Name), tm.createDisposeCb(topic.Name))
+		}
+	}
+}
+
+func (tm *HedwigTopicManager) createDisposeCb(topicName string) func(error) {
+	cb := func(err error) {
+		if err != nil {
+			return
+		}
+		glog.Infof("Topic: %s has been successfully disposed", topicName)
+		tm.disposedChan <- topicName
+	}
+	return cb
 }
 
 type hedwigTopicEntry struct {
