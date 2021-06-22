@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
@@ -89,22 +88,20 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 	defer seg.segLock.RUnlock()
 
 	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable {
-		return errors.New(fmt.Sprintf("segment store: %s is closed/expired/immutable", seg.logStr))
+		return ErrSegmentClosed
 	}
 
 	keys := seg.generateKeys(seg.nextOffSet, uint64(len(values)))
 	wb := seg.ddb.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
-			return NewStoreError(
-				fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
-				SegmentErr)
+			glog.Errorf("Unable to perform batch write to segment due to err: %s", err.Error())
+			return ErrGenericSegment
 		}
 	}
 	if err := wb.Flush(); err != nil {
-		return NewStoreError(
-			fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
-			SegmentErr)
+		glog.Errorf("Unable to flush after batch write to segment due to err: %s", err.Error())
+		return ErrGenericSegment
 	}
 	seg.nextOffSet = seg.nextOffSet + uint64(len(values))
 	return nil
@@ -117,9 +114,9 @@ func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 	defer seg.segLock.RUnlock()
 
 	if seg.closed || seg.metadata.Expired {
-		err := errors.New(fmt.Sprintf("segment: %s is closed/expired", seg.logStr))
+		glog.Errorf("Segment: %s is already closed", seg.logStr)
 		for ii := 0; ii < int(startOffset+numMessages); ii++ {
-			errs = append(errs, err)
+			errs = append(errs, ErrSegmentClosed)
 		}
 		return
 	}
@@ -138,13 +135,17 @@ func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [
 		for _, key := range keys {
 			item, err := txn.Get(key)
 			if err != nil {
-				errs = append(errs, err)
+				glog.Errorf("Unable to get key: %v from segment: %s due to err: %s",
+					key, seg.logStr, err.Error())
+				errs = append(errs, ErrGenericSegment)
 				values = append(values, nil)
 				continue
 			}
 			tmpValue, err := item.ValueCopy(nil)
 			if err != nil {
-				errs = append(errs, err)
+				glog.Errorf("Unable to parse value for key: %v on segment: %s due to err: %s",
+					key, seg.logStr, err.Error())
+				errs = append(errs, ErrGenericSegment)
 				values = append(values, nil)
 				continue
 			}

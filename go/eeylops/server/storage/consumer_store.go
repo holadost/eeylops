@@ -2,7 +2,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"fmt"
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/golang/glog"
@@ -55,21 +54,18 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, p
 	key := generateConsumerKey(consumerID, topicName, partitionID)
 	_, err := cs.kvStore.Get(key)
 	if err != nil {
-		serr := err.(*StoreError)
-		if serr.ErrorCode() != KVStoreKeyNotFoundErr {
-			return NewStoreError(
-				fmt.Sprintf("unable to register consumer due to err: %s", err.Error()),
-				ConsumerStoreErr)
+		if err != ErrKVStoreKeyNotFound {
+			glog.Errorf("Unable to register consumer due to err: %s", err.Error())
+			return ErrConsumerStoreCommit
 		}
 		err = cs.kvStore.Put(key, []byte("nil"))
 		if err != nil {
-			return NewStoreError(
-				fmt.Sprintf("unable to register consumer due to err: %s", err.Error()),
-				ConsumerStoreErr)
+			glog.Errorf("Unable to register consumer in KV store due to err: %s", err.Error())
+			return ErrConsumerStoreCommit
 		}
 	}
 	// The consumer is already registered.
-	glog.V(0).Infof("The consumer: %s for topic: %s and partition: %d was already registered "+
+	glog.Infof("The consumer: %s for topic: %s and partition: %d was already registered "+
 		"Avoiding re-registering", consumerID, topicName, partitionID)
 	return nil
 }
@@ -80,18 +76,14 @@ func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID
 	if err != nil {
 		glog.Errorf("Attempting to commit an offset even though consumer: %s is not registered for "+
 			"topic: %s, partition: %d", consumerID, topicName, partitionID)
-		return NewStoreError(
-			fmt.Sprintf("unable to commit due to err: %s", err.Error()),
-			ConsumerStoreErr)
+		return ErrConsumerStoreCommit
 	}
 	val := make([]byte, 8)
 	binary.BigEndian.PutUint64(val, offsetNum)
 	err = cs.kvStore.Put(key, val)
 	if err != nil {
 		glog.Errorf("Unable to commit an offset due to err: %s", err.Error())
-		return NewStoreError(
-			fmt.Sprintf("unable to commit due to err: %s", err.Error()),
-			ConsumerStoreErr)
+		return ErrConsumerStoreCommit
 	}
 	return nil
 }
@@ -102,9 +94,7 @@ func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicName string, p
 	if err != nil {
 		glog.Errorf("Did not find any offset committed by consumer: %s for topic: %s and partition: %d",
 			consumerID, topicName, partitionID)
-		return 0, NewStoreError(
-			fmt.Sprintf("unable to get last committed offset due to err: %s", err.Error()),
-			ConsumerStoreErr)
+		return 0, ErrConsumerStoreFetch
 	}
 	lastCommitted := binary.BigEndian.Uint64(val)
 	return lastCommitted, nil

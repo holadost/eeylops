@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"errors"
 	"flag"
 	"github.com/golang/glog"
 	"io/ioutil"
@@ -31,6 +30,7 @@ var (
 
 type Partition struct {
 	partitionID       int           // Partition ID.
+	topicNames        string        // Name of the topic
 	segments          []Segment     // List of segments in the partition.
 	rootDir           string        // Root directory of the partition.
 	gcPeriod          time.Duration // GC period in seconds.
@@ -104,13 +104,13 @@ func (p *Partition) Append(values [][]byte) error {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	if p.closed {
-		return errors.New("partition is closed")
+		glog.Fatalf("Attempting to access the partition: %d after it was closed", p.partitionID)
 	}
 	seg := p.getLiveSegment()
 	err := seg.Append(values)
 	if err != nil {
-		// TODO: Format this error.
-		return err
+		glog.Errorf("Unable to append entries to partition: %d due to err: %s", p.partitionID, err.Error())
+		return ErrPartitionAppend
 	}
 	return nil
 }
@@ -120,7 +120,7 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	if p.closed {
-		return nil, nil
+		glog.Fatalf("Attempting to access the partition: %d after it was closed", p.partitionID)
 	}
 	endOffset := startOffset + numMessages - 1
 
@@ -143,7 +143,11 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 			}
 			scanSizeBytes += int64(len(val))
 			values = append(values, val)
-			errs = append(errs, tmpErrs[ii])
+			if tmpErrs[ii] != nil {
+				errs = append(errs, ErrPartitionScan)
+			} else {
+				errs = append(errs, nil)
+			}
 		}
 		return
 	}
@@ -165,7 +169,6 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 		}
 		partialValues, partialErrs := seg.Scan(nextStartOffset, numPendingMsgs)
 		numPendingMsgs -= uint64(len(partialValues))
-		glog.V(1).Infof("Next start offset: %d, num pending messages: %d", nextStartOffset, numPendingMsgs)
 		for jj, val := range partialValues {
 			// Ensure that the batch size remains smaller than the max scan size.
 			if int64(len(val))+scanSizeBytes >= *maxScanSizeBytes {
@@ -175,7 +178,12 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 
 			// Merge all partial values into a single list.
 			values = append(values, val)
-			errs = append(errs, partialErrs[jj])
+			if partialErrs[jj] != nil {
+				errs = append(errs, ErrPartitionScan)
+			} else {
+				errs = append(errs, nil)
+			}
+
 		}
 	}
 	return
@@ -184,7 +192,7 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 // Snapshot the partition.
 func (p *Partition) Snapshot() error {
 	if p.closed {
-		return errors.New("partition is closed")
+		glog.Fatalf("Attempting to access the partition: %d after it was closed", p.partitionID)
 	}
 	return nil
 }
@@ -201,7 +209,7 @@ func (p *Partition) Close() {
 		meta := seg.GetMetadata()
 		err := seg.Close()
 		if err != nil {
-			glog.Errorf("Failed to close segment: %d due to err: %s", meta.ID, err.Error())
+			glog.Fatalf("Failed to close segment: %d due to err: %s", meta.ID, err.Error())
 		}
 	}
 	p.closed = true

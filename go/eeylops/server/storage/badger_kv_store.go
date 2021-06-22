@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
 	"os"
@@ -50,7 +49,7 @@ func (kvStore *BadgerKVStore) GetDataDir() string {
 func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
 	var val []byte
 	if kvStore.closed {
-		return val, NewStoreError("kv store is closed", KVStoreErr)
+		return val, ErrKVStoreClosed
 	}
 	err := kvStore.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(key)
@@ -65,7 +64,9 @@ func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
 	})
 	if err != nil {
 		if err == badger.ErrKeyNotFound {
-			return val, NewStoreError("key not found", KVStoreKeyNotFoundErr)
+			return val, ErrKVStoreKeyNotFound
+		} else {
+			return val, ErrKVStoreGeneric
 		}
 	}
 	return val, err
@@ -83,16 +84,16 @@ func (kvStore *BadgerKVStore) GetS(key string) (string, error) {
 // Put puts a key value pair in the DB. If the key already exists, it would be updated.
 func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
 	if kvStore.closed {
-		return fmt.Errorf("kv store is closed")
+		glog.Errorf("KV store is closed")
+		return ErrKVStoreClosed
 	}
 	err := kvStore.db.Update(func(txn *badger.Txn) error {
 		err := txn.Set(key, value)
 		return err
 	})
 	if err != nil {
-		return NewStoreError(
-			fmt.Sprintf("unable to put key due to err: %s", err.Error()),
-			KVStoreKeyNotFoundErr)
+		glog.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
+		return ErrKVStoreGeneric
 	}
 	return nil
 }
@@ -163,12 +164,10 @@ func (kvStore *BadgerKVStore) ScanS(startKey string, numValues int) (keys []stri
 // MultiGet gets the values associated with multiple keys.
 func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []error) {
 	if kvStore.closed {
-		err := NewStoreError(
-			fmt.Sprintf("kv store is closed"),
-			KVStoreErr)
+		glog.Errorf("KV store is closed")
 		for ii := 0; ii < len(keys); ii++ {
 			values = append(values, []byte{})
-			errs = append(errs, err)
+			errs = append(errs, ErrKVStoreClosed)
 		}
 		return
 	}
@@ -177,11 +176,10 @@ func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []e
 			item, err := txn.Get(key)
 			if err != nil {
 				if err == badger.ErrKeyNotFound {
-					errs = append(errs, NewStoreError("key not found", KVStoreKeyNotFoundErr))
+					errs = append(errs, ErrKVStoreKeyNotFound)
 				} else {
-					errs = append(
-						errs,
-						NewStoreError(fmt.Sprintf("unable to get key due to err: %s", err.Error()), KVStoreErr))
+					glog.Errorf("Unable to get key: %v due to err: %s", key, err.Error())
+					errs = append(errs, ErrKVStoreGeneric)
 				}
 				errs = append(errs, err)
 				values = append(values, nil)
@@ -189,9 +187,8 @@ func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []e
 			}
 			tmpValue, err := item.ValueCopy(nil)
 			if err != nil {
-				errs = append(
-					errs,
-					NewStoreError(fmt.Sprintf("unable to get key due to err: %s", err.Error()), KVStoreErr))
+				glog.Errorf("Unable to parse value for key: %v due to err: %s", key, err.Error())
+				errs = append(errs, ErrKVStoreGeneric)
 				values = append(values, nil)
 				continue
 			}
@@ -230,22 +227,19 @@ func (kvStore *BadgerKVStore) MultiGetS(keys []string) ([]string, []error) {
 // BatchPut sets/updates multiple key value pairs in the DB.
 func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
 	if kvStore.closed {
-		return NewStoreError(
-			fmt.Sprintf("kv store is closed"),
-			KVStoreErr)
+		glog.Errorf("KV store is already closed")
+		return ErrKVStoreClosed
 	}
 	wb := kvStore.db.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
-			return NewStoreError(
-				fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
-				KVStoreErr)
+			glog.Errorf("Unable to perform batch put due to err: %s", err.Error())
+			return ErrKVStoreGeneric
 		}
 	}
 	if err := wb.Flush(); err != nil {
-		return NewStoreError(
-			fmt.Sprintf("unable to put batch due to err: %s", err.Error()),
-			KVStoreErr)
+		glog.Errorf("Unable to perform flush after batch put due to err: %s", err.Error())
+		return ErrKVStoreGeneric
 	}
 	return nil
 }

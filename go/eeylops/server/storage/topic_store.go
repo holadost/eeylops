@@ -3,7 +3,6 @@ package storage
 import (
 	"eeylops/server/base"
 	"encoding/json"
-	"fmt"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/golang/glog"
@@ -54,7 +53,8 @@ func (ts *TopicStore) AddTopic(topic base.Topic) error {
 	val := ts.marshalTopic(&topic)
 	err := ts.kvStore.Put(key, val)
 	if err != nil {
-		return NewStoreError(fmt.Sprintf("unable to add topic due to err: %s", err.Error()), TopicStoreErr)
+		glog.Errorf("Unable to add topic: %s due to err: %s", topic.Name, err.Error())
+		return ErrTopicStore
 	}
 	return nil
 }
@@ -65,14 +65,16 @@ func (ts *TopicStore) MarkTopicForRemoval(topicName string) error {
 	topic, err := ts.GetTopic(topicName)
 	if err != nil {
 		glog.Errorf("Unable to fetch topic info to mark it for removal due to err: %s", err.Error())
-		return NewStoreError(fmt.Sprintf("unable to find topic: %s to mark it for removal", topicName),
-			TopicStoreErr)
+		if err == ErrKVStoreKeyNotFound {
+			return ErrTopicNotFound
+		}
+		return ErrTopicStore
 	}
 	topic.ToRemove = true
 	val := ts.marshalTopic(&topic)
 	if err = ts.kvStore.Put(key, val); err != nil {
-		return NewStoreError(fmt.Sprintf("unable to mark topic for removal due to err: %s", err.Error()),
-			TopicStoreErr)
+		glog.Errorf("Unable to mark topic: %s for removal in store due to err: %s", topic.Name, err.Error())
+		return ErrTopicStore
 	}
 	return nil
 }
@@ -83,22 +85,20 @@ func (ts *TopicStore) RemoveTopic(topicName string) error {
 	topic, err := ts.GetTopic(topicName)
 	if err != nil {
 		glog.Errorf("Unable to fetch topic info to mark it for removal due to err: %s", err.Error())
-		return NewStoreError(fmt.Sprintf("unable to find topic: %s to mark it for removal", topicName),
-			TopicStoreErr)
+		if err == ErrKVStoreKeyNotFound {
+			return ErrTopicNotFound
+		}
+		return ErrTopicStore
 	}
 	if !topic.ToRemove {
 		glog.Errorf("Cannot remove topic: %s as it was not previously marked for removal. Topic: %s",
 			topicName, topic.ToString())
-		return NewStoreError(
-			fmt.Sprintf("unable to remove topic: %s as it is not marked for removal", topicName),
-			TopicStoreErr)
+		return ErrTopicStore
 	}
 	err = ts.kvStore.Delete(key)
 	if err != nil {
 		glog.Errorf("Unable to delete topic: %s due to err: %s", topicName, err.Error())
-		return NewStoreError(
-			fmt.Sprintf("unable to remove topic: %s due to err: %s", topicName, err.Error()),
-			TopicStoreErr)
+		return ErrTopicStore
 	}
 	return nil
 }
@@ -109,9 +109,10 @@ func (ts *TopicStore) GetTopic(topicName string) (base.Topic, error) {
 	topicVal, err := ts.kvStore.Get(key)
 	if err != nil {
 		glog.Errorf("Unable to get topic: %s due to err: %s", topicName, err.Error())
-		return topic, NewStoreError(
-			fmt.Sprintf("unable to get topic: %s due to err: %s", topicName, err.Error()),
-			TopicStoreErr)
+		if err == ErrKVStoreKeyNotFound {
+			return topic, ErrTopicNotFound
+		}
+		return topic, ErrTopicStore
 	}
 	topic = ts.unmarshalTopic(topicVal)
 	return topic, nil
@@ -121,7 +122,7 @@ func (ts *TopicStore) GetAllTopics() ([]base.Topic, error) {
 	_, values, _, err := ts.kvStore.Scan(nil, -1)
 	if err != nil {
 		glog.Errorf("Unable to get all topics in topic store due to err: %s", err.Error())
-		return nil, err
+		return nil, ErrTopicStore
 	}
 	var topics []base.Topic
 	for ii := 0; ii < len(values); ii++ {
