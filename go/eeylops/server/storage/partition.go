@@ -21,7 +21,6 @@ var (
 		"Expired segment monitor interval seconds")
 	liveSegmentMonitorIntervalSecs = flag.Int("partition_live_seg_monitor_interval_seconds", 5,
 		"Live segment monitor interval seconds")
-	numGCWorkers        = flag.Int("partition_num_gc_workers", 2, "Number of garbage collection workers")
 	numRecordsInSegment = flag.Int64("partition_num_records_per_segment_threshold", KNumSegmentRecordsThreshold,
 		"Number of records in a segment threshold")
 	maxScanSizeBytes = flag.Int64("partition_max_scan_size_bytes", KMaxScanSizeBytes,
