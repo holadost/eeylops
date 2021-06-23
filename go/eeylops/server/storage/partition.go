@@ -29,17 +29,17 @@ var (
 )
 
 type Partition struct {
-	partitionID       int           // Partition ID.
-	topicNames        string        // Name of the topic
-	segments          []Segment     // List of segments in the partition.
-	rootDir           string        // Root directory of the partition.
-	gcPeriod          time.Duration // GC period in seconds.
-	partitionCfgLock  sync.RWMutex  // Lock on the partition configuration.
-	backgroundJobDone chan bool     // Notification to ask background goroutines to exit.
-	snapshotChan      chan bool     // Snapshot channel
-	gcChan            chan int      // This channel is used by partitionManager to let the GC routines know which
-	// segments can be reclaimed.
-	closed bool // Flag to indicate whether the partition is open/closed.
+	partitionID       int              // Partition ID.
+	topicNames        string           // Name of the topic
+	segments          []Segment        // List of segments in the partition.
+	rootDir           string           // Root directory of the partition.
+	gcPeriod          time.Duration    // GC period in seconds.
+	partitionCfgLock  sync.RWMutex     // Lock on the partition configuration.
+	backgroundJobDone chan bool        // Notification to ask background goroutines to exit.
+	snapshotChan      chan bool        // Snapshot channel
+	disposer          *StorageDisposer // Disposer.
+	disposedChan      chan int         // Callback channel after segments have been disposed.
+	closed            bool             // Flag to indicate whether the partition is open/closed.
 }
 
 func NewPartition(id int, rootDir string, gcPeriodSecs int) *Partition {
@@ -54,7 +54,8 @@ func NewPartition(id int, rootDir string, gcPeriodSecs int) *Partition {
 func (p *Partition) initialize() {
 	p.backgroundJobDone = make(chan bool)
 	p.snapshotChan = make(chan bool)
-	p.gcChan = make(chan int, 128)
+	p.disposedChan = make(chan int, 128)
+	p.disposer = DefaultDisposer()
 	glog.Infof("Initializing partition: %d", p.partitionID)
 	err := os.MkdirAll(p.getSegmentRootDirectory(), 0774)
 	if err != nil {
@@ -184,7 +185,6 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 			} else {
 				errs = append(errs, nil)
 			}
-
 		}
 	}
 	return
@@ -305,7 +305,6 @@ func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) boo
 //     3. Checks the snapshotChan and saves the partition configuration when a snapshot is requested.
 func (p *Partition) partitionManager() {
 	glog.Infof("Partition manager for partition ID: %d is now running", p.partitionID)
-	p.startGarbageCollectors()
 	liveSegTicker := time.NewTicker(time.Duration(*liveSegmentMonitorIntervalSecs) * time.Second)
 	expTicker := time.NewTicker(time.Duration(*expiredSegmentMonitorIntervalSecs) * time.Second)
 	for {
@@ -403,28 +402,6 @@ func (p *Partition) maybeReclaimExpiredSegments() {
 // snapshot saves the current partition configuration.
 func (p *Partition) snapshot() {
 
-}
-
-// startGarbageCollectors starts the garbage collectors.
-func (p *Partition) startGarbageCollectors() {
-	glog.Infof("Garbage collectors(%d) have started for partition ID: %d", *numGCWorkers, p.partitionID)
-	gc := func() {
-		for {
-			select {
-			case segmentID := <-p.gcChan:
-				segmentDir := p.getSegmentDirectory(segmentID)
-				err := os.RemoveAll(segmentDir)
-				if err != nil {
-					glog.Fatalf("Unable to delete segment directory due to err: %v", err)
-				}
-			case <-p.backgroundJobDone:
-				return
-			}
-		}
-	}
-	for ii := 0; ii < *numGCWorkers; ii++ {
-		go gc()
-	}
 }
 
 /************************************* Helper methods ************************************************/
