@@ -4,24 +4,37 @@ import (
 	"eeylops/server/base"
 	"eeylops/server/storage"
 	"github.com/golang/glog"
+	"os"
 	"path"
 	"sync"
 	"time"
 )
 
 type TopicController struct {
-	store        *storage.TopicStore          // Backing store for topics registered with eeylops.
-	topicMap     map[string]*hedwigTopicEntry // In memory map that holds the topics and partitions.
-	topicMapLock sync.RWMutex                 // Read-write lock to protect access to topicMap.
-	rootDir      string
-	disposer     *storage.StorageDisposer
-	disposedChan chan string
+	topicStore    *storage.TopicStore          // Backing topicStore for topics registered with eeylops.
+	consumerStore *storage.ConsumerStore       // Consumer store.
+	topicMap      map[string]*hedwigTopicEntry // In memory map that holds the topics and partitions.
+	topicMapLock  sync.RWMutex                 // Read-write lock to protect access to topicMap.
+	rootDir       string                       // Root directory for this topic controller.
+	controllerID  string                       // Controller ID.
+	disposer      *storage.StorageDisposer     // Disposer to help remove deleted topics.
+	disposedChan  chan string                  // Callback channel after disposer has removed topics.
 }
 
-func NewTopicController(rootDir string) *TopicController {
+type TopicControllerOpts struct {
+	// The root directory for this topic controller.
+	RootDirectory string // Root directory for the topic controller.
+
+	// The controller ID. This is the same controller ID that we use for Raft as well. A topic controller is tied
+	// to a single raft controller.
+	ControllerID string // Controller ID.
+}
+
+func NewTopicController(opts TopicControllerOpts) *TopicController {
 	tc := &TopicController{}
-	tc.rootDir = rootDir
-	tc.store = storage.NewTopicStore(tc.rootDir)
+	tc.rootDir = opts.RootDirectory
+	tc.topicStore = storage.NewTopicStore(tc.rootDir)
+	tc.consumerStore = storage.NewConsumerStore(tc.rootDir)
 	tc.topicMap = make(map[string]*hedwigTopicEntry)
 	tc.disposedChan = make(chan string, 200)
 	tc.initialize()
@@ -29,8 +42,35 @@ func NewTopicController(rootDir string) *TopicController {
 }
 
 func (tc *TopicController) initialize() {
-	// Read all the topics from the topic store and check if the topic directories
+	// Read all the topics from the topic topicStore and check if the topic directories
 	// exist under the given directory.
+	glog.Infof("Initializing topic controller. Controller ID: %s", tc.controllerID)
+	allTopics, err := tc.topicStore.GetAllTopics()
+	if err != nil {
+		glog.Fatalf("Unable to get all topics in the topic topicStore due to err: %s", err.Error())
+	}
+	for _, topic := range allTopics {
+		if topic.ToRemove {
+			glog.Infof("Skipping initializing topic: %s as it has been marked for removal", topic.Name)
+			continue
+		}
+		glog.Infof("Initializing topic: %s for controller: %s", topic.Name, tc.controllerID)
+		topicDir := tc.getTopicRootDirectory(topic.Name)
+		if err := os.MkdirAll(topicDir, 0774); err != nil {
+			glog.Fatalf("Unable to create topic directory for topic: %s due to err: %s",
+				topic.Name, err.Error())
+			return
+		}
+		pMap := make(map[int]*storage.Partition)
+		for _, ii := range topic.PartitionIDs {
+			pMap[ii] = storage.NewPartition(ii, topicDir, topic.TTLSeconds)
+		}
+		entry := &hedwigTopicEntry{
+			topic:        &topic,
+			partitionMap: pMap,
+		}
+		tc.topicMap[topic.Name] = entry
+	}
 }
 
 func (tc *TopicController) GetTopic(topicName string) (base.Topic, error) {
@@ -52,9 +92,9 @@ func (tc *TopicController) AddTopic(topic base.Topic) error {
 		glog.Errorf("Topic: %s already exists", topic.Name)
 		return ErrTopicExists
 	}
-	err := tc.store.AddTopic(topic)
+	err := tc.topicStore.AddTopic(topic)
 	if err != nil {
-		glog.Errorf("Unable to add topic to topic: %s store due to err: %s", topic.Name, err.Error())
+		glog.Errorf("Unable to add topic to topic: %s topicStore due to err: %s", topic.Name, err.Error())
 		return ErrInstanceTopicManager
 	}
 	partMap := make(map[int]*storage.Partition)
@@ -78,7 +118,7 @@ func (tc *TopicController) RemoveTopic(topicName string) error {
 		glog.Errorf("Topic: %s does not exist. Cannot remove topic", topicName)
 		return ErrTopicNotFound
 	}
-	if err := tc.store.MarkTopicForRemoval(topicName); err != nil {
+	if err := tc.topicStore.MarkTopicForRemoval(topicName); err != nil {
 		glog.Errorf("Unable to mark topic: %s for removal due to err: %s", topicName, err.Error())
 		return ErrInstanceTopicManager
 	}
@@ -116,19 +156,19 @@ func (tc *TopicController) janitor() {
 		case <-disposeTicker.C:
 			tc.disposeTopics()
 		case topicName := <-tc.disposedChan:
-			// The topic was disposed. Remove it from the store.
-			serr := tc.store.RemoveTopic(topicName)
+			// The topic was disposed. Remove it from the topicStore.
+			serr := tc.topicStore.RemoveTopic(topicName)
 			if serr != nil {
-				glog.Fatalf("Unable to remove topic from topic store due to err: %s", serr.Error())
+				glog.Fatalf("Unable to remove topic from topic topicStore due to err: %s", serr.Error())
 			}
 		}
 	}
 }
 
 func (tc *TopicController) disposeTopics() {
-	topics, err := tc.store.GetAllTopics()
+	topics, err := tc.topicStore.GetAllTopics()
 	if err != nil {
-		glog.Fatalf("Unable to fetch all topics from topic store due to err: %s", err.Error())
+		glog.Fatalf("Unable to fetch all topics from topic topicStore due to err: %s", err.Error())
 	}
 	for _, topic := range topics {
 		if topic.ToRemove {
