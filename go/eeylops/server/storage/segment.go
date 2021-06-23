@@ -15,8 +15,6 @@ import (
 )
 
 type Segment interface {
-	// Initialize the segment.
-	Initialize()
 	// Close the segment.
 	Close() error
 	// Append values to the segment.

@@ -34,12 +34,12 @@ func NewBadgerSegment(rootDir string) (*BadgerSegment, error) {
 	}
 	seg := new(BadgerSegment)
 	seg.rootDir = rootDir
-	seg.Initialize()
+	seg.initialize()
 	return seg, nil
 }
 
 // Initialize implements the Segment interface. It initializes the segment.
-func (seg *BadgerSegment) Initialize() {
+func (seg *BadgerSegment) initialize() {
 	glog.Infof("Initializing badger segment located at: %s", seg.rootDir)
 	// Initialize metadata ddb.
 	seg.mdb = newSegmentMetadataDB(seg.rootDir)

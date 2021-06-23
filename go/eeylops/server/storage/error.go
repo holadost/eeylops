@@ -26,6 +26,10 @@ var (
 	// ErrPartitionScan is returned if there was an error while scanning entries from the partition.
 	ErrPartitionScan = errors.New("ErrPartitionScan: partition scan error")
 
+	// ErrPartitionClosed is returned if the partition was accessed after it was closed. A partition is closed
+	// iff the topic was removed.
+	ErrPartitionClosed = errors.New("ErrPartitionClosed: partition closed")
+
 	// ErrConsumerStore is returned when we have unexpected consumer store error.
 	// ErrConsumerStore = errors.New("ErrConsumerStore: consumer store error")
 

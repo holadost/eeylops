@@ -105,7 +105,7 @@ func (p *Partition) Append(values [][]byte) error {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	if p.closed {
-		glog.Fatalf("Attempting to access the partition: %d after it was closed", p.partitionID)
+		return ErrPartitionClosed
 	}
 	seg := p.getLiveSegment()
 	err := seg.Append(values)
@@ -121,7 +121,7 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	if p.closed {
-		glog.Fatalf("Attempting to access the partition: %d after it was closed", p.partitionID)
+		return nil, []error{ErrPartitionClosed}
 	}
 	endOffset := startOffset + numMessages - 1
 
@@ -192,7 +192,7 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 // Snapshot the partition.
 func (p *Partition) Snapshot() error {
 	if p.closed {
-		glog.Fatalf("Attempting to access the partition: %d after it was closed", p.partitionID)
+		return ErrPartitionClosed
 	}
 	return nil
 }

@@ -227,7 +227,3 @@ func TestPartitionScan(t *testing.T) {
 	}
 	glog.Infof("TestPartitionScan finished successfully")
 }
-
-func TestStress(t *testing.T) {
-
-}
