@@ -37,8 +37,9 @@ type Partition struct {
 	partitionCfgLock  sync.RWMutex  // Lock on the partition configuration.
 	backgroundJobDone chan bool     // Notification to ask background goroutines to exit.
 	snapshotChan      chan bool     // Snapshot channel
-	gcChan            chan int      // This channel is used by curator to let the GC routines know which segments can be reclaimed.
-	closed            bool          // Flag to indicate whether the partition is open/closed.
+	gcChan            chan int      // This channel is used by partitionManager to let the GC routines know which
+	// segments can be reclaimed.
+	closed bool // Flag to indicate whether the partition is open/closed.
 }
 
 func NewPartition(id int, rootDir string, gcPeriodSecs int) *Partition {
@@ -95,8 +96,8 @@ func (p *Partition) initialize() {
 	}
 	p.closed = false
 
-	// Start curator.
-	go p.curator()
+	// Start partition manager.
+	go p.partitionManager()
 }
 
 // Append records to the partition.
@@ -297,13 +298,13 @@ func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) boo
 	return false
 }
 
-/************************************************ CURATOR *****************************************************/
-// curator is a long running background routine that performs the following operations:
+/******************************************* PARTITION MANAGER ************************************************/
+// partitionManager is a long running background routine that performs the following operations:
 //     1. Checks the current live segment and if it has hit a threshold, it creates a new segment.
 //     2. Checks the segments that have expired and marks them for GC. GC is handled by another background goroutine.
 //     3. Checks the snapshotChan and saves the partition configuration when a snapshot is requested.
-func (p *Partition) curator() {
-	glog.Infof("Curator for partition ID: %d is now running", p.partitionID)
+func (p *Partition) partitionManager() {
+	glog.Infof("Partition manager for partition ID: %d is now running", p.partitionID)
 	p.startGarbageCollectors()
 	liveSegTicker := time.NewTicker(time.Duration(*liveSegmentMonitorIntervalSecs) * time.Second)
 	expTicker := time.NewTicker(time.Duration(*expiredSegmentMonitorIntervalSecs) * time.Second)
