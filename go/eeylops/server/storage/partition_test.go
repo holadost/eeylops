@@ -46,7 +46,17 @@ func loadDataBasic(p *Partition, numSegments int, numValuesPerSegment int) {
 
 func TestPartitionInitialize(t *testing.T) {
 	testMarker("TestPartitionInitialize")
-	p := NewPartition(0, "/tmp/eeylops/TestPartitionInitialize", 86400*7)
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  "/tmp/eeylops/TestPartitionInitialize",
+		ExpiredSegmentPollIntervalSecs: 0,
+		LiveSegmentPollIntervalSecs:    0,
+		NumRecordsPerSegmentThreshold:  0,
+		MaxScanSizeBytes:               0,
+		TTLSeconds:                     86400 * 7,
+	}
+	p := NewPartition(opts)
 	glog.Infof("Partition ID: %d", p.partitionID)
 	p.Close()
 	_ = os.RemoveAll("/tmp/eeylops/TestPartitionInitialize")
@@ -57,7 +67,17 @@ func TestPartitionReInitialize(t *testing.T) {
 	testMarker("TestPartitionReInitialize")
 	for ii := 0; ii < 5; ii++ {
 		glog.Infof("\n\n\nIteration: %d", ii)
-		p := NewPartition(0, "/tmp/eeylops/TestPartitionReInitialize", 86400*7)
+		opts := PartitionOpts{
+			TopicName:                      "topic1",
+			PartitionID:                    1,
+			RootDirectory:                  "/tmp/eeylops/TestPartitionReInitialize",
+			ExpiredSegmentPollIntervalSecs: 0,
+			LiveSegmentPollIntervalSecs:    0,
+			NumRecordsPerSegmentThreshold:  0,
+			MaxScanSizeBytes:               0,
+			TTLSeconds:                     86400 * 7,
+		}
+		p := NewPartition(opts)
 		glog.Infof("Partition ID: %d", p.partitionID)
 		p.Close()
 	}
@@ -69,7 +89,17 @@ func TestPartitionAppend(t *testing.T) {
 	testMarker("TestPartitionAppend")
 	testDir := "/tmp/eeylops/TestPartitionAppend"
 	defer func() { _ = os.RemoveAll(testDir) }()
-	p := NewPartition(0, testDir, 86400*7)
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 0,
+		LiveSegmentPollIntervalSecs:    0,
+		NumRecordsPerSegmentThreshold:  0,
+		MaxScanSizeBytes:               0,
+		TTLSeconds:                     86400 * 7,
+	}
+	p := NewPartition(opts)
 	loadDataBasic(p, 1, 100)
 	glog.Infof("TestPartitionAppend finished successfully")
 }
@@ -78,7 +108,17 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 	testMarker("TestPartitionNewSegmentCreation")
 	testDir := "/tmp/eeylops/TestPartitionNewSegmentCreation"
 	_ = os.RemoveAll(testDir)
-	p := NewPartition(0, testDir, 86400*7)
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 0,
+		LiveSegmentPollIntervalSecs:    0,
+		NumRecordsPerSegmentThreshold:  0,
+		MaxScanSizeBytes:               0,
+		TTLSeconds:                     86400 * 7,
+	}
+	p := NewPartition(opts)
 	loadDataBasic(p, 10, 100)
 	segs := p.getSegments(10, 50)
 	if segs == nil || len(segs) != 1 {
@@ -154,7 +194,17 @@ func TestPartitionScan(t *testing.T) {
 	testMarker("TestPartitionScan")
 	testDir := "/tmp/eeylops/TestPartitionScan"
 	_ = os.RemoveAll(testDir)
-	p := NewPartition(0, testDir, 86400*7)
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 0,
+		LiveSegmentPollIntervalSecs:    0,
+		NumRecordsPerSegmentThreshold:  0,
+		MaxScanSizeBytes:               0,
+		TTLSeconds:                     86400 * 7,
+	}
+	p := NewPartition(opts)
 	numSegs := 10
 	numValsPerSeg := 100
 	loadDataBasic(p, numSegs, numValsPerSeg)

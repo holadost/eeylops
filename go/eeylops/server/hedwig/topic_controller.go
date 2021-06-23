@@ -74,7 +74,13 @@ func (tc *TopicController) initialize() {
 		}
 		pMap := make(map[int]*storage.Partition)
 		for _, ii := range topic.PartitionIDs {
-			pMap[ii] = storage.NewPartition(ii, topicDir, topic.TTLSeconds)
+			opts := storage.PartitionOpts{
+				TopicName:     topic.Name,
+				PartitionID:   ii,
+				RootDirectory: topicDir,
+				TTLSeconds:    topic.TTLSeconds,
+			}
+			pMap[ii] = storage.NewPartition(opts)
 		}
 		entry := &topicEntry{
 			topic:        &topic,
@@ -114,7 +120,13 @@ func (tc *TopicController) AddTopic(topic base.Topic) error {
 	}
 	partMap := make(map[int]*storage.Partition)
 	for _, elem := range topic.PartitionIDs {
-		part := storage.NewPartition(elem, tc.getTopicRootDirectory(topic.Name), topic.TTLSeconds)
+		opts := storage.PartitionOpts{
+			TopicName:     topic.Name,
+			PartitionID:   elem,
+			RootDirectory: tc.getTopicRootDirectory(topic.Name),
+			TTLSeconds:    topic.TTLSeconds,
+		}
+		part := storage.NewPartition(opts)
 		partMap[elem] = part
 	}
 	entry := &topicEntry{

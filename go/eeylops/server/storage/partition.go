@@ -17,36 +17,130 @@ const KSegmentsDirectoryName = "segments"
 const KMaxScanSizeBytes = 15 * 1000000 // 15MB
 
 var (
-	expiredSegmentMonitorIntervalSecs = flag.Int("partition_exp_segment_monitor_interval_seconds", 600,
+	FlagExpiredSegmentMonitorIntervalSecs = flag.Int("partition_exp_segment_monitor_interval_seconds", 600,
 		"Expired segment monitor interval seconds")
-	liveSegmentMonitorIntervalSecs = flag.Int("partition_live_seg_monitor_interval_seconds", 5,
+	FlagLiveSegmentMonitorIntervalSecs = flag.Int("partition_live_seg_monitor_interval_seconds", 5,
 		"Live segment monitor interval seconds")
-	numRecordsInSegment = flag.Int64("partition_num_records_per_segment_threshold", KNumSegmentRecordsThreshold,
+	FlagNumRecordsInSegment = flag.Int("partition_num_records_per_segment_threshold", KNumSegmentRecordsThreshold,
 		"Number of records in a segment threshold")
-	maxScanSizeBytes = flag.Int64("partition_max_scan_size_bytes", KMaxScanSizeBytes,
+	FlagMaxScanSizeBytes = flag.Int("partition_max_scan_size_bytes", KMaxScanSizeBytes,
 		"Max scan size in bytes. Defaults to 16MB")
 )
 
 type Partition struct {
-	partitionID       int              // Partition ID.
-	topicNames        string           // Name of the topic
-	segments          []Segment        // List of segments in the partition.
-	rootDir           string           // Root directory of the partition.
-	gcPeriod          time.Duration    // GC period in seconds.
-	partitionCfgLock  sync.RWMutex     // Lock on the partition configuration.
-	backgroundJobDone chan bool        // Notification to ask background goroutines to exit.
-	snapshotChan      chan bool        // Snapshot channel
-	disposer          *StorageDisposer // Disposer.
-	disposedChan      chan int         // Callback channel after segments have been disposed.
-	closed            bool             // Flag to indicate whether the partition is open/closed.
+	partitionCfgLock               sync.RWMutex     // Lock on the partition configuration.
+	topicName                      string           // Name of the topic
+	partitionID                    int              // Partition ID.
+	rootDir                        string           // Root directory of the partition.
+	ttlSeconds                     int              // TTL seconds for every record.
+	expiredSegmentPollIntervalSecs time.Duration    // Expired segment poll interval seconds.
+	liveSegmentPollIntervalSecs    time.Duration    // Live segment poll interval seconds.
+	numRecordsPerSegment           int              // Number of records per segment.
+	maxScanSizeBytes               int              // Max scan size bytes.
+	segments                       []Segment        // List of segments in the partition.
+	backgroundJobDone              chan bool        // Notification to ask background goroutines to exit.
+	snapshotChan                   chan bool        // Snapshot channel
+	disposer                       *StorageDisposer // Disposer.
+	disposedChan                   chan int         // Callback channel after segments have been disposed.
+	closed                         bool             // Flag to indicate whether the partition is open/closed.
 }
 
-func NewPartition(id int, rootDir string, gcPeriodSecs int) *Partition {
+type PartitionOpts struct {
+	// Name of the topic. This is a compulsory parameter.
+	TopicName string
+
+	// The partition ID. This is a compulsory parameter.
+	PartitionID int
+
+	// Data directory where the partition data is stored. This is a compulsory parameter.
+	RootDirectory string
+
+	// The interval(in seconds) when segments are checked to see if they have expired and are disposed. This is an
+	// optional parameter.
+	ExpiredSegmentPollIntervalSecs int
+
+	// The interval(in seconds) where the live segment is monitored to check if it has crossed the
+	//NumRecordsPerSegmentThreshold. This is an optional parameter.
+	LiveSegmentPollIntervalSecs int
+
+	// The number of records per segment. This is an optional parameter.
+	NumRecordsPerSegmentThreshold int
+
+	// Maximum scan size in bytes. This is an optional parameter.
+	MaxScanSizeBytes int
+
+	// TTL seconds for every record. This is an optional parameter. Defaults to -1. If -1, the data is never
+	// reclaimed.
+	TTLSeconds int
+}
+
+func NewPartition(opts PartitionOpts) *Partition {
 	p := new(Partition)
-	p.partitionID = id
-	p.rootDir = rootDir
-	p.gcPeriod = time.Second * time.Duration(gcPeriodSecs)
+	p.topicName = opts.TopicName
+	if p.topicName == "" {
+		glog.Fatalf("A topic name must be provided when initializing a partition")
+	}
+	p.partitionID = opts.PartitionID
+	if p.partitionID <= 0 {
+		glog.Fatalf("Partition ID must be defined. Partition ID must be > 0")
+	}
+	p.rootDir = opts.RootDirectory
+	if p.rootDir == "" {
+		glog.Fatalf("A data directory must be specified for topic: %s, partition: %d",
+			p.topicName, p.partitionID)
+	}
+	if opts.TTLSeconds <= 0 {
+		glog.Infof("TTL seconds <= 0. Setting TTL to -1 instead for topic: %s, partition: %d",
+			p.topicName, p.partitionID)
+		p.ttlSeconds = -1
+	} else {
+		p.ttlSeconds = opts.TTLSeconds
+	}
+
+	if opts.ExpiredSegmentPollIntervalSecs <= 0 {
+		if *FlagExpiredSegmentMonitorIntervalSecs <= 0 {
+			glog.Fatalf("Expired segment monitor interval must be > 0")
+		}
+		p.expiredSegmentPollIntervalSecs = time.Duration(*FlagExpiredSegmentMonitorIntervalSecs) * time.Second
+	} else {
+		p.expiredSegmentPollIntervalSecs = time.Duration(opts.ExpiredSegmentPollIntervalSecs) * time.Second
+	}
+
+	if opts.LiveSegmentPollIntervalSecs == 0 {
+		if *FlagLiveSegmentMonitorIntervalSecs <= 0 {
+			glog.Fatalf("Live segment monitor interval must be > 0")
+		}
+		p.liveSegmentPollIntervalSecs = time.Duration(*FlagLiveSegmentMonitorIntervalSecs) * time.Second
+	} else {
+		p.liveSegmentPollIntervalSecs = time.Duration(opts.LiveSegmentPollIntervalSecs) * time.Second
+	}
+
+	if opts.NumRecordsPerSegmentThreshold <= 0 {
+		if *FlagNumRecordsInSegment <= 0 {
+			glog.Fatalf("Number of records in the segment must be > 0")
+		}
+		p.numRecordsPerSegment = *FlagNumRecordsInSegment
+	} else {
+		p.numRecordsPerSegment = opts.NumRecordsPerSegmentThreshold
+	}
+
+	if opts.MaxScanSizeBytes <= 0 {
+		if *FlagMaxScanSizeBytes <= 0 {
+			glog.Fatalf("Maximum scan size bytes must be > 0")
+		}
+		p.maxScanSizeBytes = *FlagMaxScanSizeBytes
+	} else {
+		p.maxScanSizeBytes = opts.MaxScanSizeBytes
+	}
+
 	p.initialize()
+	glog.Infof("Partition initialized. Partition Config:\n------------------------------------------------"+
+		"\nTopic Name: %s\nPartition ID: %d\nData Directory: %s\nTTL Seconds: %d"+
+		"\nNum Records Per Segment Threshold: %d\nMax Scan Size(bytes): %d"+
+		"\nExpired Segment Monitor Interval: %v\nLive Segment Monitor Interval: %v"+
+		"\n------------------------------------------------",
+		p.topicName, p.partitionID, p.rootDir, p.ttlSeconds, p.numRecordsPerSegment, p.maxScanSizeBytes,
+		p.expiredSegmentPollIntervalSecs, p.liveSegmentPollIntervalSecs)
 	return p
 }
 
@@ -130,7 +224,7 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 	if segs == nil || len(segs) == 0 {
 		return
 	}
-	var scanSizeBytes int64
+	var scanSizeBytes int
 	scanSizeBytes = 0
 
 	// All offsets are present in the same segment.
@@ -139,10 +233,10 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 		tmpVals, tmpErrs := segs[0].Scan(segStartOffset, numMessages)
 		for ii, val := range tmpVals {
 			// Ensure that the batch size remains smaller than the max scan size.
-			if int64(len(val))+scanSizeBytes >= *maxScanSizeBytes {
+			if (len(val) + scanSizeBytes) >= p.maxScanSizeBytes {
 				break
 			}
-			scanSizeBytes += int64(len(val))
+			scanSizeBytes += len(val)
 			values = append(values, val)
 			if tmpErrs[ii] != nil {
 				errs = append(errs, ErrPartitionScan)
@@ -172,10 +266,10 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 		numPendingMsgs -= uint64(len(partialValues))
 		for jj, val := range partialValues {
 			// Ensure that the batch size remains smaller than the max scan size.
-			if int64(len(val))+scanSizeBytes >= *maxScanSizeBytes {
+			if (len(val) + scanSizeBytes) >= p.maxScanSizeBytes {
 				return
 			}
-			scanSizeBytes += int64(len(val))
+			scanSizeBytes += len(val)
 
 			// Merge all partial values into a single list.
 			values = append(values, val)
@@ -307,8 +401,8 @@ func (p *Partition) offsetInSegment(offset uint64, seg Segment) bool {
 //     3. Checks the snapshotChan and saves the partition configuration when a snapshot is requested.
 func (p *Partition) partitionManager() {
 	glog.Infof("Partition manager for partition ID: %d is now running", p.partitionID)
-	liveSegTicker := time.NewTicker(time.Duration(*liveSegmentMonitorIntervalSecs) * time.Second)
-	expTicker := time.NewTicker(time.Duration(*expiredSegmentMonitorIntervalSecs) * time.Second)
+	liveSegTicker := time.NewTicker(p.liveSegmentPollIntervalSecs)
+	expTicker := time.NewTicker(p.expiredSegmentPollIntervalSecs)
 	for {
 		select {
 		case <-p.backgroundJobDone:
@@ -336,7 +430,7 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	defer p.partitionCfgLock.RUnlock()
 	seg := p.segments[len(p.segments)-1]
 	metadata := seg.GetMetadata()
-	if (metadata.EndOffset - metadata.StartOffset) > uint64(*numRecordsInSegment) {
+	if (metadata.EndOffset - metadata.StartOffset) > uint64(p.numRecordsPerSegment) {
 		return true
 	}
 	return false
