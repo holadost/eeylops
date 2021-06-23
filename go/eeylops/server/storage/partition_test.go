@@ -225,5 +225,10 @@ func TestPartitionScan(t *testing.T) {
 			return
 		}
 	}
+
+	values, errs = p.Scan(uint64(numSegs*numValsPerSeg), uint64(10))
+	if len(errs) != 0 {
+		glog.Fatalf("We got values back even though we never wrote to these offsets")
+	}
 	glog.Infof("TestPartitionScan finished successfully")
 }
