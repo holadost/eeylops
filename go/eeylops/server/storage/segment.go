@@ -21,10 +21,14 @@ type Segment interface {
 	Append([][]byte) error
 	// Scan numMessages values from the segment store from the given start offset.
 	Scan(startOffset uint64, numMessages uint64) ([][]byte, []error)
+	// IsEmpty returns true if the segment is empty. False otherwise.
+	IsEmpty() bool
 	// Stats fetches the stats for this instance of segment.
 	Stats()
 	// GetMetadata fetches the metadata of the segment.
 	GetMetadata() SegmentMetadata
+	// GetRange returns the start and end offset of the segment.
+	GetRange() (uint64, uint64)
 	// SetMetadata sets the metadata. This is updated internally and by the partition when a segment is created.
 	SetMetadata(SegmentMetadata)
 	// MarkImmutable marks the segment as immutable.

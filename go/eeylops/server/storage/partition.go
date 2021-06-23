@@ -236,7 +236,7 @@ func (p *Partition) getSegments(startOffset uint64, endOffset uint64) []Segment 
 		if ii >= len(p.segments) {
 			break
 		}
-		if p.offsetInSegment(endOffset, p.segments[ii].GetMetadata()) {
+		if p.offsetInSegment(endOffset, p.segments[ii]) {
 			endSegIdx = ii
 			break
 		}
@@ -272,17 +272,16 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 		return -1
 	}
 	if startIdx == endIdx {
-		metadata := p.segments[startIdx].GetMetadata()
-		if p.offsetInSegment(offset, metadata) {
+		if p.offsetInSegment(offset, p.segments[startIdx]) {
 			return startIdx
 		}
 		return -1
 	}
 	midIdx := startIdx + (endIdx-startIdx)/2
-	metadata := p.segments[midIdx].GetMetadata()
-	if p.offsetInSegment(offset, metadata) {
+	sOff, _ := p.segments[midIdx].GetRange()
+	if p.offsetInSegment(offset, p.segments[midIdx]) {
 		return midIdx
-	} else if offset < metadata.StartOffset {
+	} else if offset < sOff {
 		return p.findOffset(0, midIdx-1, offset)
 	} else {
 		return p.findOffset(midIdx+1, endIdx, offset)
@@ -290,8 +289,12 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 }
 
 // offsetInSegment checks whether the given offset is in the segment or not.
-func (p *Partition) offsetInSegment(offset uint64, metadata SegmentMetadata) bool {
-	if offset >= metadata.StartOffset && offset <= metadata.EndOffset {
+func (p *Partition) offsetInSegment(offset uint64, seg Segment) bool {
+	if seg.IsEmpty() {
+		return false
+	}
+	sOff, eOff := seg.GetRange()
+	if offset >= sOff && offset <= eOff {
 		return true
 	}
 	return false

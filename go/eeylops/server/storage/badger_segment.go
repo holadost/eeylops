@@ -81,6 +81,11 @@ func (seg *BadgerSegment) Close() error {
 	return err
 }
 
+// IsEmpty implements the Segment interface. Returns true if the segment is empty. False otherwise.
+func (seg *BadgerSegment) IsEmpty() bool {
+	return seg.nextOffSet == 0
+}
+
 // Append implements the Segment interface. This method appends the given values to the segment.
 func (seg *BadgerSegment) Append(values [][]byte) error {
 	// Acquire a read lock on the segment as we are not changing the segment metadata.
@@ -192,6 +197,23 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 		}
 	}
 	return metadata
+}
+
+// GetRange returns the range of the segment.
+func (seg *BadgerSegment) GetRange() (sOff uint64, eOff uint64) {
+	seg.segLock.RLock()
+	defer seg.segLock.RUnlock()
+
+	sOff = seg.metadata.StartOffset
+	eOff = seg.metadata.EndOffset
+	if !seg.metadata.Immutable {
+		if seg.nextOffSet != 0 {
+			eOff = seg.metadata.StartOffset + seg.nextOffSet - 1
+		} else {
+			eOff = seg.metadata.StartOffset
+		}
+	}
+	return
 }
 
 // SetMetadata sets the metadata for the segment.
