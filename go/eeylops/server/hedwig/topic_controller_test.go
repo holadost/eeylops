@@ -25,10 +25,11 @@ func createTestDirForInstanceManager(t *testing.T, testName string) string {
 func TestTopicController(t *testing.T) {
 	glog.Infof("*******************************************************************************************\n\n")
 	glog.Infof("Starting TestTopicController")
+	scanIntervalSecs := 5
 	opts := TopicControllerOpts{
 		RootDirectory:         createTestDirForInstanceManager(t, "TestTopicController"),
 		ControllerID:          "1",
-		StoreScanIntervalSecs: 5,
+		StoreScanIntervalSecs: scanIntervalSecs,
 	}
 	controller := NewTopicController(opts)
 	topicName := "topic1"
@@ -71,7 +72,7 @@ func TestTopicController(t *testing.T) {
 	}
 
 	glog.Infof("Waiting for janitor to reclaim the topic directory")
-	time.Sleep(12 * time.Second)
+	time.Sleep(15 * time.Second)
 	_, err = os.Stat(controller.getTopicRootDirectory(topicName))
 	glog.V(1).Infof("Stat Err: %v", err)
 	if err == nil {

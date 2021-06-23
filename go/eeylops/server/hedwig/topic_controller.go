@@ -170,7 +170,7 @@ func (tc *TopicController) getTopicRootDirectory(topicName string) string {
 // removes those topics from the underlying storage.
 func (tc *TopicController) janitor() {
 	glog.Infof("Starting janitor for topic controller: %s", tc.controllerID)
-	disposeTicker := time.NewTicker(10 * time.Second)
+	disposeTicker := time.NewTicker(time.Duration(tc.storeScanIntervalSecs) * time.Second)
 	for {
 		select {
 		case <-disposeTicker.C:

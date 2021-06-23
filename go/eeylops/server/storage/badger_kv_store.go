@@ -105,7 +105,19 @@ func (kvStore *BadgerKVStore) PutS(key string, value string) error {
 
 // Delete deletes a key value pair from the DB.
 func (kvStore *BadgerKVStore) Delete(key []byte) error {
-	return kvStore.Put(key, []byte(""))
+	if kvStore.closed {
+		glog.Errorf("KV store is closed")
+		return ErrKVStoreClosed
+	}
+	err := kvStore.db.Update(func(txn *badger.Txn) error {
+		err := txn.Delete(key)
+		return err
+	})
+	if err != nil {
+		glog.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
+		return ErrKVStoreGeneric
+	}
+	return nil
 }
 
 // DeleteS deletes a key value pair from the DB.
@@ -257,12 +269,24 @@ func (kvStore *BadgerKVStore) BatchPutS(keys []string, values []string) error {
 
 // BatchDelete deletes multiple key value pairs from the DB.
 func (kvStore *BadgerKVStore) BatchDelete(keys [][]byte) error {
-	var values [][]byte
-	for ii := 0; ii < len(keys); ii++ {
-		// Put empty string to delete the value. Badger will delete this eventually.
-		values = append(values, []byte(""))
+	if kvStore.closed {
+		glog.Errorf("KV store is closed")
+		return ErrKVStoreClosed
 	}
-	return kvStore.BatchPut(keys, values)
+	err := kvStore.db.Update(func(txn *badger.Txn) error {
+		for _, key := range keys {
+			err := txn.Delete(key)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		glog.Errorf("Unable to batch delete keys: %v due to err: %s", keys, err.Error())
+		return ErrKVStoreGeneric
+	}
+	return nil
 }
 
 // BatchDeleteS deletes multiple key value pairs from the DB.

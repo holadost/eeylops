@@ -120,6 +120,7 @@ func (ts *TopicStore) GetTopic(topicName string) (base.Topic, error) {
 
 func (ts *TopicStore) GetAllTopics() ([]base.Topic, error) {
 	_, values, _, err := ts.kvStore.Scan(nil, -1)
+	glog.Infof("Total number of topics in the store: %d", len(values))
 	if err != nil {
 		glog.Errorf("Unable to get all topics in topic store due to err: %s", err.Error())
 		return nil, ErrTopicStore
