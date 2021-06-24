@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"eeylops/server/base"
 	"encoding/binary"
 	"fmt"
 	badger "github.com/dgraph-io/badger/v3"
@@ -18,7 +19,7 @@ type BadgerSegment struct {
 	mdb        *segmentMetadataDB // Segment metadata ddb.
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	nextOffSet uint64           // Next start offset for new appends.
+	nextOffSet base.Offset      // Next start offset for new appends.
 	segLock    sync.RWMutex     // A RW lock for the segment.
 	closed     bool             // Flag that indicates whether the segment is closed.
 	rootDir    string           // Root directory of this segment.
@@ -96,7 +97,7 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 		return ErrSegmentClosed
 	}
 
-	keys := seg.generateKeys(seg.nextOffSet, uint64(len(values)))
+	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(values)))
 	wb := seg.ddb.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
@@ -108,32 +109,32 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 		glog.Errorf("Unable to flush after batch write to segment due to err: %s", err.Error())
 		return ErrGenericSegment
 	}
-	seg.nextOffSet = seg.nextOffSet + uint64(len(values))
+	seg.nextOffSet = seg.nextOffSet + base.Offset(len(values))
 	return nil
 }
 
 // Scan implements the Segment interface. It attempts to fetch numMessages starting from the given
 // startOffset.
-func (seg *BadgerSegment) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
+func (seg *BadgerSegment) Scan(startOffset base.Offset, numMessages uint64) (values [][]byte, errs []error) {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
-
+	tmpNumMsgs := base.Offset(numMessages)
 	if seg.closed || seg.metadata.Expired {
 		glog.Errorf("Segment: %s is already closed", seg.logStr)
-		for ii := 0; ii < int(startOffset+numMessages); ii++ {
+		for ii := 0; ii < int(startOffset+tmpNumMsgs); ii++ {
 			errs = append(errs, ErrSegmentClosed)
 		}
 		return
 	}
 	// Compute the keys that need to be fetched.
 	no := seg.nextOffSet
-	if startOffset+numMessages >= no {
-		numMessages = no - startOffset
+	if startOffset+tmpNumMsgs >= no {
+		tmpNumMsgs = no - startOffset
 	}
 	if no == 0 {
 		return values, errs
 	}
-	keys := seg.generateKeys(startOffset, numMessages)
+	keys := seg.generateKeys(startOffset, tmpNumMsgs)
 	// Fetch values from DB.
 	// TODO: Test/benchmark using Txn.iterator(itr.Seek(start_key) to get to the key of interest).
 	seg.ddb.View(func(txn *badger.Txn) error {
@@ -200,7 +201,7 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 }
 
 // GetRange returns the range of the segment.
-func (seg *BadgerSegment) GetRange() (sOff uint64, eOff uint64) {
+func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 
@@ -235,12 +236,12 @@ func (seg *BadgerSegment) updateLogStr() {
 }
 
 // generateKeys generates keys based on the given startOffset and numMessages.
-func (seg *BadgerSegment) generateKeys(startOffset uint64, numMessages uint64) [][]byte {
-	lastOffset := startOffset + numMessages
+func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base.Offset) [][]byte {
+	lastOffset := startOffset + base.Offset(numMessages)
 	var keys [][]byte
 	for ii := startOffset; ii < lastOffset; ii++ {
 		val := make([]byte, 8)
-		binary.BigEndian.PutUint64(val, ii)
+		binary.BigEndian.PutUint64(val, uint64(ii))
 		keys = append(keys, val)
 	}
 	return keys
@@ -257,7 +258,7 @@ func (seg *BadgerSegment) initializeNextOffset() {
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
 		val := item.KeyCopy(nil)
-		seg.nextOffSet = binary.BigEndian.Uint64(val) + 1
+		seg.nextOffSet = base.Offset(binary.BigEndian.Uint64(val)) + 1
 		hasVal = true
 		break
 	}

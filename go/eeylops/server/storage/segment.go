@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"encoding/json"
 	"fmt"
 	"github.com/golang/glog"
@@ -20,7 +21,7 @@ type Segment interface {
 	// Append values to the segment.
 	Append([][]byte) error
 	// Scan numMessages values from the segment store from the given start offset.
-	Scan(startOffset uint64, numMessages uint64) ([][]byte, []error)
+	Scan(startOffset base.Offset, numMessages uint64) ([][]byte, []error)
 	// IsEmpty returns true if the segment is empty. False otherwise.
 	IsEmpty() bool
 	// Stats fetches the stats for this instance of segment.
@@ -28,7 +29,7 @@ type Segment interface {
 	// GetMetadata fetches the metadata of the segment.
 	GetMetadata() SegmentMetadata
 	// GetRange returns the start and end offset of the segment.
-	GetRange() (uint64, uint64)
+	GetRange() (base.Offset, base.Offset)
 	// SetMetadata sets the metadata. This is updated internally and by the partition when a segment is created.
 	SetMetadata(SegmentMetadata)
 	// MarkImmutable marks the segment as immutable.
@@ -40,15 +41,15 @@ type Segment interface {
 // SegmentMetadata holds the metadata of a segment.
 // Note: Make sure to add any new fields to the ToString() method as well.
 type SegmentMetadata struct {
-	ID                 uint64    `json:"id"`                  // Segment ID.
-	Immutable          bool      `json:"immutable"`           // Flag to indicate whether segment is immutable.
-	Expired            bool      `json:"expired"`             // Flag indicating whether the segment has expired.
-	StartOffset        uint64    `json:"start_offset"`        // StartOffset of the segment.
-	EndOffset          uint64    `json:"end_offset"`          // EndOffset of the segment. Not valid if segment is live.
-	CreatedTimestamp   time.Time `json:"created_timestamp"`   // Segment created time.
-	ImmutableTimestamp time.Time `json:"immutable_timestamp"` // Time when segment was marked as immutable.
-	ImmutableReason    int       `json:"immutable_reason"`    // The reason why the segment was marked immutable.
-	ExpiredTimestamp   time.Time `json:"expired_timestamp"`   // Time when segment was expired.
+	ID                 uint64      `json:"id"`                  // Segment ID.
+	Immutable          bool        `json:"immutable"`           // Flag to indicate whether segment is immutable.
+	Expired            bool        `json:"expired"`             // Flag indicating whether the segment has expired.
+	StartOffset        base.Offset `json:"start_offset"`        // StartOffset of the segment.
+	EndOffset          base.Offset `json:"end_offset"`          // EndOffset of the segment. Not valid if segment is live.
+	CreatedTimestamp   time.Time   `json:"created_timestamp"`   // Segment created time.
+	ImmutableTimestamp time.Time   `json:"immutable_timestamp"` // Time when segment was marked as immutable.
+	ImmutableReason    int         `json:"immutable_reason"`    // The reason why the segment was marked immutable.
+	ExpiredTimestamp   time.Time   `json:"expired_timestamp"`   // Time when segment was expired.
 }
 
 func newSegmentMetadata(data []byte) *SegmentMetadata {

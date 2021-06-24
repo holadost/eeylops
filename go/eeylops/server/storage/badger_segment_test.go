@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -73,7 +74,7 @@ func TestBadgerSegment(t *testing.T) {
 			}
 			got := bds.GetMetadata()
 			checkMetadata(t, &got, &initialMeta)
-			ex := uint64(0)
+			ex := base.Offset(0)
 			if iter == 0 {
 				ex = initialMeta.StartOffset
 			} else {
@@ -93,7 +94,7 @@ func TestBadgerSegment(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unable to append values to segment due to err: %s", err.Error())
 		}
-		vals, errs := bds.Scan(uint64(iter*batchSize), uint64(batchSize))
+		vals, errs := bds.Scan(base.Offset(iter*batchSize), uint64(batchSize))
 		for ii := 0; ii < batchSize; ii++ {
 			if errs[ii] != nil {
 				t.Fatalf("Received error while scanning message: %d. Error: %s", ii, errs[ii].Error())

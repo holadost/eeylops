@@ -16,3 +16,5 @@ func GetDataDirectory() string {
 	}
 	return *dataDir
 }
+
+type Offset int64

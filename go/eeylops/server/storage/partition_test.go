@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -227,7 +228,7 @@ func TestPartitionScan(t *testing.T) {
 
 	startOffset := 121
 	numMsgs := 100
-	values, errs = p.Scan(uint64(startOffset), uint64(numMsgs))
+	values, errs = p.Scan(base.Offset(startOffset), uint64(numMsgs))
 	if errs == nil || len(errs) != numMsgs {
 		if errs != nil {
 			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
@@ -253,7 +254,7 @@ func TestPartitionScan(t *testing.T) {
 	startOffset = 221
 	numMsgs = (numSegs * numValsPerSeg) + startOffset
 	expectedNumMsgs := (numSegs * numValsPerSeg) - startOffset
-	values, errs = p.Scan(uint64(startOffset), uint64(numMsgs))
+	values, errs = p.Scan(base.Offset(startOffset), uint64(numMsgs))
 	if errs == nil || len(errs) != expectedNumMsgs {
 		if errs != nil {
 			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
@@ -276,7 +277,7 @@ func TestPartitionScan(t *testing.T) {
 		}
 	}
 
-	values, errs = p.Scan(uint64(numSegs*numValsPerSeg), uint64(10))
+	values, errs = p.Scan(base.Offset(numSegs*numValsPerSeg), uint64(10))
 	if len(errs) != 0 {
 		glog.Fatalf("We got values back even though we never wrote to these offsets")
 	}

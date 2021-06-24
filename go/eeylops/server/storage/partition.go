@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"flag"
 	"github.com/golang/glog"
 	"io/ioutil"
@@ -28,21 +29,38 @@ var (
 )
 
 type Partition struct {
-	partitionCfgLock               sync.RWMutex     // Lock on the partition configuration.
-	topicName                      string           // Name of the topic
-	partitionID                    int              // Partition ID.
-	rootDir                        string           // Root directory of the partition.
-	ttlSeconds                     int              // TTL seconds for every record.
-	expiredSegmentPollIntervalSecs time.Duration    // Expired segment poll interval seconds.
-	liveSegmentPollIntervalSecs    time.Duration    // Live segment poll interval seconds.
-	numRecordsPerSegment           int              // Number of records per segment.
-	maxScanSizeBytes               int              // Max scan size bytes.
-	segments                       []Segment        // List of segments in the partition.
-	backgroundJobDone              chan bool        // Notification to ask background goroutines to exit.
-	snapshotChan                   chan bool        // Snapshot channel
-	disposer                       *StorageDisposer // Disposer.
-	disposedChan                   chan int         // Callback channel after segments have been disposed.
-	closed                         bool             // Flag to indicate whether the partition is open/closed.
+	// Lock on the partition configuration. All operations on the partition need to acquire this lock.
+	partitionCfgLock sync.RWMutex
+	// Name of the topic
+	topicName string
+	// Partition ID.
+	partitionID int
+	// Root directory of the partition.
+	rootDir string
+	// TTL seconds for every record.
+	ttlSeconds int
+	// Current start offset of the partition.
+	currStartOffset uint64
+	// Expired segment poll interval seconds.
+	expiredSegmentPollIntervalSecs time.Duration
+	// Live segment poll interval seconds.
+	liveSegmentPollIntervalSecs time.Duration
+	// Number of records per segment.
+	numRecordsPerSegment int
+	// Max scan size bytes.
+	maxScanSizeBytes int
+	// List of segments in the partition.
+	segments []Segment
+	// Notification to ask background goroutines to exit.
+	backgroundJobDone chan bool
+	// Snapshot channel.
+	snapshotChan chan bool
+	// Disposer.
+	disposer *StorageDisposer
+	// Callback channel after segments have been disposed.
+	disposedChan chan int
+	// Flag to indicate whether the partition is open/closed.
+	closed bool
 }
 
 type PartitionOpts struct {
@@ -211,13 +229,14 @@ func (p *Partition) Append(values [][]byte) error {
 }
 
 // Scan numMessages records from the partition from the given startOffset.
-func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byte, errs []error) {
+func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values [][]byte, errs []error) {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	if p.closed {
 		return nil, []error{ErrPartitionClosed}
 	}
-	endOffset := startOffset + numMessages - 1
+	numMsgsOffset := base.Offset(numMessages)
+	endOffset := startOffset + numMsgsOffset - 1
 
 	// Get all the segments that contain our desired offsets.
 	segs := p.getSegments(startOffset, endOffset)
@@ -250,7 +269,7 @@ func (p *Partition) Scan(startOffset uint64, numMessages uint64) (values [][]byt
 	// The values are present across multiple segments. Merge them before returning.
 	glog.V(1).Infof("Gathering values from multiple(%d) segments", len(segs))
 	numPendingMsgs := numMessages
-	var nextStartOffset uint64
+	var nextStartOffset base.Offset
 	for ii, seg := range segs {
 		if numPendingMsgs == 0 {
 			return
@@ -311,7 +330,7 @@ func (p *Partition) Close() {
 
 // getSegments returns a list of segments that contains all the elements between the given start and end offsets.
 // This function assumes that a partitionCfgLock has been acquired.
-func (p *Partition) getSegments(startOffset uint64, endOffset uint64) []Segment {
+func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) []Segment {
 	var segs []Segment
 
 	// Find start offset segment.
@@ -360,7 +379,7 @@ func (p *Partition) getLiveSegment() Segment {
 
 // findOffset finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
 // been acquired.
-func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
+func (p *Partition) findOffset(startIdx int, endIdx int, offset base.Offset) int {
 	// Base cases.
 	if startIdx > endIdx {
 		return -1
@@ -383,7 +402,7 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset uint64) int {
 }
 
 // offsetInSegment checks whether the given offset is in the segment or not.
-func (p *Partition) offsetInSegment(offset uint64, seg Segment) bool {
+func (p *Partition) offsetInSegment(offset base.Offset, seg Segment) bool {
 	if seg.IsEmpty() {
 		return false
 	}
@@ -430,7 +449,7 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	defer p.partitionCfgLock.RUnlock()
 	seg := p.segments[len(p.segments)-1]
 	metadata := seg.GetMetadata()
-	if (metadata.EndOffset - metadata.StartOffset) > uint64(p.numRecordsPerSegment) {
+	if (metadata.EndOffset - metadata.StartOffset) > base.Offset(p.numRecordsPerSegment) {
 		return true
 	}
 	return false
@@ -443,7 +462,7 @@ func (p *Partition) createNewSegment() {
 	defer p.partitionCfgLock.Unlock()
 
 	glog.Infof("Creating new segment for partition: %d", p.partitionID)
-	var startOffset uint64
+	var startOffset base.Offset
 	var segID uint64
 
 	if len(p.segments) == 0 {
