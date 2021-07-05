@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-type TopicController struct {
+type TopicsController struct {
 	topicStore            *storage.TopicStore      // Backing topicStore for topics registered with eeylops.
 	consumerStore         *storage.ConsumerStore   // Consumer store.
 	topicMap              map[string]*topicEntry   // In memory map that holds the topics and partitions.
@@ -34,8 +34,8 @@ type TopicControllerOpts struct {
 	StoreScanIntervalSecs int
 }
 
-func NewTopicController(opts TopicControllerOpts) *TopicController {
-	tc := &TopicController{}
+func NewTopicController(opts TopicControllerOpts) *TopicsController {
+	tc := &TopicsController{}
 	tc.rootDir = opts.RootDirectory
 	tc.controllerID = opts.ControllerID
 	tc.storeScanIntervalSecs = opts.StoreScanIntervalSecs
@@ -46,7 +46,7 @@ func NewTopicController(opts TopicControllerOpts) *TopicController {
 	return tc
 }
 
-func (tc *TopicController) initialize() {
+func (tc *TopicsController) initialize() {
 	tc.topicStore = storage.NewTopicStore(tc.getControllerRootDirectory())
 	tc.consumerStore = storage.NewConsumerStore(tc.getControllerRootDirectory())
 	tc.topicMap = make(map[string]*topicEntry)
@@ -91,7 +91,7 @@ func (tc *TopicController) initialize() {
 	go tc.janitor()
 }
 
-func (tc *TopicController) GetTopic(topicName string) (base.Topic, error) {
+func (tc *TopicsController) GetTopic(topicName string) (base.Topic, error) {
 	tc.topicMapLock.RLock()
 	defer tc.topicMapLock.RUnlock()
 	val, exists := tc.topicMap[topicName]
@@ -102,7 +102,7 @@ func (tc *TopicController) GetTopic(topicName string) (base.Topic, error) {
 	return *val.topic, nil
 }
 
-func (tc *TopicController) AddTopic(topic base.Topic) error {
+func (tc *TopicsController) AddTopic(topic base.Topic) error {
 	tc.topicMapLock.Lock()
 	defer tc.topicMapLock.Unlock()
 	_, exists := tc.topicMap[topic.Name]
@@ -137,7 +137,7 @@ func (tc *TopicController) AddTopic(topic base.Topic) error {
 	return nil
 }
 
-func (tc *TopicController) RemoveTopic(topicName string) error {
+func (tc *TopicsController) RemoveTopic(topicName string) error {
 	tc.topicMapLock.Lock()
 	defer tc.topicMapLock.Unlock()
 	_, exists := tc.topicMap[topicName]
@@ -153,7 +153,7 @@ func (tc *TopicController) RemoveTopic(topicName string) error {
 	return nil
 }
 
-func (tc *TopicController) GetPartition(topicName string, partitionID int) (*storage.Partition, error) {
+func (tc *TopicsController) GetPartition(topicName string, partitionID int) (*storage.Partition, error) {
 	tc.topicMapLock.RLock()
 	defer tc.topicMapLock.RUnlock()
 	entry, exists := tc.topicMap[topicName]
@@ -169,18 +169,18 @@ func (tc *TopicController) GetPartition(topicName string, partitionID int) (*sto
 	return partition, nil
 }
 
-func (tc *TopicController) getControllerRootDirectory() string {
+func (tc *TopicsController) getControllerRootDirectory() string {
 	return path.Join(tc.rootDir, tc.controllerID)
 }
 
-func (tc *TopicController) getTopicRootDirectory(topicName string) string {
+func (tc *TopicsController) getTopicRootDirectory(topicName string) string {
 	return path.Join(tc.getControllerRootDirectory(), "topics", topicName)
 }
 
 /********************************************** TOPICS JANITOR ********************************************************/
 // janitor is a long running background goroutine that periodically checks which topics have been marked for removal and
 // removes those topics from the underlying storage.
-func (tc *TopicController) janitor() {
+func (tc *TopicsController) janitor() {
 	glog.Infof("Starting janitor for topic controller: %s", tc.controllerID)
 	disposeTicker := time.NewTicker(time.Duration(tc.storeScanIntervalSecs) * time.Second)
 	for {
@@ -198,7 +198,7 @@ func (tc *TopicController) janitor() {
 	}
 }
 
-func (tc *TopicController) disposeTopics() {
+func (tc *TopicsController) disposeTopics() {
 	topics, err := tc.topicStore.GetAllTopics()
 	if err != nil {
 		glog.Fatalf("Unable to fetch all topics from topic topicStore due to err: %s", err.Error())
@@ -211,7 +211,7 @@ func (tc *TopicController) disposeTopics() {
 	}
 }
 
-func (tc *TopicController) createDisposeCb(topicName string) func(error) {
+func (tc *TopicsController) createDisposeCb(topicName string) func(error) {
 	cb := func(err error) {
 		if err != nil {
 			return
