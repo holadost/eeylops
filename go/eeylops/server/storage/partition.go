@@ -252,7 +252,7 @@ func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values []
 		tmpVals, tmpErrs := segs[0].Scan(segStartOffset, numMessages)
 		for ii, val := range tmpVals {
 			// Ensure that the batch size remains smaller than the max scan size.
-			if (len(val) + scanSizeBytes) >= p.maxScanSizeBytes {
+			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
 				break
 			}
 			scanSizeBytes += len(val)
@@ -285,7 +285,7 @@ func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values []
 		numPendingMsgs -= uint64(len(partialValues))
 		for jj, val := range partialValues {
 			// Ensure that the batch size remains smaller than the max scan size.
-			if (len(val) + scanSizeBytes) >= p.maxScanSizeBytes {
+			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
 				return
 			}
 			scanSizeBytes += len(val)
@@ -449,7 +449,10 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	defer p.partitionCfgLock.RUnlock()
 	seg := p.segments[len(p.segments)-1]
 	metadata := seg.GetMetadata()
-	if (metadata.EndOffset - metadata.StartOffset) > base.Offset(p.numRecordsPerSegment) {
+	numRecords := metadata.EndOffset - metadata.StartOffset + 1
+	if numRecords >= base.Offset(p.numRecordsPerSegment) {
+		glog.Infof("Current live segment records(%d) has reached/exceeded threshold(%d). "+
+			"New segment is required", numRecords, p.numRecordsPerSegment)
 		return true
 	}
 	return false

@@ -4,8 +4,10 @@ import (
 	"eeylops/server/base"
 	"fmt"
 	"github.com/golang/glog"
+	"math/rand"
 	"os"
 	"testing"
+	"time"
 )
 
 func createTestPartitionDir(t *testing.T, testName string) string {
@@ -282,4 +284,57 @@ func TestPartitionScan(t *testing.T) {
 		glog.Fatalf("We got values back even though we never wrote to these offsets")
 	}
 	glog.Infof("TestPartitionScan finished successfully")
+}
+
+func TestPartitionManager(t *testing.T) {
+	testMarker("TestPartitionManager")
+	testDir := "/tmp/eeylops/TestPartitionManager"
+	_ = os.RemoveAll(testDir)
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 0,
+		LiveSegmentPollIntervalSecs:    1,
+		NumRecordsPerSegmentThreshold:  100,
+		MaxScanSizeBytes:               1500,
+		TTLSeconds:                     86400 * 7,
+	}
+	p := NewPartition(opts)
+	totalValues := 500
+	numValuesPerBatch := 50
+	valueSizeBytes := 100
+	totalIters := totalValues / numValuesPerBatch
+	// Test live segment scans.
+	for iter := 0; iter < totalIters; iter++ {
+		glog.Infof("Sleeping for 1.5 second to allow manager to scan live segment")
+		time.Sleep(1500 * time.Millisecond)
+		var values [][]byte
+		for ii := 0; ii < numValuesPerBatch; ii++ {
+			token := make([]byte, valueSizeBytes)
+			rand.Read(token)
+			values = append(values, token)
+		}
+		err := p.Append(values)
+		if err != nil {
+			glog.Fatalf("Append failed due to err: %s", err.Error())
+		}
+	}
+	if len(p.segments) != totalValues/opts.NumRecordsPerSegmentThreshold {
+		glog.Fatalf("Expected %d segments, got: %d", totalValues/numValuesPerBatch, len(p.segments))
+	}
+
+	// Test scans with max scan size bytes.
+	values, errs := p.Scan(0, 20)
+	if len(errs) != opts.MaxScanSizeBytes/valueSizeBytes {
+		glog.Fatalf("Expected upto 10 messages. Got: %d", len(errs))
+	}
+	for ii, err := range errs {
+		if err != nil {
+			glog.Fatalf("Unable to get offset: %d due to err: %s", ii, err.Error())
+		}
+	}
+	if len(values) != opts.MaxScanSizeBytes/valueSizeBytes {
+		glog.Fatalf("Expected only 10 messages but we got: %d", len(values))
+	}
 }
