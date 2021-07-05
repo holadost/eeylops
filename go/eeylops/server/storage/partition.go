@@ -25,7 +25,7 @@ var (
 	FlagNumRecordsInSegment = flag.Int("partition_num_records_per_segment_threshold", KNumSegmentRecordsThreshold,
 		"Number of records in a segment threshold")
 	FlagMaxScanSizeBytes = flag.Int("partition_max_scan_size_bytes", KMaxScanSizeBytes,
-		"Max scan size in bytes. Defaults to 16MB")
+		"Max scan size in bytes. Defaults to 15MB")
 )
 
 type Partition struct {
