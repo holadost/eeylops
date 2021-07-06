@@ -4,6 +4,7 @@ import (
 	"eeylops/server/base"
 	"flag"
 	"github.com/golang/glog"
+	flatbuffers "github.com/google/flatbuffers/go"
 	"io/ioutil"
 	"os"
 	"path"
@@ -228,6 +229,21 @@ func (p *Partition) Append(values [][]byte) error {
 	return nil
 }
 
+func (p *Partition) AppendWithTs(values [][]byte, tsNano int64) error {
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+	if p.closed {
+		return ErrPartitionClosed
+	}
+	seg := p.getLiveSegment()
+	err := seg.Append(p.makeMessageValues(values, tsNano))
+	if err != nil {
+		glog.Errorf("Unable to append entries to partition: %d due to err: %s", p.partitionID, err.Error())
+		return ErrPartitionAppend
+	}
+	return nil
+}
+
 // Scan numMessages records from the partition from the given startOffset.
 func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values [][]byte, errs []error) {
 	p.partitionCfgLock.RLock()
@@ -411,6 +427,43 @@ func (p *Partition) offsetInSegment(offset base.Offset, seg Segment) bool {
 		return true
 	}
 	return false
+}
+
+func (p *Partition) makeMessageValues(values [][]byte, ts int64) (retValues [][]byte) {
+	if len(values) == 0 {
+		return
+	}
+	for _, value := range values {
+		builder := flatbuffers.NewBuilder(len(value) + 8)
+		MessageStartBodyVector(builder, len(value))
+		for ii := len(value) - 1; ii >= 0; ii-- {
+			builder.PrependByte(value[ii])
+		}
+		body := builder.EndVector(len(value))
+		MessageStart(builder)
+		MessageAddTimestamp(builder, ts)
+		MessageAddBody(builder, body)
+		msg := MessageEnd(builder)
+		builder.Finish(msg)
+		retValues = append(retValues, builder.FinishedBytes())
+	}
+	return
+}
+
+func (p *Partition) fetchValuesFromMessages(messages [][]byte) (retValues [][]byte, timestamps []int64) {
+	if len(messages) == 0 {
+		return
+	}
+	for _, value := range messages {
+		msg := GetRootAsMessage(value, 0)
+		retVal := make([]byte, msg.BodyLength())
+		for ii := 0; ii < msg.BodyLength(); ii++ {
+			retVal[ii] = byte(msg.Body(ii))
+		}
+		retValues = append(retValues, retVal)
+		timestamps = append(timestamps, msg.Timestamp())
+	}
+	return
 }
 
 /******************************************* PARTITION MANAGER ************************************************/

@@ -3,7 +3,7 @@ namespace storage;
 
 table Message {
   timestamp:long;
-  body: [ubyte];
+  body: [byte];
 }
 
 root_type Message;

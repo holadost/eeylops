@@ -10,7 +10,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.3 // indirect
-	github.com/google/flatbuffers v2.0.0+incompatible // indirect
+	github.com/google/flatbuffers v2.0.0+incompatible
 	github.com/jinzhu/gorm v1.9.16
 	github.com/lib/pq v1.10.1
 	github.com/mattn/go-sqlite3 v1.14.7 // indirect
