@@ -10,6 +10,7 @@ INSTALL_GOLANG="wget -c https://storage.googleapis.com/golang/go${GO_VERSION}.li
 # Make env directory.
 mkdir -p ${GOLANG_DIR}
 
+sudo snap install flatbuffers
 
 # Install golang.
 echo ""

@@ -1,0 +1,9 @@
+// myschema.fbs
+namespace storage;
+
+table Message {
+  timestamp:long;
+  body: [ubyte];
+}
+
+root_type Message;
