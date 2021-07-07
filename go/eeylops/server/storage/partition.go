@@ -41,7 +41,7 @@ type Partition struct {
 	// TTL seconds for every record.
 	ttlSeconds int
 	// Current start offset of the partition.
-	currStartOffset uint64
+	currStartOffset base.Offset
 	// Expired segment poll interval seconds.
 	expiredSegmentPollIntervalSecs time.Duration
 	// Live segment poll interval seconds.
@@ -316,6 +316,97 @@ func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values []
 		}
 	}
 	return
+}
+
+// ScanV2 numMessages records from the partition from the given startOffset.
+func (p *Partition) ScanV2(startOffset base.Offset, numMessages uint64) ([][]byte, error, base.Offset) {
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+	var values [][]byte
+	var nextOffset base.Offset
+	if p.closed {
+		return nil, ErrPartitionClosed, -1
+	}
+
+	// The start offset is no longer present. Ask client to start scanning from the current start offset of the
+	// partition.
+	if startOffset < p.currStartOffset {
+		return values, nil, p.currStartOffset
+	}
+	endOffset := startOffset + base.Offset(numMessages) - 1
+
+	// Get all the segments that contain our desired offsets.
+	segs := p.getSegments(startOffset, endOffset)
+	if segs == nil || len(segs) == 0 {
+		// The start offset is greater than the largest offset in the partition. There is nothing to scan.
+		return values, nil, -1
+	}
+	var scanSizeBytes int
+	scanSizeBytes = 0
+
+	// All offsets are present in the same segment.
+	currOffset := startOffset
+	if len(segs) == 1 {
+		segStartOffset := startOffset - segs[0].GetMetadata().StartOffset
+		tmpVals, tmpErrs := segs[0].Scan(segStartOffset, numMessages)
+		for ii, val := range tmpVals {
+			if ii != 0 {
+				currOffset++
+			}
+			// Ensure that the batch size remains smaller than the max scan size.
+			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
+				// We are skipping this message so set the nextOffset to the currOffset since it will need to
+				// be scanned in the next scan call.
+				nextOffset = currOffset
+				break
+			}
+			nextOffset = currOffset + 1
+			scanSizeBytes += len(val)
+			values = append(values, val)
+			if tmpErrs[ii] != nil {
+				return nil, ErrPartitionScan, startOffset
+			}
+		}
+		return values, nil, nextOffset
+	}
+
+	// The values are present across multiple segments. Merge them before returning.
+	glog.V(1).Infof("Gathering values from multiple(%d) segments", len(segs))
+	numPendingMsgs := numMessages
+	var segStartOffset base.Offset
+	for ii, seg := range segs {
+		if numPendingMsgs == 0 {
+			return values, nil, nextOffset
+		}
+		if ii == 0 {
+			// First segment. Start scanning from the correct offset into the segment.
+			segStartOffset = startOffset - seg.GetMetadata().StartOffset
+		} else {
+			// Start scanning from the very first offset in the segment.
+			segStartOffset = 0
+		}
+		partialValues, partialErrs := seg.Scan(segStartOffset, numPendingMsgs)
+		numPendingMsgs -= uint64(len(partialValues))
+		for jj, val := range partialValues {
+			if (ii != 0) && (jj != 0) {
+				currOffset++
+			}
+			// Ensure that the batch size remains smaller than the max scan size.
+			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
+				nextOffset = currOffset
+				return values, nil, nextOffset
+			}
+			scanSizeBytes += len(val)
+			nextOffset = currOffset + 1
+
+			// Merge all partial values into a single list.
+			values = append(values, val)
+			if partialErrs[jj] != nil {
+				return nil, ErrPartitionScan, startOffset
+			}
+		}
+	}
+	return values, nil, nextOffset
 }
 
 // Snapshot the partition.
