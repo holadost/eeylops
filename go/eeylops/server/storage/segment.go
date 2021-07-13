@@ -16,6 +16,7 @@ import (
 )
 
 type Segment interface {
+	ID() int
 	// Close the segment.
 	Close() error
 	// Append values to the segment.

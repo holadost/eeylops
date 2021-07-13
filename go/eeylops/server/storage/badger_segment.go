@@ -66,6 +66,10 @@ func (seg *BadgerSegment) initialize() {
 	seg.updateLogStr()
 }
 
+func (seg *BadgerSegment) ID() int {
+	return int(seg.metadata.ID)
+}
+
 // Close implements the Segment interface. It closes the connection to the underlying
 // BadgerDB database as well as invoking the context's cancel function.
 func (seg *BadgerSegment) Close() error {

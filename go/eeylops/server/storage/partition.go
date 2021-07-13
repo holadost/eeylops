@@ -4,7 +4,7 @@ import (
 	"eeylops/server/base"
 	"flag"
 	"github.com/golang/glog"
-	flatbuffers "github.com/google/flatbuffers/go"
+	flatbuf "github.com/google/flatbuffers/go"
 	"io/ioutil"
 	"os"
 	"path"
@@ -198,14 +198,14 @@ func (p *Partition) initialize() {
 	// created.
 	if len(p.segments) == 0 {
 		glog.Infof("Did not find any segment in the backing store. Creating segment for first time")
-		p.createNewSegment()
+		p.createNewSegmentWithLock()
 	}
 
 	// The last segment can be live or immutable. If immutable, create a new segment.
 	lastSeg := p.segments[len(p.segments)-1]
 	lastMeta := lastSeg.GetMetadata()
 	if lastMeta.Immutable {
-		p.createNewSegment()
+		p.createNewSegmentWithLock()
 	}
 	p.closed = false
 
@@ -353,6 +353,9 @@ func (p *Partition) ScanV2(startOffset base.Offset, numMessages uint64) ([][]byt
 			if ii != 0 {
 				currOffset++
 			}
+			if tmpErrs[ii] != nil {
+				return nil, ErrPartitionScan, startOffset
+			}
 			// Ensure that the batch size remains smaller than the max scan size.
 			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
 				// We are skipping this message so set the nextOffset to the currOffset since it will need to
@@ -362,10 +365,8 @@ func (p *Partition) ScanV2(startOffset base.Offset, numMessages uint64) ([][]byt
 			}
 			nextOffset = currOffset + 1
 			scanSizeBytes += len(val)
-			values = append(values, val)
-			if tmpErrs[ii] != nil {
-				return nil, ErrPartitionScan, startOffset
-			}
+			body, _ := p.fetchValueFromMessage(val)
+			values = append(values, body)
 		}
 		return values, nil, nextOffset
 	}
@@ -391,6 +392,9 @@ func (p *Partition) ScanV2(startOffset base.Offset, numMessages uint64) ([][]byt
 			if (ii != 0) && (jj != 0) {
 				currOffset++
 			}
+			if partialErrs[jj] != nil {
+				return nil, ErrPartitionScan, startOffset
+			}
 			// Ensure that the batch size remains smaller than the max scan size.
 			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
 				nextOffset = currOffset
@@ -400,10 +404,8 @@ func (p *Partition) ScanV2(startOffset base.Offset, numMessages uint64) ([][]byt
 			nextOffset = currOffset + 1
 
 			// Merge all partial values into a single list.
-			values = append(values, val)
-			if partialErrs[jj] != nil {
-				return nil, ErrPartitionScan, startOffset
-			}
+			body, _ := p.fetchValueFromMessage(val)
+			values = append(values, body)
 		}
 	}
 	return values, nil, nextOffset
@@ -525,7 +527,7 @@ func (p *Partition) makeMessageValues(values [][]byte, ts int64) (retValues [][]
 		return
 	}
 	for _, value := range values {
-		builder := flatbuffers.NewBuilder(len(value) + 8)
+		builder := flatbuf.NewBuilder(len(value) + 8)
 		MessageStartBodyVector(builder, len(value))
 		for ii := len(value) - 1; ii >= 0; ii-- {
 			builder.PrependByte(value[ii])
@@ -541,20 +543,13 @@ func (p *Partition) makeMessageValues(values [][]byte, ts int64) (retValues [][]
 	return
 }
 
-func (p *Partition) fetchValuesFromMessages(messages [][]byte) (retValues [][]byte, timestamps []int64) {
-	if len(messages) == 0 {
-		return
+func (p *Partition) fetchValueFromMessage(message []byte) ([]byte, int64) {
+	msgFb := GetRootAsMessage(message, 0)
+	retVal := make([]byte, msgFb.BodyLength())
+	for ii := 0; ii < msgFb.BodyLength(); ii++ {
+		retVal[ii] = byte(msgFb.Body(ii))
 	}
-	for _, value := range messages {
-		msg := GetRootAsMessage(value, 0)
-		retVal := make([]byte, msg.BodyLength())
-		for ii := 0; ii < msg.BodyLength(); ii++ {
-			retVal[ii] = byte(msg.Body(ii))
-		}
-		retValues = append(retValues, retVal)
-		timestamps = append(timestamps, msg.Timestamp())
-	}
-	return
+	return retVal, msgFb.Timestamp()
 }
 
 /******************************************* PARTITION MANAGER ************************************************/
@@ -563,7 +558,7 @@ func (p *Partition) fetchValuesFromMessages(messages [][]byte) (retValues [][]by
 //     2. Checks the segments that have expired and marks them for GC. GC is handled by another background goroutine.
 //     3. Checks the snapshotChan and saves the partition configuration when a snapshot is requested.
 func (p *Partition) partitionManager() {
-	glog.Infof("Partition manager for partition ID: %d is now running", p.partitionID)
+	glog.Infof("Partition manager[%s:%d] has started", p.topicName, p.partitionID)
 	liveSegTicker := time.NewTicker(p.liveSegmentPollIntervalSecs)
 	expTicker := time.NewTicker(p.expiredSegmentPollIntervalSecs)
 	for {
@@ -583,7 +578,7 @@ func (p *Partition) partitionManager() {
 // maybeCreateNewSegment checks if a new segment needs to be created and if so, creates one.
 func (p *Partition) maybeCreateNewSegment() {
 	if p.shouldCreateNewSegment() {
-		p.createNewSegment()
+		p.createNewSegmentWithLock()
 	}
 }
 
@@ -602,12 +597,14 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	return false
 }
 
-// createNewSegment marks the current live segment immutable and creates a new live segment.
-func (p *Partition) createNewSegment() {
-	// Acquire the segments lock since we are creating a new segment.
+func (p *Partition) createNewSegmentWithLock() {
 	p.partitionCfgLock.Lock()
 	defer p.partitionCfgLock.Unlock()
+	p.createNewSegment()
+}
 
+// createNewSegment marks the current live segment immutable and creates a new live segment.
+func (p *Partition) createNewSegment() {
 	glog.Infof("Creating new segment for partition: %d", p.partitionID)
 	var startOffset base.Offset
 	var segID uint64
@@ -658,7 +655,69 @@ func (p *Partition) createNewSegment() {
 // It also marks these segments for deletion after ensuring that the segment is not required by any
 // snapshots.
 func (p *Partition) maybeReclaimExpiredSegments() {
-	glog.Warningf("maybeReclaimExpiredSegments: Still not implemented!")
+	if p.shouldExpireSegment() {
+		expiredSegIds := p.expireSegments()
+		ds := DefaultDisposer()
+		for _, segId := range expiredSegIds {
+			ds.Dispose(p.getSegmentDirectory(segId), func(err error) {
+				if err != nil {
+					glog.Fatalf("Unable to delete segment: %d in partition: [%s:%d] due to err: %s",
+						segId, p.topicName, p.partitionID, err.Error())
+				}
+			})
+		}
+	}
+}
+
+// shouldExpireSegment returns true if segments need to be expired. false otherwise
+func (p *Partition) shouldExpireSegment() bool {
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+	seg := p.segments[0]
+	metadata := seg.GetMetadata()
+	if (!metadata.Immutable) || ((time.Now().Unix() - metadata.ImmutableTimestamp.Unix()) <= int64(p.ttlSeconds)) {
+		return false
+	}
+	return true
+}
+
+// expireSegments expires all the required segments.
+func (p *Partition) expireSegments() []int {
+	lastIdxExpired := p.markSegmentsAsExpiredAndGetLastIdx()
+	if lastIdxExpired == -1 {
+		return nil
+	}
+	p.partitionCfgLock.Lock()
+	defer p.partitionCfgLock.Unlock()
+	var expiredSegIds []int
+	for ii := 0; ii <= lastIdxExpired; ii++ {
+		expiredSegIds = append(expiredSegIds, p.segments[ii].ID())
+	}
+	if lastIdxExpired == len(p.segments)-1 {
+		// All segments have expired. Use the lockless createNewSegment as we have already acquired the lock.
+		p.segments = nil
+		p.createNewSegment()
+	} else {
+		p.segments = p.segments[lastIdxExpired+1:]
+	}
+	return expiredSegIds
+}
+
+// markSegmentsAsExpiredAndGetLastIdx and expires segments and returns the last segment index in segments that was
+// expired.
+func (p *Partition) markSegmentsAsExpiredAndGetLastIdx() int {
+	lastIdxExpired := -1
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+	for ii, seg := range p.segments {
+		metadata := seg.GetMetadata()
+		if (!metadata.Immutable) || ((time.Now().Unix() - metadata.ImmutableTimestamp.Unix()) <= int64(p.ttlSeconds)) {
+			break
+		}
+		lastIdxExpired = ii
+		seg.MarkExpired()
+	}
+	return lastIdxExpired
 }
 
 // snapshot saves the current partition configuration.
@@ -672,7 +731,7 @@ func (p *Partition) getPartitionDirectory() string {
 	return path.Join(p.rootDir, strconv.Itoa(p.partitionID))
 }
 
-// getSegmentRootDirectory returns the segment directory for a given segmentID.
+// getSegmentRootDirectory returns the segments root directory.
 func (p *Partition) getSegmentRootDirectory() string {
 	return path.Join(p.getPartitionDirectory(), KSegmentsDirectoryName)
 }
