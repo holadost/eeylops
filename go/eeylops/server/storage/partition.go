@@ -709,7 +709,8 @@ func (p *Partition) expireSegments() []int {
 	return expiredSegIds
 }
 
-// markSegmentsAsExpiredAndGetLastIdx expires segments and returns the last index in segments that was expired.
+// markSegmentsAsExpiredAndGetLastIdx expires segments and returns the last index in segments that was expired. This
+// method assumes that partitionCfgLock has already been acquired.
 func (p *Partition) markSegmentsAsExpiredAndGetLastIdx() int {
 	lastIdxExpired := -1
 	for ii, seg := range p.segments {
