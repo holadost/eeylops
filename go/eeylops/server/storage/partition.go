@@ -58,8 +58,6 @@ type Partition struct {
 	snapshotChan chan bool
 	// Disposer.
 	disposer *StorageDisposer
-	// Callback channel after segments have been disposed.
-	disposedChan chan int
 	// Flag to indicate whether the partition is open/closed.
 	closed bool
 	// Log ID string.
@@ -168,7 +166,6 @@ func NewPartition(opts PartitionOpts) *Partition {
 func (p *Partition) initialize() {
 	p.backgroundJobDone = make(chan bool)
 	p.snapshotChan = make(chan bool)
-	p.disposedChan = make(chan int, 128)
 	p.disposer = DefaultDisposer()
 	glog.Infof("Initializing partition: %d", p.partitionID)
 	err := os.MkdirAll(p.getSegmentRootDirectory(), 0774)
@@ -665,9 +662,8 @@ func (p *Partition) maybeReclaimExpiredSegments() {
 	glog.Infof("%s Checking if segments need to be expired", p.logIDStr)
 	if p.shouldExpireSegment() {
 		expiredSegIds := p.expireSegments()
-		ds := DefaultDisposer()
 		for _, segId := range expiredSegIds {
-			ds.Dispose(p.getSegmentDirectory(segId), func(err error) {
+			p.disposer.Dispose(p.getSegmentDirectory(segId), func(err error) {
 				if err != nil {
 					glog.Fatalf("%s Unable to delete segment: %d in partition: [%s:%d] due to err: %s",
 						p.logIDStr, segId, p.topicName, p.partitionID, err.Error())
