@@ -308,6 +308,7 @@ func TestPartitionManager(t *testing.T) {
 	sleepTime := 500*time.Millisecond + time.Duration(opts.ExpiredSegmentPollIntervalSecs)*time.Millisecond*1000
 	opts.TTLSeconds = int((time.Duration(totalIters) * sleepTime) / time.Second)
 	p := NewPartition(opts)
+	defer p.Close()
 	// Test live segment scans.
 	for iter := 0; iter < totalIters; iter++ {
 		glog.Infof("Sleeping for %v seconds to allow manager to scan live segment", sleepTime)
@@ -342,11 +343,18 @@ func TestPartitionManager(t *testing.T) {
 	if len(values) != opts.MaxScanSizeBytes/valueSizeBytes {
 		glog.Fatalf("Expected only 10 messages but we got: %d", len(values))
 	}
+	currNumSegs := len(p.segments)
 	time.Sleep(sleepTime * 4)
 	for iter := 0; iter < totalValues/opts.NumRecordsPerSegmentThreshold; iter++ {
-		if len(p.segments) != (totalValues/opts.NumRecordsPerSegmentThreshold - iter) {
-			glog.Fatalf("Segment wasn't expired properly!")
+		p.Close()
+		p = NewPartition(opts)
+		if len(p.segments) == 1 {
+			break
 		}
+		if len(p.segments) >= currNumSegs {
+			glog.Fatalf("Found %d segments. Expected < %d segments", len(p.segments), currNumSegs)
+		}
+		currNumSegs = len(p.segments)
 		time.Sleep(sleepTime * 2)
 	}
 }

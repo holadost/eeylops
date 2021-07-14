@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -53,7 +54,8 @@ type Partition struct {
 	// List of segments in the partition.
 	segments []Segment
 	// Notification to ask background goroutines to exit.
-	backgroundJobDone chan bool
+	backgroundJobDone        chan bool
+	partitionManagerDoneChan chan bool
 	// Snapshot channel.
 	snapshotChan chan bool
 	// Disposer.
@@ -166,6 +168,7 @@ func NewPartition(opts PartitionOpts) *Partition {
 func (p *Partition) initialize() {
 	p.backgroundJobDone = make(chan bool)
 	p.snapshotChan = make(chan bool)
+	p.partitionManagerDoneChan = make(chan bool, 1)
 	p.disposer = DefaultDisposer()
 	glog.Infof("Initializing partition: %d", p.partitionID)
 	err := os.MkdirAll(p.getSegmentRootDirectory(), 0774)
@@ -183,8 +186,15 @@ func (p *Partition) initialize() {
 			glog.Fatalf("%s Unable to initialize segment due to err: %s", p.logIDStr, err.Error())
 			return
 		}
+		meta := segment.GetMetadata()
+		if meta.Expired {
+			if len(p.segments) != 0 {
+				glog.Fatalf("%s Found an expired segment in the middle of segments. Segment ID: %d",
+					p.logIDStr, meta.ID)
+			}
+			continue
+		}
 		if ii < len(segmentIds)-1 {
-			meta := segment.GetMetadata()
 			if !meta.Immutable {
 				glog.Fatalf("%s Found segment at index: %d(%d), %s to be live", p.logIDStr, ii, len(segmentIds),
 					meta.ToString())
@@ -428,6 +438,7 @@ func (p *Partition) Close() {
 	if p.closed {
 		return
 	}
+	p.closed = true
 	close(p.backgroundJobDone)
 	for _, seg := range p.segments {
 		meta := seg.GetMetadata()
@@ -436,7 +447,6 @@ func (p *Partition) Close() {
 			glog.Fatalf("%s Failed to close segment: %d due to err: %s", p.logIDStr, meta.ID, err.Error())
 		}
 	}
-	p.closed = true
 }
 
 // getSegments returns a list of segments that contains all the elements between the given start and end offsets.
@@ -566,6 +576,7 @@ func (p *Partition) partitionManager() {
 	for {
 		select {
 		case <-p.backgroundJobDone:
+			glog.Infof("%s Partition manager exiting", p.logIDStr)
 			return
 		case <-liveSegTicker.C:
 			p.maybeCreateNewSegment()
@@ -589,6 +600,9 @@ func (p *Partition) maybeCreateNewSegment() {
 func (p *Partition) shouldCreateNewSegment() bool {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
+	if p.closed {
+		return false
+	}
 	seg := p.segments[len(p.segments)-1]
 	metadata := seg.GetMetadata()
 	numRecords := metadata.EndOffset - metadata.StartOffset + 1
@@ -603,6 +617,9 @@ func (p *Partition) shouldCreateNewSegment() bool {
 func (p *Partition) createNewSegmentWithLock() {
 	p.partitionCfgLock.Lock()
 	defer p.partitionCfgLock.Unlock()
+	if p.closed {
+		return
+	}
 	p.createNewSegment()
 }
 
@@ -661,15 +678,7 @@ func (p *Partition) createNewSegment() {
 func (p *Partition) maybeReclaimExpiredSegments() {
 	glog.Infof("%s Checking if segments need to be expired", p.logIDStr)
 	if p.shouldExpireSegment() {
-		expiredSegIds := p.expireSegments()
-		for _, segId := range expiredSegIds {
-			p.disposer.Dispose(p.getSegmentDirectory(segId), func(err error) {
-				if err != nil {
-					glog.Fatalf("%s Unable to delete segment: %d in partition: [%s:%d] due to err: %s",
-						p.logIDStr, segId, p.topicName, p.partitionID, err.Error())
-				}
-			})
-		}
+		p.expireSegments()
 	}
 }
 
@@ -677,6 +686,9 @@ func (p *Partition) maybeReclaimExpiredSegments() {
 func (p *Partition) shouldExpireSegment() bool {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
+	if p.closed {
+		return false
+	}
 	seg := p.segments[0]
 	metadata := seg.GetMetadata()
 	if !p.isSegExpirable(&metadata) {
@@ -687,42 +699,62 @@ func (p *Partition) shouldExpireSegment() bool {
 }
 
 // expireSegments expires all the required segments.
-func (p *Partition) expireSegments() []int {
-	p.partitionCfgLock.Lock()
-	defer p.partitionCfgLock.Unlock()
-	lastIdxExpired := p.markSegmentsAsExpiredAndGetLastIdx()
-	if lastIdxExpired == -1 {
-		return nil
-	}
-	var expiredSegIds []int
-	for ii := 0; ii <= lastIdxExpired; ii++ {
-		expiredSegIds = append(expiredSegIds, p.segments[ii].ID())
-	}
-	if lastIdxExpired == len(p.segments)-1 {
-		// All segments have expired. Use the lockless createNewSegment as we have already acquired the lock.
-		p.segments = nil
-		p.createNewSegment()
-	} else {
-		p.segments = p.segments[lastIdxExpired+1:]
+func (p *Partition) expireSegments() {
+	expiredSegs := p.removeExpiredSegments()
 
+	// The expired segs have been removed from segments. We can now safely acquire the RLock and delete the
+	// segments
+	p.partitionCfgLock.RLock()
+	defer p.partitionCfgLock.RUnlock()
+	for _, seg := range expiredSegs {
+		segId := seg.ID()
+		seg.MarkExpired()
+		err := seg.Close()
+		if err != nil {
+			glog.Fatalf("%s Unable to close segment due to err: %s", p.logIDStr, err.Error())
+		}
+		segDir := p.getSegmentDirectory(segId)
+		expiredSegDirName := filepath.Base(segDir) + "-expired"
+		expiredSegDir := path.Join(filepath.Dir(segDir), expiredSegDirName)
+		err = os.Rename(segDir, expiredSegDir)
+		if err != nil {
+			glog.Fatalf("%s Unable to rename segment directory as expired due to err: %s",
+				p.logIDStr, err.Error())
+		}
+		p.disposer.Dispose(expiredSegDir, func(err error) {
+			if err != nil {
+				glog.Fatalf("%s Unable to delete segment: %d in partition: [%s:%d] due to err: %s",
+					p.logIDStr, segId, p.topicName, p.partitionID, err.Error())
+			}
+		})
 	}
-	return expiredSegIds
 }
 
-// markSegmentsAsExpiredAndGetLastIdx expires segments and returns the last index in segments that was expired. This
-// method assumes that partitionCfgLock has already been acquired.
-func (p *Partition) markSegmentsAsExpiredAndGetLastIdx() int {
+// removeExpiredSegments removes the expired segment(s) from segments.
+func (p *Partition) removeExpiredSegments() []Segment {
+	// Acquire write lock on partition as we are going to be changing segments.
+	p.partitionCfgLock.Lock()
+	defer p.partitionCfgLock.Unlock()
+	if p.closed {
+		return nil
+	}
+
 	lastIdxExpired := -1
 	for ii, seg := range p.segments {
 		metadata := seg.GetMetadata()
 		if !p.isSegExpirable(&metadata) {
 			break
 		}
-		glog.Infof("%s Marking segment: %d as expired", p.logIDStr, metadata.ID)
 		lastIdxExpired = ii
-		seg.MarkExpired()
 	}
-	return lastIdxExpired
+	if lastIdxExpired == len(p.segments)-1 {
+		p.segments = nil
+		p.createNewSegment()
+		return nil
+	}
+	var expiredSegs []Segment
+	expiredSegs, p.segments = p.segments[0:lastIdxExpired+1], p.segments[lastIdxExpired+1:]
+	return expiredSegs
 }
 
 func (p *Partition) isSegExpirable(metadata *SegmentMetadata) bool {
