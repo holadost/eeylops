@@ -253,7 +253,7 @@ func (p *Partition) Append(values [][]byte) error {
 	return nil
 }
 
-func (p *Partition) AppendWithTs(values [][]byte, tsNano int64) error {
+func (p *Partition) AppendV2(values [][]byte, tsNano int64, lastRLogIdx int64) error {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
 	if p.closed {
