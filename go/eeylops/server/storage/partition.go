@@ -221,6 +221,17 @@ func (p *Partition) initialize() {
 	}
 	p.closed = false
 
+	// Delete all expired segments from the file system.
+	expiredSegDirs := p.getExpiredFileSystemSegments()
+	createCB := func(segDir string) func(error) {
+		return func(err error) {
+			glog.Fatalf("%s Unable to delete seg dir: %s due to err: %s", p.logIDStr, segDir, err.Error())
+		}
+	}
+	for _, segDir := range expiredSegDirs {
+		p.disposer.Dispose(segDir, createCB(segDir))
+	}
+
 	// Start partition manager.
 	go p.partitionManager()
 }
@@ -836,4 +847,25 @@ func (p *Partition) getFileSystemSegments() []int {
 		}
 	}
 	return segmentIDs
+}
+
+// getExpiredFileSystemSegments returns all the segments that have the expired suffix in the segment directory name.
+// It is possible to have such directories if the directories were renamed but were not deleted.
+func (p *Partition) getExpiredFileSystemSegments() []string {
+	segRootDir := p.getSegmentRootDirectory()
+	fileInfo, err := ioutil.ReadDir(segRootDir)
+	if err != nil {
+		glog.Fatalf("%s Unable to read partition directory and find segments due to err: %v",
+			p.logIDStr, err)
+		return nil
+	}
+	var expiredSegs []string
+	for _, file := range fileInfo {
+		if file.IsDir() {
+			if strings.HasSuffix(file.Name(), KExpiredSegmentDirSuffix) {
+				expiredSegs = append(expiredSegs, path.Join(segRootDir, file.Name()))
+			}
+		}
+	}
+	return expiredSegs
 }
