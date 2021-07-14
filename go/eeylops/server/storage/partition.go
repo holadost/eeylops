@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +19,7 @@ import (
 const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
 const KSegmentsDirectoryName = "segments"
 const KMaxScanSizeBytes = 15 * 1000000 // 15MB
+const KExpiredSegmentDirSuffix = "-expired"
 
 var (
 	FlagExpiredSegmentMonitorIntervalSecs = flag.Int("partition_exp_segment_monitor_interval_seconds", 600,
@@ -714,8 +716,9 @@ func (p *Partition) expireSegments() {
 			glog.Fatalf("%s Unable to close segment due to err: %s", p.logIDStr, err.Error())
 		}
 		segDir := p.getSegmentDirectory(segId)
-		expiredSegDirName := filepath.Base(segDir) + "-expired"
+		expiredSegDirName := filepath.Base(segDir) + KExpiredSegmentDirSuffix
 		expiredSegDir := path.Join(filepath.Dir(segDir), expiredSegDirName)
+		glog.Infof("%s Renaming segment directory for segment: %d to %s", p.logIDStr, segId, expiredSegDir)
 		err = os.Rename(segDir, expiredSegDir)
 		if err != nil {
 			glog.Fatalf("%s Unable to rename segment directory as expired due to err: %s",
@@ -807,6 +810,9 @@ func (p *Partition) getFileSystemSegments() []int {
 	var segmentIDs []int
 	for _, file := range fileInfo {
 		if file.IsDir() {
+			if strings.HasSuffix(file.Name(), KExpiredSegmentDirSuffix) {
+				continue
+			}
 			segmentID, err := strconv.Atoi(file.Name())
 			if err != nil {
 				glog.Fatalf("%s Unable to convert segment id to int due to err: %v",
