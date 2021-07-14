@@ -287,28 +287,31 @@ func TestPartitionScan(t *testing.T) {
 }
 
 func TestPartitionManager(t *testing.T) {
-	testMarker("TestPartitionManager")
-	testDir := "/tmp/eeylops/TestPartitionManager"
+	testMarker("TestPartitionManagerExpireSegment")
+	testDir := "/tmp/eeylops/TestPartitionManagerExpireSegment"
 	_ = os.RemoveAll(testDir)
+
+	totalValues := 500
+	numValuesPerBatch := 50
+	valueSizeBytes := 100
+	totalIters := totalValues / numValuesPerBatch
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
 		RootDirectory:                  testDir,
-		ExpiredSegmentPollIntervalSecs: 0,
+		ExpiredSegmentPollIntervalSecs: 1,
 		LiveSegmentPollIntervalSecs:    1,
 		NumRecordsPerSegmentThreshold:  100,
 		MaxScanSizeBytes:               1500,
 		TTLSeconds:                     86400 * 7,
 	}
+	sleepTime := 500*time.Millisecond + time.Duration(opts.ExpiredSegmentPollIntervalSecs)*time.Millisecond*1000
+	opts.TTLSeconds = int((time.Duration(totalIters) * sleepTime) / time.Second)
 	p := NewPartition(opts)
-	totalValues := 500
-	numValuesPerBatch := 50
-	valueSizeBytes := 100
-	totalIters := totalValues / numValuesPerBatch
 	// Test live segment scans.
 	for iter := 0; iter < totalIters; iter++ {
-		glog.Infof("Sleeping for 1.5 second to allow manager to scan live segment")
-		time.Sleep(1500 * time.Millisecond)
+		glog.Infof("Sleeping for %v seconds to allow manager to scan live segment", sleepTime)
+		time.Sleep(sleepTime)
 		var values [][]byte
 		for ii := 0; ii < numValuesPerBatch; ii++ {
 			token := make([]byte, valueSizeBytes)
@@ -320,8 +323,10 @@ func TestPartitionManager(t *testing.T) {
 			glog.Fatalf("Append failed due to err: %s", err.Error())
 		}
 	}
-	if len(p.segments) != totalValues/opts.NumRecordsPerSegmentThreshold {
-		glog.Fatalf("Expected %d segments, got: %d", totalValues/numValuesPerBatch, len(p.segments))
+	time.Sleep(sleepTime)
+	if len(p.segments) != totalValues/opts.NumRecordsPerSegmentThreshold+1 {
+		glog.Fatalf("Expected %d segments, got: %d", totalValues/opts.NumRecordsPerSegmentThreshold+1,
+			len(p.segments))
 	}
 
 	// Test scans with max scan size bytes.
@@ -336,5 +341,12 @@ func TestPartitionManager(t *testing.T) {
 	}
 	if len(values) != opts.MaxScanSizeBytes/valueSizeBytes {
 		glog.Fatalf("Expected only 10 messages but we got: %d", len(values))
+	}
+	time.Sleep(sleepTime * 4)
+	for iter := 0; iter < totalValues/opts.NumRecordsPerSegmentThreshold; iter++ {
+		if len(p.segments) != (totalValues/opts.NumRecordsPerSegmentThreshold - iter) {
+			glog.Fatalf("Segment wasn't expired properly!")
+		}
+		time.Sleep(sleepTime * 2)
 	}
 }
