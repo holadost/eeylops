@@ -287,8 +287,8 @@ func TestPartitionScan(t *testing.T) {
 }
 
 func TestPartitionManager(t *testing.T) {
-	testMarker("TestPartitionManagerExpireSegment")
-	testDir := "/tmp/eeylops/TestPartitionManagerExpireSegment"
+	testMarker("TestPartitionManager")
+	testDir := "/tmp/eeylops/TestPartitionManager"
 	_ = os.RemoveAll(testDir)
 
 	totalValues := 500
