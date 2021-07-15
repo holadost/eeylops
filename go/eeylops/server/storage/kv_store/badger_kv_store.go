@@ -1,4 +1,4 @@
-package storage
+package kv_store
 
 import (
 	badger "github.com/dgraph-io/badger/v3"
@@ -66,7 +66,7 @@ func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
 		if err == badger.ErrKeyNotFound {
 			return val, ErrKVStoreKeyNotFound
 		} else {
-			return val, ErrKVStoreGeneric
+			return val, ErrKVStoreBackend
 		}
 	}
 	return val, err
@@ -93,7 +93,7 @@ func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
 	})
 	if err != nil {
 		glog.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
-		return ErrKVStoreGeneric
+		return ErrKVStoreBackend
 	}
 	return nil
 }
@@ -115,7 +115,7 @@ func (kvStore *BadgerKVStore) Delete(key []byte) error {
 	})
 	if err != nil {
 		glog.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
-		return ErrKVStoreGeneric
+		return ErrKVStoreBackend
 	}
 	return nil
 }
@@ -126,7 +126,8 @@ func (kvStore *BadgerKVStore) DeleteS(key string) error {
 }
 
 // Scan scans the DB in ascending order from the given start key. if numValues is < 0, the entire DB is scanned.
-func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int) (keys [][]byte, values [][]byte, nextKey []byte, retErr error) {
+func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
+	keys [][]byte, values [][]byte, nextKey []byte, retErr error) {
 	txn := kvStore.db.NewTransaction(false)
 	defer txn.Discard()
 	itr := txn.NewIterator(badger.DefaultIteratorOptions)
@@ -138,8 +139,14 @@ func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int) (keys [][]byt
 	} else {
 		itr.Seek(startKey)
 	}
+	currSizeBytes := 0
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
+		valSize := int(item.ValueSize())
+		if currSizeBytes+valSize > scanSizeBytes {
+			break
+		}
+		currSizeBytes += valSize
 		key := item.KeyCopy(nil)
 		val, err := item.ValueCopy(nil)
 		if err != nil {
@@ -157,8 +164,9 @@ func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int) (keys [][]byt
 }
 
 // ScanS scans the DB in ascending order from the given start key.
-func (kvStore *BadgerKVStore) ScanS(startKey string, numValues int) (keys []string, values []string, nextKey string, retErr error) {
-	keysByte, valuesByte, nextKeyByte, retErrByte := kvStore.Scan([]byte(startKey), numValues)
+func (kvStore *BadgerKVStore) ScanS(startKey string, numValues int, scanSizeBytes int, reverse bool) (
+	keys []string, values []string, nextKey string, retErr error) {
+	keysByte, valuesByte, nextKeyByte, retErrByte := kvStore.Scan([]byte(startKey), numValues, scanSizeBytes, reverse)
 	if retErrByte != nil {
 		return nil, nil, "", retErrByte
 	}
@@ -240,18 +248,18 @@ func (kvStore *BadgerKVStore) MultiGetS(keys []string) ([]string, []error) {
 func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
 	if kvStore.closed {
 		glog.Errorf("KV store is already closed")
-		return ErrKVStoreClosed
+		return ErrKVStoreBackend
 	}
 	wb := kvStore.db.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
 			glog.Errorf("Unable to perform batch put due to err: %s", err.Error())
-			return ErrKVStoreGeneric
+			return ErrKVStoreBackend
 		}
 	}
 	if err := wb.Flush(); err != nil {
 		glog.Errorf("Unable to perform flush after batch put due to err: %s", err.Error())
-		return ErrKVStoreGeneric
+		return ErrKVStoreBackend
 	}
 	return nil
 }
@@ -284,7 +292,7 @@ func (kvStore *BadgerKVStore) BatchDelete(keys [][]byte) error {
 	})
 	if err != nil {
 		glog.Errorf("Unable to batch delete keys: %v due to err: %s", keys, err.Error())
-		return ErrKVStoreGeneric
+		return ErrKVStoreBackend
 	}
 	return nil
 }
@@ -309,6 +317,10 @@ func (kvStore *BadgerKVStore) Close() error {
 	kvStore.closed = true
 	kvStore.db = nil
 	return err
+}
+
+func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte, endKey []byte, batchSize uint) Scanner {
+	return nil
 }
 
 func generatePrefixKey(key []byte, prefix string) []byte {

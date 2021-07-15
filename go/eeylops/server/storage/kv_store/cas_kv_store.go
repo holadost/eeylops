@@ -1,4 +1,4 @@
-package storage
+package kv_store
 
 type CASClock struct {
 	Epoch            int64

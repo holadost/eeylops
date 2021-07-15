@@ -1,4 +1,4 @@
-package storage
+package kv_store
 
 type KVStore interface {
 	GetDataDir() string
@@ -31,4 +31,10 @@ type KVStore interface {
 	// returns a slice of keys, values, the next key and scan error(if any).
 	Scan([]byte, int, int, bool) ([][]byte, [][]byte, []byte, error)
 	ScanS(string, int, int, bool) ([]string, []string, string, error)
+
+	// CreateScanner creates a scanner that can be used to iterate over the underlying store.
+	CreateScanner(prefix []byte, startKey []byte, endKey []byte, batchSize uint) Scanner
+}
+
+type Scanner interface {
 }
