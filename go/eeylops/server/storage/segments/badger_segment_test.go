@@ -1,4 +1,4 @@
-package storage
+package segments
 
 import (
 	"eeylops/server/base"

@@ -1,9 +1,11 @@
-package storage
+package segments
 
 import (
 	"context"
 	"eeylops/server/base"
-	"encoding/binary"
+	"eeylops/server/storage"
+	"eeylops/server/storage/kv_store"
+	"eeylops/util"
 	"fmt"
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
@@ -13,19 +15,21 @@ import (
 	"time"
 )
 
+const kLastRLogIdxKey = "last_rlog_idx"
+
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	ddb        *badger.DB         // Segment data db.
-	mdb        *segmentMetadataDB // Segment metadata ddb.
-	ctx        context.Context
-	cancelFunc context.CancelFunc
-	nextOffSet base.Offset      // Next start offset for new appends.
-	segLock    sync.RWMutex     // A RW lock for the segment.
-	closed     bool             // Flag that indicates whether the segment is closed.
-	rootDir    string           // Root directory of this segment.
-	metadata   *SegmentMetadata // Cached segment metadata.
-	logStr     string           // Log string associated with the segment for easy debugging.
-	appendLock sync.Mutex       // A lock for appends allowing only one append at a time.
+	ddb         *badger.DB         // Segment data db.
+	dataDB      kv_store.KVStore   // Backing KV store to hold the data.
+	metadataDB  *SegmentMetadataDB // Segment metadata ddb.
+	nextOffSet  base.Offset        // Next start offset for new appends.
+	segLock     sync.RWMutex       // A RW lock for the segment.
+	closed      bool               // Flag that indicates whether the segment is closed.
+	rootDir     string             // Root directory of this segment.
+	metadata    *SegmentMetadata   // Cached segment metadata.
+	logStr      string             // Log string associated with the segment for easy debugging.
+	appendLock  sync.Mutex         // A lock for appends allowing only one append at a time.
+	lastRLogIdx int64              // Last replicated log index.
 }
 
 // NewBadgerSegment initializes a new instance of badger segment.
@@ -43,10 +47,10 @@ func NewBadgerSegment(rootDir string) (*BadgerSegment, error) {
 func (seg *BadgerSegment) initialize() {
 	glog.Infof("Initializing badger segment located at: %s", seg.rootDir)
 	// Initialize metadata ddb.
-	seg.mdb = newSegmentMetadataDB(seg.rootDir)
-	seg.metadata = seg.mdb.GetMetadata()
+	seg.metadataDB = NewSegmentMetadataDB(seg.rootDir)
+	seg.metadata = seg.metadataDB.GetMetadata()
 	if seg.metadata.ID == 0 {
-		glog.Infof("Did not find any metadata associated with this segment")
+		glog.Infof("Did not find any metadata associated with this segment. This must be a new segment!")
 	}
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
 	opts.SyncWrites = true
@@ -60,7 +64,7 @@ func (seg *BadgerSegment) initialize() {
 	if err != nil {
 		glog.Fatalf("Unable to open segment: %s due to err: %s", seg.logStr, err.Error())
 	}
-	seg.ctx, seg.cancelFunc = context.WithCancel(context.Background())
+	seg.dataDB = kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
 	seg.closed = false
 	seg.initializeNextOffset()
 	seg.updateLogStr()
@@ -77,11 +81,11 @@ func (seg *BadgerSegment) Close() error {
 		return nil
 	}
 	glog.Infof("Closing segment: %s", seg.logStr)
-	seg.cancelFunc()
 	err := seg.ddb.Close()
-	seg.mdb.Close()
+	seg.metadataDB.Close()
 	seg.ddb = nil
-	seg.mdb = nil
+	err = seg.dataDB.Close()
+	seg.metadataDB = nil
 	seg.closed = true
 	return err
 }
@@ -91,7 +95,8 @@ func (seg *BadgerSegment) IsEmpty() bool {
 	return seg.nextOffSet == 0
 }
 
-// Append implements the Segment interface. This method appends the given values to the segment.
+// Append implements the Segment interface. This method appends the given values to the segment. It also updates the
+// the last log index in the store as part of the same write.
 func (seg *BadgerSegment) Append(values [][]byte) error {
 	// Acquire a read lock on the segment as we are not changing the segment metadata.
 	seg.segLock.RLock()
@@ -117,9 +122,82 @@ func (seg *BadgerSegment) Append(values [][]byte) error {
 	return nil
 }
 
+func (seg *BadgerSegment) AppendV2(ctx context.Context, arg *storage.AppendEntriesArg) *storage.AppendEntriesRet {
+	seg.segLock.RLock()
+	defer seg.segLock.RUnlock()
+	var ret storage.AppendEntriesRet
+	ret.Error = nil
+	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable {
+		ret.Error = ErrSegmentClosed
+		return &ret
+	}
+	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
+	values := makeMessageValues(arg.Entries, arg.Timestamp)
+	if arg.RLogIdx >= 0 {
+		keys = append(keys, []byte(kLastRLogIdxKey))
+		values = append(values, util.UintToBytes(uint64(arg.RLogIdx)))
+	}
+	err := seg.dataDB.BatchPut(keys, values)
+	if err != nil {
+		glog.Errorf("Unable to append entries in segment: %d due to err: %s", seg.ID(), err.Error())
+		ret.Error = ErrSegmentBackend
+	}
+	return &ret
+}
+
 // Scan implements the Segment interface. It attempts to fetch numMessages starting from the given
 // startOffset.
 func (seg *BadgerSegment) Scan(startOffset base.Offset, numMessages uint64) (values [][]byte, errs []error) {
+	seg.segLock.RLock()
+	defer seg.segLock.RUnlock()
+	tmpNumMsgs := base.Offset(numMessages)
+	if seg.closed || seg.metadata.Expired {
+		glog.Errorf("Segment: %s is already closed", seg.logStr)
+		for ii := 0; ii < int(startOffset+tmpNumMsgs); ii++ {
+			errs = append(errs, ErrSegmentClosed)
+		}
+		return
+	}
+	// Compute the keys that need to be fetched.
+	no := seg.nextOffSet
+	if startOffset+tmpNumMsgs >= no {
+		tmpNumMsgs = no - startOffset
+	}
+	if no == 0 {
+		return values, errs
+	}
+	keys := seg.generateKeys(startOffset, tmpNumMsgs)
+	// Fetch values from DB.
+	// TODO: Test/benchmark using Txn.iterator(itr.Seek(start_key) to get to the key of interest).
+	seg.ddb.View(func(txn *badger.Txn) error {
+		for _, key := range keys {
+			item, err := txn.Get(key)
+			if err != nil {
+				glog.Errorf("Unable to get key: %v from segment: %s due to err: %s",
+					key, seg.logStr, err.Error())
+				errs = append(errs, ErrGenericSegment)
+				values = append(values, nil)
+				continue
+			}
+			tmpValue, err := item.ValueCopy(nil)
+			if err != nil {
+				glog.Errorf("Unable to parse value for key: %v on segment: %s due to err: %s",
+					key, seg.logStr, err.Error())
+				errs = append(errs, ErrGenericSegment)
+				values = append(values, nil)
+				continue
+			}
+			errs = append(errs, nil)
+			values = append(values, tmpValue)
+		}
+		return nil
+	})
+	return
+}
+
+// ScanV2 implements the Segment interface. It attempts to fetch numMessages starting from the given
+// startOffset.
+func (seg *BadgerSegment) ScanV2(startOffset base.Offset, numMessages uint64) (values [][]byte, errs []error) {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	tmpNumMsgs := base.Offset(numMessages)
@@ -176,7 +254,7 @@ func (seg *BadgerSegment) MarkImmutable() {
 	if seg.nextOffSet != 0 {
 		seg.metadata.EndOffset = seg.metadata.StartOffset + seg.nextOffSet - 1
 	}
-	seg.mdb.PutMetadata(seg.metadata)
+	seg.metadataDB.PutMetadata(seg.metadata)
 }
 
 // MarkExpired marks the segment as immutable.
@@ -185,7 +263,7 @@ func (seg *BadgerSegment) MarkExpired() {
 	defer seg.segLock.Unlock()
 	seg.metadata.Expired = true
 	seg.metadata.ExpiredTimestamp = time.Now()
-	seg.mdb.PutMetadata(seg.metadata)
+	seg.metadataDB.PutMetadata(seg.metadata)
 }
 
 // GetMetadata returns a copy of the metadata associated with the segment.
@@ -225,7 +303,7 @@ func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
-	seg.mdb.PutMetadata(&sm)
+	seg.metadataDB.PutMetadata(&sm)
 	seg.metadata = &sm
 	seg.updateLogStr()
 }
@@ -244,9 +322,7 @@ func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base
 	lastOffset := startOffset + base.Offset(numMessages)
 	var keys [][]byte
 	for ii := startOffset; ii < lastOffset; ii++ {
-		val := make([]byte, 8)
-		binary.BigEndian.PutUint64(val, uint64(ii))
-		keys = append(keys, val)
+		keys = append(keys, util.UintToBytes(uint64(ii)))
 	}
 	return keys
 }
@@ -262,7 +338,7 @@ func (seg *BadgerSegment) initializeNextOffset() {
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
 		val := item.KeyCopy(nil)
-		seg.nextOffSet = base.Offset(binary.BigEndian.Uint64(val)) + 1
+		seg.nextOffSet = base.Offset(util.BytesToUint(val)) + 1
 		hasVal = true
 		break
 	}

@@ -1,5 +1,5 @@
 // myschema.fbs
-namespace storage;
+namespace server.storage.segments;
 
 table Message {
   timestamp:long;

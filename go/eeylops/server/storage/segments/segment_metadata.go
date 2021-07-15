@@ -1,39 +1,18 @@
-package storage
+package segments
 
 import (
 	"eeylops/server/base"
 	"encoding/json"
 	"fmt"
 	"github.com/golang/glog"
-	_ "github.com/jinzhu/gorm/dialects/postgres"
-	_ "github.com/jinzhu/gorm/dialects/sqlite"
-	_ "github.com/lib/pq"
 	"time"
 )
 
-type Segment interface {
-	ID() int
-	// Close the segment.
-	Close() error
-	// Append values to the segment.
-	Append([][]byte) error
-	// Scan numMessages values from the segment store from the given start offset.
-	Scan(startOffset base.Offset, numMessages uint64) ([][]byte, []error)
-	// IsEmpty returns true if the segment is empty. False otherwise.
-	IsEmpty() bool
-	// Stats fetches the stats for this instance of segment.
-	Stats()
-	// GetMetadata fetches the metadata of the segment.
-	GetMetadata() SegmentMetadata
-	// GetRange returns the start and end offset of the segment.
-	GetRange() (base.Offset, base.Offset)
-	// SetMetadata sets the metadata. This is updated internally and by the partition when a segment is created.
-	SetMetadata(SegmentMetadata)
-	// MarkImmutable marks the segment as immutable.
-	MarkImmutable()
-	// MarkExpired marks the segment as expired.
-	MarkExpired()
-}
+// Constants.
+const dataDirName = "data"
+const metadataDirName = "metadata"
+const metadataDbName = "metadata.db"
+const metadataKeyName = "metadata"
 
 // SegmentMetadata holds the metadata of a segment.
 // Note: Make sure to add any new fields to the ToString() method as well.
@@ -49,7 +28,7 @@ type SegmentMetadata struct {
 	ExpiredTimestamp   time.Time   `json:"expired_timestamp"`   // Time when segment was expired.
 }
 
-func newSegmentMetadata(data []byte) *SegmentMetadata {
+func NewSegmentMetadata(data []byte) *SegmentMetadata {
 	var sm SegmentMetadata
 	err := json.Unmarshal(data, &sm)
 	if err != nil {
@@ -71,9 +50,3 @@ func (sm *SegmentMetadata) Serialize() []byte {
 	}
 	return data
 }
-
-// Constants.
-const dataDirName = "data"
-const metadataDirName = "metadata"
-const metadataDbName = "metadata.db"
-const metadataKeyName = "metadata"
