@@ -5,23 +5,6 @@ import (
 )
 
 var (
-	// ErrKVStoreKeyNotFound is returned when the given key is not found in the KV store.
-	ErrKVStoreKeyNotFound = errors.New("ErrKVStoreKeyNotFound: key not found")
-
-	// ErrKVStoreClosed is returned when the KV store is closed.
-	ErrKVStoreClosed = errors.New("ErrKVStoreClosed: kv store is closed")
-
-	// ErrKVStoreGeneric is returned when there is some generic kv store error.
-	ErrKVStoreGeneric = errors.New("ErrKVStoreGeneric: kv store generic error")
-
-	// ErrGenericSegment when we have an unexpected segment error.
-	ErrGenericSegment = errors.New("ErrGenericSegment: generic segment error")
-
-	// ErrSegmentBackend when we have an unexpected segment error.
-	ErrSegmentBackend = errors.New("ErrSegmentBackend: segment backend error")
-
-	// ErrSegmentClosed is returned if we try to access the segment when it is closed.
-	ErrSegmentClosed = errors.New("ErrSegmentClosed: segment is closed")
 
 	// ErrPartitionAppend is returned when there was an error while appending entries to the partition.
 	ErrPartitionAppend = errors.New("ErrPartitionAppend: partition append error")

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"eeylops/server/base"
+	"eeylops/server/storage/kv_store"
 	"encoding/json"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
@@ -14,7 +15,7 @@ const topicStoreDirectory = "topic_store"
 
 // TopicStore holds all the topics for eeylops.
 type TopicStore struct {
-	kvStore *BadgerKVStore
+	kvStore *kv_store.BadgerKVStore
 	rootDir string
 	tsDir   string
 }
@@ -40,7 +41,7 @@ func (ts *TopicStore) initialize() {
 	opts.BlockCacheSize = 0
 	opts.Compression = options.None
 	opts.VerifyValueChecksum = true
-	ts.kvStore = NewBadgerKVStore(ts.tsDir, opts)
+	ts.kvStore = kv_store.NewBadgerKVStore(ts.tsDir, opts)
 }
 
 func (ts *TopicStore) Close() error {
@@ -119,7 +120,7 @@ func (ts *TopicStore) GetTopic(topicName string) (base.Topic, error) {
 }
 
 func (ts *TopicStore) GetAllTopics() ([]base.Topic, error) {
-	_, values, _, err := ts.kvStore.Scan(nil, -1)
+	_, values, _, err := ts.kvStore.Scan(nil, -1, -1)
 	glog.Infof("Total number of topics in the store: %d", len(values))
 	if err != nil {
 		glog.Errorf("Unable to get all topics in topic store due to err: %s", err.Error())

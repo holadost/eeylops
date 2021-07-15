@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"eeylops/util/logging/glog"
 	"fmt"
 )
 
@@ -29,27 +30,27 @@ func (logger *PrefixLogger) GetPrefix() string {
 
 func (logger *PrefixLogger) Infof(format string, args ...interface{}) {
 	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	Infof(newFormat, args...)
+	glog.Infof(newFormat, args...)
 }
 
 func (logger *PrefixLogger) Errorf(format string, args ...interface{}) {
 	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	Errorf(newFormat, args...)
+	glog.Errorf(newFormat, args...)
 }
 
 func (logger *PrefixLogger) Warningf(format string, args ...interface{}) {
 	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	Warningf(newFormat, args...)
+	glog.Warningf(newFormat, args...)
 }
 
 func (logger *PrefixLogger) Fatalf(format string, args ...interface{}) {
 	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	Fatalf(newFormat, args...)
+	glog.Fatalf(newFormat, args...)
 }
 
 func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
 	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	V(Level(v)).Infof(newFormat, args...)
+	glog.V(glog.Level(v)).Infof(newFormat, args...)
 }
 
 func createPrefixStr(prefix string) string {
