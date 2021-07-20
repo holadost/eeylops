@@ -182,7 +182,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *storage_base.ScanEntrie
 	scanner := seg.dataDB.CreateScanner([]byte(""), sk)
 	defer scanner.Close()
 	bytesScannedSoFar := 0
-	for scanner.Rewind(); scanner.Valid(); scanner.Next() {
+	for ; scanner.Valid(); scanner.Next() {
 		key, msg, err := scanner.GetItem()
 		if err != nil {
 			seg.logger.Errorf("Failed to scan offset due to scan backend err: %s", err.Error())

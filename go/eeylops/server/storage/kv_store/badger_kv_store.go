@@ -349,17 +349,15 @@ func newBadgerScanner(db *badger.DB, startKey []byte) *BadgerScanner {
 
 func (scanner *BadgerScanner) initialize() {
 	scanner.txn = scanner.db.NewTransaction(false)
-	itr := scanner.txn.NewIterator(badger.DefaultIteratorOptions)
-	// Seek to the correct entry.
-	if (scanner.startKey == nil) || len(scanner.startKey) == 0 {
-		itr.Rewind()
-	} else {
-		itr.Seek(scanner.startKey)
-	}
+	scanner.iter = scanner.txn.NewIterator(badger.DefaultIteratorOptions)
+	scanner.Rewind()
 }
 
 func (scanner *BadgerScanner) Rewind() {
 	scanner.iter.Rewind()
+	if len(scanner.startKey) > 0 {
+		scanner.iter.Seek(scanner.startKey)
+	}
 }
 
 func (scanner *BadgerScanner) Valid() bool {
