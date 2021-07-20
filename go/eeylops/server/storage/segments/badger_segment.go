@@ -17,6 +17,10 @@ import (
 
 const kLastRLogIdxKey = "last_rlog_idx"
 
+var (
+	kLastRLogIdxKeyBytes = []byte(kLastRLogIdxKey)
+)
+
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
 	ddb         *badger.DB         // Segment data db.
@@ -133,13 +137,24 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *sbase.AppendEntriesAr
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
 	values := makeMessageValues(arg.Entries, arg.Timestamp)
 	if arg.RLogIdx >= 0 {
-		keys = append(keys, []byte(kLastRLogIdxKey))
+		if arg.RLogIdx <= seg.lastRLogIdx {
+			seg.logger.Errorf("Invalid replicated log index: %d. Expected value greater than: %d",
+				arg.RLogIdx, seg.lastRLogIdx)
+			ret.Error = ErrSegmentInvalidRLogIdx
+			return &ret
+		}
+		keys = append(keys, kLastRLogIdxKeyBytes)
 		values = append(values, util.UintToBytes(uint64(arg.RLogIdx)))
 	}
 	err := seg.dataDB.BatchPut(keys, values)
 	if err != nil {
 		seg.logger.Errorf("Unable to append entries in segment: %d due to err: %s", seg.ID(), err.Error())
 		ret.Error = ErrSegmentBackend
+		return &ret
+	}
+	// Update the last replicated log index for the segment.
+	if arg.RLogIdx >= 0 {
+		seg.lastRLogIdx = arg.RLogIdx
 	}
 	return &ret
 }
