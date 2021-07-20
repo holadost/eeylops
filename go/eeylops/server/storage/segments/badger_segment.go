@@ -3,7 +3,7 @@ package segments
 import (
 	"context"
 	"eeylops/server/base"
-	storage_base "eeylops/server/storage/base"
+	sbase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
@@ -32,6 +32,8 @@ type BadgerSegment struct {
 	openedOnce  bool               // A flag to indicate if the segment was opened once. A segment cannot be
 	// closed and reopened.
 	logger        *logging.PrefixLogger // Logger object.
+	topicName     string                // Topic name.
+	partitionID   uint                  // Partition ID.
 	scanSizeBytes int                   // Maximum scan size in bytes.
 }
 
@@ -53,6 +55,9 @@ func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
 	seg.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment:%d", -1), opts.ParentLogger)
 	seg.initialize()
 	seg.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment:%d", -1), opts.ParentLogger)
+	seg.topicName = opts.Topic
+	seg.partitionID = opts.PartitionID
+	seg.scanSizeBytes = opts.ScanSizeBytes
 	return seg, nil
 }
 
@@ -116,10 +121,10 @@ func (seg *BadgerSegment) IsEmpty() bool {
 	return seg.nextOffSet == 0
 }
 
-func (seg *BadgerSegment) Append(ctx context.Context, arg *storage_base.AppendEntriesArg) *storage_base.AppendEntriesRet {
+func (seg *BadgerSegment) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sbase.AppendEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
-	var ret storage_base.AppendEntriesRet
+	var ret sbase.AppendEntriesRet
 	ret.Error = nil
 	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable {
 		ret.Error = ErrSegmentClosed
@@ -141,10 +146,10 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *storage_base.AppendEn
 
 // Scan implements the Segment interface. It attempts to fetch numMessages starting from the given
 // startOffset.
-func (seg *BadgerSegment) Scan(ctx context.Context, arg *storage_base.ScanEntriesArg) *storage_base.ScanEntriesRet {
+func (seg *BadgerSegment) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.ScanEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
-	var ret storage_base.ScanEntriesRet
+	var ret sbase.ScanEntriesRet
 	if seg.closed || seg.metadata.Expired {
 		seg.logger.Errorf("Segment is already closed")
 		ret.Error = ErrSegmentClosed
@@ -193,12 +198,6 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *storage_base.ScanEntrie
 		}
 		offset := seg.keyToOffset(key)
 		val, ts := fetchValueFromMessage(msg)
-		if seg.scanSizeBytes > 0 {
-			bytesScannedSoFar += len(val)
-			if bytesScannedSoFar > seg.scanSizeBytes {
-				break
-			}
-		}
 		if arg.StartTimestamp > 0 {
 			if ts < arg.StartTimestamp {
 				//
@@ -211,7 +210,13 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *storage_base.ScanEntrie
 				break
 			}
 		}
-		ret.Values = append(ret.Values, &storage_base.ScanValue{
+		if seg.scanSizeBytes > 0 {
+			bytesScannedSoFar += len(val)
+			if bytesScannedSoFar > seg.scanSizeBytes {
+				break
+			}
+		}
+		ret.Values = append(ret.Values, &sbase.ScanValue{
 			Offset:    offset,
 			Value:     val,
 			Timestamp: ts,
