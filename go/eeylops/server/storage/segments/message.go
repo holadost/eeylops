@@ -34,3 +34,7 @@ func fetchValueFromMessage(message []byte) ([]byte, int64) {
 	}
 	return retVal, msgFb.Timestamp()
 }
+
+func fetchTimestampFromMessage(message []byte) int64 {
+	return Message.GetRootAsMessage(message, 0).Timestamp()
+}

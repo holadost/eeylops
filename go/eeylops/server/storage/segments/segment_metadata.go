@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-// Constants.
-const dataDirName = "data"
-const metadataDirName = "metadata"
-const metadataDbName = "metadata.db"
-const metadataKeyName = "metadata"
-
 // SegmentMetadata holds the metadata of a segment.
 // Note: Make sure to add any new fields to the ToString() method as well.
 type SegmentMetadata struct {
@@ -26,6 +20,8 @@ type SegmentMetadata struct {
 	ImmutableTimestamp time.Time   `json:"immutable_timestamp"` // Time when segment was marked as immutable.
 	ImmutableReason    int         `json:"immutable_reason"`    // The reason why the segment was marked immutable.
 	ExpiredTimestamp   time.Time   `json:"expired_timestamp"`   // Time when segment was expired.
+	FirstMsgTimestamp  time.Time   `json:"first_msg_timestamp"` // The first message timestamp.
+	LastMsgTimestamp   time.Time   `json:"last_msg_timestamp"`  // The last message timestamp.
 }
 
 func NewSegmentMetadata(data []byte) *SegmentMetadata {
@@ -39,8 +35,10 @@ func NewSegmentMetadata(data []byte) *SegmentMetadata {
 
 func (sm *SegmentMetadata) ToString() string {
 	return fmt.Sprintf("ID: %d, Immutable %v, Expired %v, Start offset: %d, End offset: %d, Created At: %v, "+
-		"Immutable At: %v, Expired At: %v, Immutable Reason: %d", sm.ID, sm.Immutable, sm.Expired, sm.StartOffset,
-		sm.EndOffset, sm.CreatedTimestamp, sm.ImmutableTimestamp, sm.ExpiredTimestamp, sm.ImmutableReason)
+		"Immutable At: %v, Expired At: %v, Immutable Reason: %d, First Message Timestamp: %v, "+
+		"Last Message Timestamp: %v", sm.ID, sm.Immutable, sm.Expired, sm.StartOffset, sm.EndOffset,
+		sm.CreatedTimestamp, sm.ImmutableTimestamp, sm.ExpiredTimestamp, sm.ImmutableReason, sm.FirstMsgTimestamp,
+		sm.LastMsgTimestamp)
 }
 
 func (sm *SegmentMetadata) Serialize() []byte {

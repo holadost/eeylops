@@ -9,14 +9,12 @@ import (
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
-	badger "github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v3"
 	"os"
 	"path"
 	"sync"
 	"time"
 )
-
-const kLastRLogIdxKey = "last_rlog_idx"
 
 var (
 	kLastRLogIdxKeyBytes = []byte(kLastRLogIdxKey)
@@ -24,7 +22,6 @@ var (
 
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	ddb           *badger.DB            // Segment data db.
 	dataDB        kv_store.KVStore      // Backing KV store to hold the data.
 	metadataDB    *SegmentMetadataDB    // Segment metadata ddb.
 	nextOffSet    base.Offset           // Next start offset for new appends.
@@ -34,7 +31,8 @@ type BadgerSegment struct {
 	metadata      *SegmentMetadata      // Cached segment metadata.
 	appendLock    sync.Mutex            // A lock for appends allowing only one append at a time.
 	lastRLogIdx   int64                 // Last replicated log index.
-	lastAppendTs  int64                 // Last message appended timestamp.
+	firstMsgTs    int64                 // First message timestamp.
+	lastMsgTs     int64                 // Last message timestamp.
 	openedOnce    bool                  // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
 	logger        *logging.PrefixLogger // Logger object.
 	topicName     string                // Topic name.
@@ -62,14 +60,14 @@ func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
 	seg.topicName = opts.Topic
 	seg.partitionID = opts.PartitionID
 	seg.scanSizeBytes = opts.ScanSizeBytes
-	seg.setup()
+	seg.initialize()
 	// Reinitialize logger with correct segment id.
 	seg.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment:%d", seg.ID()), opts.ParentLogger)
 	return seg, nil
 }
 
 // Initialize implements the Segment interface. It initializes the segment.
-func (seg *BadgerSegment) setup() {
+func (seg *BadgerSegment) initialize() {
 	seg.logger.Infof("Initializing badger segment located at: %s", seg.rootDir)
 	// Initialize metadata ddb.
 	seg.metadataDB = NewSegmentMetadataDB(seg.rootDir)
@@ -95,7 +93,7 @@ func (seg *BadgerSegment) Open() {
 	}
 	seg.openedOnce = true
 	seg.closed = false
-	seg.initialize()
+	seg.open()
 }
 
 func (seg *BadgerSegment) ID() int {
@@ -108,11 +106,11 @@ func (seg *BadgerSegment) Close() error {
 	if seg.closed {
 		return nil
 	}
+	seg.segLock.Lock()
+	defer seg.segLock.Unlock()
 	seg.logger.Infof("Closing segment")
-	err := seg.ddb.Close()
 	seg.metadataDB.Close()
-	seg.ddb = nil
-	err = seg.dataDB.Close()
+	err := seg.dataDB.Close()
 	seg.metadataDB = nil
 	seg.closed = true
 	return err
@@ -133,33 +131,34 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *sbase.AppendEntriesAr
 		ret.Error = ErrSegmentClosed
 		return &ret
 	}
-	if arg.Timestamp < seg.lastAppendTs {
+	if arg.Timestamp < seg.lastMsgTs {
 		ret.Error = ErrSegmentInvalidTimestamp
 		return &ret
 	}
+	oldNextOffset := seg.nextOffSet
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
 	values := makeMessageValues(arg.Entries, arg.Timestamp)
-	if arg.RLogIdx >= 0 {
-		if arg.RLogIdx <= seg.lastRLogIdx {
-			seg.logger.Errorf("Invalid replicated log index: %d. Expected value greater than: %d",
-				arg.RLogIdx, seg.lastRLogIdx)
-			ret.Error = ErrSegmentInvalidRLogIdx
-			return &ret
-		}
-		keys = append(keys, kLastRLogIdxKeyBytes)
-		values = append(values, util.UintToBytes(uint64(arg.RLogIdx)))
+	if arg.RLogIdx <= seg.lastRLogIdx {
+		seg.logger.Errorf("Invalid replicated log index: %d. Expected value greater than: %d",
+			arg.RLogIdx, seg.lastRLogIdx)
+		ret.Error = ErrSegmentInvalidRLogIdx
+		return &ret
 	}
+	keys = append(keys, kLastRLogIdxKeyBytes)
+	values = append(values, util.UintToBytes(uint64(arg.RLogIdx)))
+
 	err := seg.dataDB.BatchPut(keys, values)
 	if err != nil {
 		seg.logger.Errorf("Unable to append entries in segment: %d due to err: %s", seg.ID(), err.Error())
 		ret.Error = ErrSegmentBackend
 		return &ret
 	}
-	// Update the last replicated log index for the segment.
-	if arg.RLogIdx >= 0 {
-		seg.lastRLogIdx = arg.RLogIdx
+	if oldNextOffset == seg.metadata.StartOffset {
+		// These were the first messages appended to the segment.
+		seg.firstMsgTs = arg.Timestamp
 	}
-	seg.lastAppendTs = arg.Timestamp
+	seg.lastRLogIdx = arg.RLogIdx
+	seg.lastMsgTs = arg.Timestamp
 	return &ret
 }
 
@@ -208,7 +207,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *
 		// TODO: Use index db and scan the store to find the sk. Set the endOffset accordingly.
 	}
 
-	scanner := seg.dataDB.CreateScanner([]byte(""), sk, false)
+	scanner := seg.dataDB.CreateScanner(nil, sk, false)
 	defer scanner.Close()
 	bytesScannedSoFar := 0
 	for ; scanner.Valid(); scanner.Next() {
@@ -248,11 +247,13 @@ func (seg *BadgerSegment) MarkImmutable() {
 	seg.metadata.ImmutableTimestamp = time.Now()
 	if seg.nextOffSet != 0 {
 		seg.metadata.EndOffset = seg.metadata.StartOffset + seg.nextOffSet - 1
+		seg.metadata.FirstMsgTimestamp = time.Unix(0, seg.firstMsgTs)
+		seg.metadata.LastMsgTimestamp = time.Unix(0, seg.lastMsgTs)
 	}
 	seg.metadataDB.PutMetadata(seg.metadata)
 }
 
-// MarkExpired marks the segment as immutable.
+// MarkExpired marks the segment as expired.
 func (seg *BadgerSegment) MarkExpired() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
@@ -268,16 +269,18 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 	seg.segLock.RUnlock()
 
 	if !metadata.Immutable {
-		if seg.nextOffSet != 0 {
-			metadata.EndOffset = seg.nextOffSet - 1
+		if seg.nextOffSet == metadata.StartOffset {
+			metadata.EndOffset = -1
 		} else {
-			metadata.EndOffset = metadata.StartOffset
+			metadata.EndOffset = seg.nextOffSet - 1
 		}
+		metadata.FirstMsgTimestamp = time.Unix(0, seg.firstMsgTs)
+		metadata.LastMsgTimestamp = time.Unix(0, seg.lastMsgTs)
 	}
 	return metadata
 }
 
-// GetRange returns the range of the segment.
+// GetRange returns the range(start and end offset) of the segment.
 func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
@@ -294,6 +297,19 @@ func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 	return
 }
 
+// GetMsgTimestampRange returns the first and last message unix timestamps(in nanoseconds).
+func (seg *BadgerSegment) GetMsgTimestampRange() (fMsgTs int64, lMsgTs int64) {
+	seg.segLock.RLock()
+	defer seg.segLock.RUnlock()
+	if seg.nextOffSet == seg.metadata.StartOffset {
+		// Segment is empty.
+		return
+	}
+	fMsgTs = seg.firstMsgTs
+	lMsgTs = seg.lastMsgTs
+	return
+}
+
 // SetMetadata sets the metadata for the segment.
 func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
 	seg.segLock.Lock()
@@ -302,6 +318,7 @@ func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
 	seg.metadata = &sm
 }
 
+// Stats returns the stats of the segment.
 func (seg *BadgerSegment) Stats() {
 
 }
@@ -316,40 +333,61 @@ func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base
 	return keys
 }
 
+// Converts the given offset to a key representation for dataDB.
 func (seg *BadgerSegment) offsetToKey(offset base.Offset) []byte {
 	return util.UintToBytes(uint64(offset))
 }
 
+// Converts the key representation of the offset(from dataDB) back to base.Offset type.
 func (seg *BadgerSegment) keyToOffset(key []byte) base.Offset {
 	return base.Offset(util.BytesToUint(key))
 }
 
-// initialize the segment.
-func (seg *BadgerSegment) initialize() {
-	seg.logger.VInfof(0, "Initializing next offset for segment")
-	hasVal := false
-	itr := seg.dataDB.CreateScanner(nil, nil, true)
-	defer itr.Close()
-	for ; itr.Valid(); itr.Next() {
-		key, item, err := itr.GetItem()
-		if err != nil {
-			seg.logger.Fatalf("Unable to initialize next offset due to scan err: %s", err.Error())
+// Opens the segment.
+func (seg *BadgerSegment) open() {
+	// Gather the last replicated log index in the segment.
+	val, err := seg.dataDB.Get(kLastRLogIdxKeyBytes)
+	if err != nil {
+		if err == kv_store.ErrKVStoreKeyNotFound {
+			// Segment is empty.
+			seg.nextOffSet = seg.GetMetadata().StartOffset
+			seg.firstMsgTs = -1
+			seg.lastMsgTs = -1
+			seg.lastRLogIdx = -1
+			return
 		}
-		if bytes.Compare(key, kLastRLogIdxKeyBytes) == 0 {
-			// Set last replicated log index for segment.
-			seg.lastRLogIdx = int64(util.BytesToUint(item))
-			continue
-		}
+	} else {
+		seg.lastRLogIdx = int64(util.BytesToUint(val))
+	}
 
-		// Set next offset and last appended timestamp for segment.
-		seg.nextOffSet = seg.keyToOffset(key) + 1
-		_, seg.lastAppendTs = fetchValueFromMessage(item)
-		hasVal = true
-		break
+	// Gather first and last message timestamps by scanning in both forward and reverse directions. Also gather the
+	// last offset appended and hence the nextOffset in the segment.
+	dirs := []bool{false, true}
+	for _, dir := range dirs {
+		itr := seg.dataDB.CreateScanner(nil, nil, true)
+		for ; itr.Valid(); itr.Next() {
+			key, item, err := itr.GetItem()
+			if err != nil {
+				seg.logger.Fatalf("Unable to initialize next offset, first and last message timestamps due to "+
+					"scan err: %s", err.Error())
+			}
+			if bytes.Compare(key, kLastRLogIdxKeyBytes) == 0 {
+				// Skip this key.
+				continue
+			}
+			// Set next offset and last appended timestamp for segment.
+			ts := fetchTimestampFromMessage(item)
+			if dir {
+				// Scanning in reverse direction. Set last append ts and next offset.
+				seg.nextOffSet = seg.keyToOffset(key) + 1
+				seg.lastMsgTs = ts
+			} else {
+				// Scanning in forward direction. Set the first append timestamp.
+				seg.firstMsgTs = ts
+			}
+			break
+		}
+		itr.Close()
 	}
-	if !hasVal {
-		seg.nextOffSet = seg.GetMetadata().StartOffset
-		seg.lastAppendTs = -1
-		seg.lastRLogIdx = -1
-	}
+
 }
