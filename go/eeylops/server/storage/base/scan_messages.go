@@ -1,4 +1,4 @@
-package storage
+package base
 
 import "eeylops/server/base"
 
@@ -10,7 +10,13 @@ type ScanEntriesArg struct {
 }
 
 type ScanEntriesRet struct {
-	Values     [][]byte    // The values.
-	NextOffset base.Offset // Next offset to be scanned.
-	Error      error       // Scan error if any.
+	Values     []*ScanValue // The values.
+	NextOffset base.Offset  // Next offset to be scanned.
+	Error      error        // Scan error if any.
+}
+
+type ScanValue struct {
+	Offset    base.Offset
+	Value     []byte
+	Timestamp int64
 }

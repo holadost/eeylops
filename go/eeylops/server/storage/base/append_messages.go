@@ -1,4 +1,4 @@
-package storage
+package base
 
 type AppendEntriesArg struct {
 	Entries   [][]byte // The entries to be appended

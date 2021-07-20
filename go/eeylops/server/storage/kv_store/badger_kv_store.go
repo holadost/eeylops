@@ -319,10 +319,66 @@ func (kvStore *BadgerKVStore) Close() error {
 	return err
 }
 
-func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte, endKey []byte, batchSize uint) Scanner {
-	return nil
+func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte) Scanner {
+	// TODO: Handle prefix scans.
+	if len(prefix) > 0 {
+		glog.Warningf("Prefix scans are still not supported! Ignoring prefix during scans for now")
+	}
+	return newBadgerScanner(kvStore.db, startKey)
 }
 
 func generatePrefixKey(key []byte, prefix string) []byte {
 	return []byte{}
+}
+
+type BadgerScanner struct {
+	db       *badger.DB
+	iter     *badger.Iterator
+	txn      *badger.Txn
+	startKey []byte
+}
+
+func newBadgerScanner(db *badger.DB, startKey []byte) *BadgerScanner {
+	scanner := new(BadgerScanner)
+	scanner.db = db
+	scanner.iter = nil
+	scanner.startKey = startKey
+	scanner.initialize()
+	return nil
+}
+
+func (scanner *BadgerScanner) initialize() {
+	scanner.txn = scanner.db.NewTransaction(false)
+	itr := scanner.txn.NewIterator(badger.DefaultIteratorOptions)
+	// Seek to the correct entry.
+	if (scanner.startKey == nil) || len(scanner.startKey) == 0 {
+		itr.Rewind()
+	} else {
+		itr.Seek(scanner.startKey)
+	}
+}
+
+func (scanner *BadgerScanner) Rewind() {
+	scanner.iter.Rewind()
+}
+
+func (scanner *BadgerScanner) Valid() bool {
+	return scanner.iter.Valid()
+}
+
+func (scanner *BadgerScanner) Next() {
+	scanner.iter.Next()
+}
+
+func (scanner *BadgerScanner) GetItem() (key []byte, val []byte, err error) {
+	return
+}
+
+func (scanner *BadgerScanner) Seek(key []byte) {
+	scanner.iter.Seek(key)
+}
+
+func (scanner *BadgerScanner) Close() {
+	scanner.iter.Close()
+	scanner.txn.Discard()
 }

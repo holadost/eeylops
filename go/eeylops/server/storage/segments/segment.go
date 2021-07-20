@@ -1,8 +1,9 @@
 package segments
 
 import (
+	"context"
 	"eeylops/server/base"
-	"eeylops/server/storage"
+	base2 "eeylops/server/storage/base"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	_ "github.com/lib/pq"
@@ -12,12 +13,9 @@ type Segment interface {
 	ID() int
 	// Close the segment.
 	Close() error
-	// Append values to the segment. The second int64 defines the last replicated log index.
-	Append([][]byte, int64) error
-	AppendV2(*storage.AppendEntriesArg) *storage.AppendEntriesRet
-	// Scan numMessages values from the segment store from the given start offset.
-	Scan(startOffset base.Offset, numMessages uint64) ([][]byte, []error)
-	ScanV2(*storage.ScanEntriesArg) *storage.ScanEntriesRet
+	// Append values to the segment.
+	Append(ctx context.Context, arg *base2.AppendEntriesArg) *base2.AppendEntriesRet
+	Scan(ctx context.Context, arg *base2.ScanEntriesArg) *base2.ScanEntriesRet
 	// IsEmpty returns true if the segment is empty. False otherwise.
 	IsEmpty() bool
 	// Stats fetches the stats for this instance of segment.

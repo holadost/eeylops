@@ -18,10 +18,11 @@ func NewPrefixLogger(prefix string) *PrefixLogger {
 // NewPrefixLoggerWithParent returns a new instance of the prefix logger. It uses the prefix of the parent as well
 // as the given prefix in every log statement. Makes traceability from logs a whole lot easier.
 func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *PrefixLogger {
-	newLogger := PrefixLogger{
-		prefix: parentLogger.GetPrefix() + " " + createPrefixStr(prefix),
+	actualPrefix := prefix
+	if parentLogger != nil {
+		actualPrefix = parentLogger.GetPrefix() + " " + createPrefixStr(prefix)
 	}
-	return &newLogger
+	return NewPrefixLogger(actualPrefix)
 }
 
 func (logger *PrefixLogger) GetPrefix() string {
