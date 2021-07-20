@@ -35,6 +35,7 @@ func TestBadgerKVStore(t *testing.T) {
 	batchSize := 10
 	numIters := 20
 	// Batch write values
+	glog.Infof("Testing Batch Put")
 	for iter := 0; iter < numIters; iter++ {
 		if iter%5 == 0 {
 			err := store.Close()
@@ -48,8 +49,8 @@ func TestBadgerKVStore(t *testing.T) {
 		var values []string
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			keys = append(keys, fmt.Sprintf("key-%d", meraVal))
-			values = append(values, fmt.Sprintf("value-%d", meraVal))
+			keys = append(keys, fmt.Sprintf("key-%03d", meraVal))
+			values = append(values, fmt.Sprintf("value-%03d", meraVal))
 		}
 		err := store.BatchPutS(keys, values)
 		if err != nil {
@@ -59,12 +60,13 @@ func TestBadgerKVStore(t *testing.T) {
 	}
 
 	// Batch read and verify values
+	glog.Infof("Testing MultiGet")
 	for iter := 0; iter < numIters; iter++ {
 		var keys []string
 		var values []string
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			keys = append(keys, fmt.Sprintf("key-%d", meraVal))
+			keys = append(keys, fmt.Sprintf("key-%03d", meraVal))
 		}
 		values, errs := store.MultiGetS(keys)
 		for ii := 0; ii < len(keys); ii++ {
@@ -72,7 +74,7 @@ func TestBadgerKVStore(t *testing.T) {
 				glog.Fatalf("Hit an unexpected error: %s", errs[ii].Error())
 				return
 			}
-			exVal := fmt.Sprintf("value-%d", iter*batchSize+ii)
+			exVal := fmt.Sprintf("value-%03d", iter*batchSize+ii)
 			val := values[ii]
 			if exVal != val {
 				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", exVal, val)
@@ -81,6 +83,38 @@ func TestBadgerKVStore(t *testing.T) {
 		}
 	}
 
+	glog.Infof("Testing scanner")
+	scanner := store.CreateScanner(nil, nil, false)
+	// defer scanner.Close()
+	for iter := 0; iter < numIters; iter++ {
+		var keys []string
+		var values []string
+		for ii := 0; ii < batchSize; ii++ {
+			meraVal := iter*batchSize + ii
+			keys = append(keys, fmt.Sprintf("key-%03d", meraVal))
+			values = append(values, fmt.Sprintf("value-%03d", meraVal))
+		}
+		cnt := 0
+		for ; scanner.Valid(); scanner.Next() {
+			key, item, err := scanner.GetItem()
+			if err != nil {
+				glog.Fatalf("Failed to scan store due to err: %s", err.Error())
+			}
+			if string(key) != keys[cnt] || string(item) != values[cnt] {
+				glog.Fatalf("Mismatch: Expected Key: %s, Expected Val: %s, Got Key: %s, Got Val: %s",
+					keys[cnt], values[cnt], string(key), string(item))
+			}
+			cnt += 1
+			if cnt == batchSize {
+				break
+			}
+		}
+		if scanner.Valid() {
+			scanner.Next()
+		}
+	}
+
+	glog.Infof("Testing put and get")
 	singleKey := "singleKey"
 	singleVal := "singleVal"
 	err := store.PutS(singleKey, singleVal)

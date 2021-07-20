@@ -346,7 +346,7 @@ func newBadgerScanner(db *badger.DB, startKey []byte, reverse bool) *BadgerScann
 	scanner.startKey = startKey
 	scanner.reverse = reverse
 	scanner.initialize()
-	return nil
+	return scanner
 }
 
 func (scanner *BadgerScanner) initialize() {
