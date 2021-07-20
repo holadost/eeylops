@@ -319,12 +319,12 @@ func (kvStore *BadgerKVStore) Close() error {
 	return err
 }
 
-func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte) Scanner {
+func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte, reverse bool) Scanner {
 	// TODO: Handle prefix scans.
 	if len(prefix) > 0 {
 		glog.Warningf("Prefix scans are still not supported! Ignoring prefix during scans for now")
 	}
-	return newBadgerScanner(kvStore.db, startKey)
+	return newBadgerScanner(kvStore.db, startKey, reverse)
 }
 
 func generatePrefixKey(key []byte, prefix string) []byte {
@@ -336,19 +336,23 @@ type BadgerScanner struct {
 	iter     *badger.Iterator
 	txn      *badger.Txn
 	startKey []byte
+	reverse  bool
 }
 
-func newBadgerScanner(db *badger.DB, startKey []byte) *BadgerScanner {
+func newBadgerScanner(db *badger.DB, startKey []byte, reverse bool) *BadgerScanner {
 	scanner := new(BadgerScanner)
 	scanner.db = db
 	scanner.iter = nil
 	scanner.startKey = startKey
+	scanner.reverse = reverse
 	scanner.initialize()
 	return nil
 }
 
 func (scanner *BadgerScanner) initialize() {
 	scanner.txn = scanner.db.NewTransaction(false)
+	opts := badger.DefaultIteratorOptions
+	opts.Reverse = scanner.reverse
 	scanner.iter = scanner.txn.NewIterator(badger.DefaultIteratorOptions)
 	scanner.Rewind()
 }
@@ -369,6 +373,9 @@ func (scanner *BadgerScanner) Next() {
 }
 
 func (scanner *BadgerScanner) GetItem() (key []byte, val []byte, err error) {
+	item := scanner.iter.Item()
+	key = item.KeyCopy(nil)
+	val, err = item.ValueCopy(nil)
 	return
 }
 

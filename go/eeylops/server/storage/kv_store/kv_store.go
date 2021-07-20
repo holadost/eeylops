@@ -33,7 +33,7 @@ type KVStore interface {
 	ScanS(startKey string, numMessages int, scanSizeBytes int, reverse bool) (keys []string, values []string, nextKey string, err error)
 
 	// CreateScanner creates a scanner that can be used to iterate over the underlying store.
-	CreateScanner(prefix []byte, startKey []byte) Scanner
+	CreateScanner(prefix []byte, startKey []byte, reverse bool) Scanner
 }
 
 type Scanner interface {
