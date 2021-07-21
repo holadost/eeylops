@@ -5,31 +5,33 @@ import (
 	"eeylops/server/base"
 	sbase "eeylops/server/storage/base"
 	"eeylops/util"
+	"eeylops/util/logging"
 	"fmt"
-	"github.com/golang/glog"
 	"testing"
 	"time"
 )
 
+var logger = logging.NewPrefixLogger("Test")
+
 func checkMetadata(t *testing.T, got *SegmentMetadata, expected *SegmentMetadata) {
-	glog.Infof("Metadata: %s", got.ToString())
+	logger.Infof("Metadata: %s", got.ToString())
 	if got.ID != expected.ID {
-		glog.Fatalf("ID mismatch. Expected: %d, Got: %d", expected.ID, got.ID)
+		logger.Fatalf("ID mismatch. Expected: %d, Got: %d", expected.ID, got.ID)
 	}
 	if got.StartOffset != expected.StartOffset {
-		glog.Fatalf("Start offset mismatch. Expected: %d, Got: %d",
+		logger.Fatalf("Start offset mismatch. Expected: %d, Got: %d",
 			expected.StartOffset, got.StartOffset)
 	}
 	if !got.CreatedTimestamp.Equal(expected.CreatedTimestamp) {
-		glog.Fatalf("Created Time mismatch. Expected: %v, Got: %v",
+		logger.Fatalf("Created Time mismatch. Expected: %v, Got: %v",
 			expected.CreatedTimestamp, got.CreatedTimestamp)
 	}
 	if got.Immutable != expected.Immutable {
-		glog.Fatalf("Immutable mismatch. Expected: %v, Got: %v",
+		logger.Fatalf("Immutable mismatch. Expected: %v, Got: %v",
 			expected.Immutable, got.Immutable)
 	}
 	if got.Expired != expected.Expired {
-		glog.Fatalf("Expired mismatch. Expected: %v, Got: %v",
+		logger.Fatalf("Expired mismatch. Expected: %v, Got: %v",
 			expected.Expired, got.Expired)
 	}
 }
@@ -55,7 +57,7 @@ func TestBadgerSegment(t *testing.T) {
 	}
 	bds, err := NewBadgerSegment(&opts)
 	if err != nil {
-		glog.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
 	bds.SetMetadata(initialMeta)
 	batchSize := 10
@@ -66,26 +68,27 @@ func TestBadgerSegment(t *testing.T) {
 		if iter%5 == 0 {
 			err = bds.Close()
 			if err != nil {
-				glog.Fatalf("Failed to close segment due to err: %s", err.Error())
+				logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 			}
 			bds, err = NewBadgerSegment(&opts)
 			if err != nil {
-				glog.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+				logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 			}
+			bds.Open()
 			got := bds.GetMetadata()
 			checkMetadata(t, &got, &initialMeta)
 			ex := base.Offset(0)
 			if iter == 0 {
-				ex = initialMeta.StartOffset
+				ex = -1
 			} else {
 				ex = bds.nextOffSet - 1
 			}
 			if got.EndOffset != ex {
-				glog.Fatalf("End offset mismatch. Expected: %d, Got: %d", ex, got.EndOffset)
+				logger.Fatalf("End offset mismatch. Expected: %d, Got: %d", ex, got.EndOffset)
 			}
 		}
 
-		glog.Infof("Starting iteration: %d", iter)
+		logger.Infof("Starting iteration: %d", iter)
 		var values [][]byte
 		for ii := 0; ii < batchSize; ii++ {
 			values = append(values, []byte(fmt.Sprintf("value-%04d", ii)))
@@ -99,7 +102,7 @@ func TestBadgerSegment(t *testing.T) {
 
 		ret := bds.Append(context.Background(), &arg)
 		if ret.Error != nil {
-			glog.Fatalf("Unable to append values to segment due to err: %s", ret.Error.Error())
+			logger.Fatalf("Unable to append values to segment due to err: %s", ret.Error.Error())
 		}
 		sarg := sbase.ScanEntriesArg{
 			StartOffset:    base.Offset(iter * batchSize),
@@ -109,13 +112,13 @@ func TestBadgerSegment(t *testing.T) {
 		}
 		sret := bds.Scan(context.Background(), &sarg)
 		if sret.Error != nil {
-			glog.Fatalf("Received error while scanning message. Error: %s", sret.Error.Error())
+			logger.Fatalf("Received error while scanning message. Error: %s", sret.Error.Error())
 		}
 		for ii := 0; ii < batchSize; ii++ {
 			value := string(sret.Values[ii].Value)
 			expectedVal := fmt.Sprintf("value-%04d", ii)
 			if value != expectedVal {
-				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, value)
+				logger.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, value)
 			}
 		}
 	}
@@ -137,41 +140,41 @@ func TestBadgerSegment(t *testing.T) {
 	metadata := bds.GetMetadata()
 	checkMetadata(t, &metadata, expected)
 	if !now.Before(metadata.ExpiredTimestamp) {
-		glog.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		logger.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
 	if !now.Before(metadata.ImmutableTimestamp) {
-		glog.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		logger.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
-
 	err = bds.Close()
 	if err != nil {
-		glog.Fatalf("Failed to close segment due to err: %s", err.Error())
+		logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
 	bds, err = NewBadgerSegment(&opts)
 	if err != nil {
-		glog.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
+	bds.Open()
 	metadata = bds.GetMetadata()
 	checkMetadata(t, &metadata, expected)
 	if !now.Before(metadata.ImmutableTimestamp) {
-		glog.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		logger.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
 	if !now.Before(metadata.ExpiredTimestamp) {
-		glog.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		logger.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
 	fts, lts := bds.GetMsgTimestampRange()
 	if !((fts > startTs) && (fts < endTs)) {
-		glog.Fatalf("First message timestamp(%d) must have been in the range (%d, %d)", fts, startTs, endTs)
+		logger.Fatalf("First message timestamp(%d) must have been in the range (%d, %d)", fts, startTs, endTs)
 	}
 	if !((lts > startTs) && (lts < endTs) && (lts > fts)) {
-		glog.Fatalf("last message timestamp(%d) must have been in the range (%d, %d) and greater than %d",
+		logger.Fatalf("last message timestamp(%d) must have been in the range (%d, %d) and greater than %d",
 			lts, startTs, endTs, fts)
 	}
 	err = bds.Close()
 	if err != nil {
-		glog.Fatalf("Failed to close segment due to err: %s", err.Error())
+		logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
 	if metadata.EndOffset != expected.EndOffset {
-		glog.Fatalf("End offset mismatch. Expected: %d, Got: %d", expected.EndOffset, metadata.EndOffset)
+		logger.Fatalf("End offset mismatch. Expected: %d, Got: %d", expected.EndOffset, metadata.EndOffset)
 	}
 }
