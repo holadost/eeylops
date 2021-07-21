@@ -62,6 +62,7 @@ func (mdb *SegmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 		Key:   metadataKeyName,
 		Value: metadata.Serialize(),
 	}
+	glog.Infof("Putting metadata in segment metadata DB: %s", metadata.ToString())
 	tx := mdb.Db.Begin()
 	// defer tx.Close()
 	dbc := tx.Where("key = ?", metadataKeyName).First(&val)

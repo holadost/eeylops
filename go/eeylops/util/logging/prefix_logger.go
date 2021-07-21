@@ -55,5 +55,5 @@ func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
 }
 
 func createPrefixStr(prefix string) string {
-	return "[" + prefix + "]"
+	return "{" + prefix + "}"
 }
