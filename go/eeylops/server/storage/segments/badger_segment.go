@@ -88,6 +88,7 @@ func (seg *BadgerSegment) initialize() {
 func (seg *BadgerSegment) Open() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
+	seg.logger.Infof("Opening segment")
 	if seg.openedOnce {
 		seg.logger.Fatalf("The segment cannot be reopened again")
 	}
@@ -136,6 +137,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *sbase.AppendEntriesAr
 		return &ret
 	}
 	oldNextOffset := seg.nextOffSet
+	seg.logger.Infof("Appending %d messages starting from offset: %d", len(arg.Entries), seg.nextOffSet)
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
 	values := makeMessageValues(arg.Entries, arg.Timestamp)
 	if arg.RLogIdx <= seg.lastRLogIdx {
@@ -159,6 +161,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *sbase.AppendEntriesAr
 	}
 	seg.lastRLogIdx = arg.RLogIdx
 	seg.lastMsgTs = arg.Timestamp
+	seg.nextOffSet += base.Offset(len(arg.Entries))
 	return &ret
 }
 
@@ -180,12 +183,16 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *
 	// Sanity checks to see if the segment contains our start offset.
 	if (arg.StartOffset >= 0) && (arg.StartOffset < seg.metadata.StartOffset) {
 		// The start offset does not belong to this segment.
+		seg.logger.Errorf("Start offset does not belong to this segment. Given start offset: %d, "+
+			"Seg start offset: %d, Segment next offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffSet)
 		ret.Error = ErrSegmentInvalid
 		return &ret
 	}
 
 	if (seg.nextOffSet == seg.metadata.StartOffset+1) || (arg.StartOffset >= seg.nextOffSet) {
 		// Either the segment is empty or it does not contain our desired offset yet.
+		seg.logger.Warningf("Requested offset: %d is not present in this segment. "+
+			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffSet)
 		ret.Error = nil
 		ret.Values = nil
 		ret.NextOffset = -1
@@ -243,10 +250,11 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *
 func (seg *BadgerSegment) MarkImmutable() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
+	seg.logger.Infof("Marking segment as immutable")
 	seg.metadata.Immutable = true
 	seg.metadata.ImmutableTimestamp = time.Now()
-	if seg.nextOffSet != 0 {
-		seg.metadata.EndOffset = seg.metadata.StartOffset + seg.nextOffSet - 1
+	if seg.nextOffSet > seg.metadata.StartOffset {
+		seg.metadata.EndOffset = seg.nextOffSet - 1
 		seg.metadata.FirstMsgTimestamp = time.Unix(0, seg.firstMsgTs)
 		seg.metadata.LastMsgTimestamp = time.Unix(0, seg.lastMsgTs)
 	}
@@ -257,6 +265,7 @@ func (seg *BadgerSegment) MarkImmutable() {
 func (seg *BadgerSegment) MarkExpired() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
+	seg.logger.Infof("Marking segment as expired")
 	seg.metadata.Expired = true
 	seg.metadata.ExpiredTimestamp = time.Now()
 	seg.metadataDB.PutMetadata(seg.metadata)
@@ -350,7 +359,7 @@ func (seg *BadgerSegment) open() {
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// Segment is empty.
-			seg.nextOffSet = seg.GetMetadata().StartOffset
+			seg.nextOffSet = seg.metadata.StartOffset
 			seg.firstMsgTs = -1
 			seg.lastMsgTs = -1
 			seg.lastRLogIdx = -1
@@ -364,7 +373,7 @@ func (seg *BadgerSegment) open() {
 	// last offset appended and hence the nextOffset in the segment.
 	dirs := []bool{false, true}
 	for _, dir := range dirs {
-		itr := seg.dataDB.CreateScanner(nil, nil, true)
+		itr := seg.dataDB.CreateScanner(nil, nil, dir)
 		for ; itr.Valid(); itr.Next() {
 			key, item, err := itr.GetItem()
 			if err != nil {
@@ -389,5 +398,6 @@ func (seg *BadgerSegment) open() {
 		}
 		itr.Close()
 	}
-
+	seg.logger.VInfof(1, "First Message TS: %d, Last Message TS: %d, Next Offset: %d, Last RLog Index: %d",
+		seg.firstMsgTs, seg.lastMsgTs, seg.nextOffSet, seg.lastRLogIdx)
 }

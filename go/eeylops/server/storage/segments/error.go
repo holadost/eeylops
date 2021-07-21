@@ -13,7 +13,7 @@ var (
 	ErrSegmentClosed = errors.New("ErrSegmentClosed: segment is closed")
 
 	// ErrSegmentInvalid is returned if we try to access the segment when it is closed.
-	ErrSegmentInvalid = errors.New("ErrSegmentClosed: segment is closed")
+	ErrSegmentInvalid = errors.New("ErrSegmentInvalid: segment is invalid")
 
 	ErrSegmentInvalidRLogIdx   = errors.New("ErrSegmentInvalidRLogIdx: invalid replicated log index")
 	ErrSegmentInvalidTimestamp = errors.New("ErrSegmentInvalidTimestamp: invalid timestamp")

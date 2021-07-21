@@ -353,7 +353,7 @@ func (scanner *BadgerScanner) initialize() {
 	scanner.txn = scanner.db.NewTransaction(false)
 	opts := badger.DefaultIteratorOptions
 	opts.Reverse = scanner.reverse
-	scanner.iter = scanner.txn.NewIterator(badger.DefaultIteratorOptions)
+	scanner.iter = scanner.txn.NewIterator(opts)
 	scanner.Rewind()
 }
 

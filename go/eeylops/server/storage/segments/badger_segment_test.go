@@ -63,9 +63,11 @@ func TestBadgerSegment(t *testing.T) {
 	batchSize := 10
 	numIters := 20
 	lastRLogIdx := int64(0)
+	firstMsgTs := int64(0)
+	lastMsgTs := int64(0)
 	startTs := time.Now().UnixNano()
 	for iter := 0; iter < numIters; iter++ {
-		if iter%5 == 0 {
+		if iter%3 == 0 {
 			err = bds.Close()
 			if err != nil {
 				logger.Fatalf("Failed to close segment due to err: %s", err.Error())
@@ -94,9 +96,16 @@ func TestBadgerSegment(t *testing.T) {
 			values = append(values, []byte(fmt.Sprintf("value-%04d", ii)))
 		}
 		lastRLogIdx++
+		now := time.Now().UnixNano()
+		if iter == 0 {
+			firstMsgTs = now
+		}
+		if iter == numIters-1 {
+			lastMsgTs = now
+		}
 		arg := sbase.AppendEntriesArg{
 			Entries:   values,
-			Timestamp: time.Now().UnixNano(),
+			Timestamp: now,
 			RLogIdx:   lastRLogIdx,
 		}
 
@@ -105,24 +114,37 @@ func TestBadgerSegment(t *testing.T) {
 			logger.Fatalf("Unable to append values to segment due to err: %s", ret.Error.Error())
 		}
 		sarg := sbase.ScanEntriesArg{
-			StartOffset:    base.Offset(iter * batchSize),
+			StartOffset:    base.Offset(iter*batchSize) + initialMeta.StartOffset,
 			NumMessages:    uint64(batchSize),
 			StartTimestamp: -1,
 			EndTimestamp:   -1,
 		}
+		logger.Infof("Successfully appended messages. Now scanning messages using arg: %v", sarg)
 		sret := bds.Scan(context.Background(), &sarg)
 		if sret.Error != nil {
 			logger.Fatalf("Received error while scanning message. Error: %s", sret.Error.Error())
 		}
 		for ii := 0; ii < batchSize; ii++ {
 			value := string(sret.Values[ii].Value)
+			offset := sret.Values[ii].Offset
 			expectedVal := fmt.Sprintf("value-%04d", ii)
+			expectedOffset := base.Offset(iter*batchSize+ii) + initialMeta.StartOffset
 			if value != expectedVal {
 				logger.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, value)
+			}
+			if offset != expectedOffset {
+				logger.Fatalf("Offset mismatch. Expected offset: %d, Got Offset: %d", expectedOffset, offset)
 			}
 		}
 	}
 	endTs := time.Now().UnixNano()
+	f, l := bds.GetMsgTimestampRange()
+	if f != firstMsgTs {
+		logger.Fatalf("First message timestamp mismatch. Expected: %d, Got: %d", firstMsgTs, f)
+	}
+	if l != lastMsgTs {
+		logger.Fatalf("Last message timestamp mismatch. Expected: %d, Got: %d", lastMsgTs, l)
+	}
 	// Mark segment as immutable and expired and check metadata again.
 	now := time.Now()
 	bds.MarkImmutable()
@@ -170,11 +192,21 @@ func TestBadgerSegment(t *testing.T) {
 		logger.Fatalf("last message timestamp(%d) must have been in the range (%d, %d) and greater than %d",
 			lts, startTs, endTs, fts)
 	}
-	err = bds.Close()
-	if err != nil {
-		logger.Fatalf("Failed to close segment due to err: %s", err.Error())
+	if bds.lastRLogIdx != int64(numIters) {
+		logger.Fatalf("Replicated log index mismatch. Expected: %d, got: %d", numIters, bds.lastRLogIdx)
 	}
 	if metadata.EndOffset != expected.EndOffset {
 		logger.Fatalf("End offset mismatch. Expected: %d, Got: %d", expected.EndOffset, metadata.EndOffset)
+	}
+	f, l = bds.GetMsgTimestampRange()
+	if f != firstMsgTs {
+		logger.Fatalf("First message timestamp mismatch. Expected: %d, Got: %d", firstMsgTs, f)
+	}
+	if l != lastMsgTs {
+		logger.Fatalf("Last message timestamp mismatch. Expected: %d, Got: %d", lastMsgTs, l)
+	}
+	err = bds.Close()
+	if err != nil {
+		logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
 }
