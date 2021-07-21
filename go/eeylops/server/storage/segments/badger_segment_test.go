@@ -14,27 +14,28 @@ import (
 func checkMetadata(t *testing.T, got *SegmentMetadata, expected *SegmentMetadata) {
 	glog.Infof("Metadata: %s", got.ToString())
 	if got.ID != expected.ID {
-		t.Fatalf("ID mismatch. Expected: %d, Got: %d", expected.ID, got.ID)
+		glog.Fatalf("ID mismatch. Expected: %d, Got: %d", expected.ID, got.ID)
 	}
 	if got.StartOffset != expected.StartOffset {
-		t.Fatalf("Start offset mismatch. Expected: %d, Got: %d",
+		glog.Fatalf("Start offset mismatch. Expected: %d, Got: %d",
 			expected.StartOffset, got.StartOffset)
 	}
 	if !got.CreatedTimestamp.Equal(expected.CreatedTimestamp) {
-		t.Fatalf("Time mismatch. Expected: %v, Got: %v",
+		glog.Fatalf("Created Time mismatch. Expected: %v, Got: %v",
 			expected.CreatedTimestamp, got.CreatedTimestamp)
 	}
 	if got.Immutable != expected.Immutable {
-		t.Fatalf("Immutable mismatch. Expected: %v, Got: %v",
+		glog.Fatalf("Immutable mismatch. Expected: %v, Got: %v",
 			expected.Immutable, got.Immutable)
 	}
 	if got.Expired != expected.Expired {
-		t.Fatalf("Expired mismatch. Expected: %v, Got: %v",
+		glog.Fatalf("Expired mismatch. Expected: %v, Got: %v",
 			expected.Expired, got.Expired)
 	}
 }
 
 func TestBadgerSegment(t *testing.T) {
+	fmt.Println("Started badger tests!")
 	util.LogTestMarker("TestBadgerSegment")
 	dataDir := util.CreateTestDir(t, "TestBadgerSegment")
 	initialMeta := SegmentMetadata{
@@ -54,7 +55,7 @@ func TestBadgerSegment(t *testing.T) {
 	}
 	bds, err := NewBadgerSegment(&opts)
 	if err != nil {
-		t.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+		glog.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
 	bds.SetMetadata(initialMeta)
 	batchSize := 10
