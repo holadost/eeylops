@@ -55,7 +55,7 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, p
 	key := generateConsumerKey(consumerID, topicName, partitionID)
 	_, err := cs.kvStore.Get(key)
 	if err != nil {
-		if err != ErrKVStoreKeyNotFound {
+		if err != kv_store.ErrKVStoreKeyNotFound {
 			glog.Errorf("Unable to register consumer due to err: %s", err.Error())
 			return ErrConsumerStoreCommit
 		}

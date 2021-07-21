@@ -2,6 +2,7 @@ package storage
 
 import (
 	"eeylops/server/base"
+	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
 	"math/rand"
@@ -9,18 +10,6 @@ import (
 	"testing"
 	"time"
 )
-
-func createTestPartitionDir(t *testing.T, testName string) string {
-	return ""
-}
-
-func checkPartitionMetadata(t *testing.T) {
-
-}
-
-func testMarker(testName string) {
-	glog.Infof("\n\n============================= %s =============================\n\n", testName)
-}
 
 func singleProduce(startIdx int, p *Partition, numValues int) {
 	var values [][]byte
@@ -48,7 +37,7 @@ func loadDataBasic(p *Partition, numSegments int, numValuesPerSegment int) {
 }
 
 func TestPartitionInitialize(t *testing.T) {
-	testMarker("TestPartitionInitialize")
+	util.LogTestMarker("TestPartitionInitialize")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -67,7 +56,7 @@ func TestPartitionInitialize(t *testing.T) {
 }
 
 func TestPartitionReInitialize(t *testing.T) {
-	testMarker("TestPartitionReInitialize")
+	util.LogTestMarker("TestPartitionReInitialize")
 	for ii := 0; ii < 5; ii++ {
 		glog.Infof("\n\n\nIteration: %d", ii)
 		opts := PartitionOpts{
@@ -89,7 +78,7 @@ func TestPartitionReInitialize(t *testing.T) {
 }
 
 func TestPartitionAppend(t *testing.T) {
-	testMarker("TestPartitionAppend")
+	util.LogTestMarker("TestPartitionAppend")
 	testDir := "/tmp/eeylops/TestPartitionAppend"
 	defer func() { _ = os.RemoveAll(testDir) }()
 	opts := PartitionOpts{
@@ -108,7 +97,7 @@ func TestPartitionAppend(t *testing.T) {
 }
 
 func TestPartitionNewSegmentCreation(t *testing.T) {
-	testMarker("TestPartitionNewSegmentCreation")
+	util.LogTestMarker("TestPartitionNewSegmentCreation")
 	testDir := "/tmp/eeylops/TestPartitionNewSegmentCreation"
 	_ = os.RemoveAll(testDir)
 	opts := PartitionOpts{
@@ -194,7 +183,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 }
 
 func TestPartitionScan(t *testing.T) {
-	testMarker("TestPartitionScan")
+	util.LogTestMarker("TestPartitionScan")
 	testDir := "/tmp/eeylops/TestPartitionScan"
 	_ = os.RemoveAll(testDir)
 	opts := PartitionOpts{
@@ -287,7 +276,7 @@ func TestPartitionScan(t *testing.T) {
 }
 
 func TestPartitionManager(t *testing.T) {
-	testMarker("TestPartitionManager")
+	util.LogTestMarker("TestPartitionManager")
 	testDir := "/tmp/eeylops/TestPartitionManager"
 	_ = os.RemoveAll(testDir)
 

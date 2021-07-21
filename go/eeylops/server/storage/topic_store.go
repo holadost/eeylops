@@ -66,7 +66,7 @@ func (ts *TopicStore) MarkTopicForRemoval(topicName string) error {
 	topic, err := ts.GetTopic(topicName)
 	if err != nil {
 		glog.Errorf("Unable to fetch topic info to mark it for removal due to err: %s", err.Error())
-		if err == ErrKVStoreKeyNotFound {
+		if err == kv_store.ErrKVStoreKeyNotFound {
 			return ErrTopicNotFound
 		}
 		return ErrTopicStore
@@ -86,7 +86,7 @@ func (ts *TopicStore) RemoveTopic(topicName string) error {
 	topic, err := ts.GetTopic(topicName)
 	if err != nil {
 		glog.Errorf("Unable to fetch topic info to mark it for removal due to err: %s", err.Error())
-		if err == ErrKVStoreKeyNotFound {
+		if err == kv_store.ErrKVStoreKeyNotFound {
 			return ErrTopicNotFound
 		}
 		return ErrTopicStore
@@ -110,7 +110,7 @@ func (ts *TopicStore) GetTopic(topicName string) (base.Topic, error) {
 	topicVal, err := ts.kvStore.Get(key)
 	if err != nil {
 		glog.Errorf("Unable to get topic: %s due to err: %s", topicName, err.Error())
-		if err == ErrKVStoreKeyNotFound {
+		if err == kv_store.ErrKVStoreKeyNotFound {
 			return topic, ErrTopicNotFound
 		}
 		return topic, ErrTopicStore
@@ -120,7 +120,7 @@ func (ts *TopicStore) GetTopic(topicName string) (base.Topic, error) {
 }
 
 func (ts *TopicStore) GetAllTopics() ([]base.Topic, error) {
-	_, values, _, err := ts.kvStore.Scan(nil, -1, -1)
+	_, values, _, err := ts.kvStore.Scan(nil, -1, -1, false)
 	glog.Infof("Total number of topics in the store: %d", len(values))
 	if err != nil {
 		glog.Errorf("Unable to get all topics in topic store due to err: %s", err.Error())
