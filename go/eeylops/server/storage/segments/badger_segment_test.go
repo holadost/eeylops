@@ -50,7 +50,7 @@ func TestBadgerSegment(t *testing.T) {
 	}
 	opts := BadgerSegmentOpts{
 		RootDir:       dataDir,
-		ParentLogger:  nil,
+		Logger:        nil,
 		Topic:         "topic1",
 		PartitionID:   1,
 		ScanSizeBytes: 16 * (1024 * 1024), // 16MB

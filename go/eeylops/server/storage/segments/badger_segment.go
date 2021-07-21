@@ -42,7 +42,7 @@ type BadgerSegment struct {
 
 type BadgerSegmentOpts struct {
 	RootDir       string                // Root directory for the segment. This is a compulsory parameter.
-	ParentLogger  *logging.PrefixLogger // Parent logger if any. Optional parameter.
+	Logger        *logging.PrefixLogger // Parent logger if any. Optional parameter.
 	Topic         string                // Topic name. Optional parameter.
 	PartitionID   uint                  // Partition ID. Optional parameter.
 	ScanSizeBytes int                   // Max scan size(in bytes). Optional parameter.
@@ -56,13 +56,19 @@ func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
 	seg := new(BadgerSegment)
 	seg.rootDir = opts.RootDir
 	// Set segment ID as root directory for now since we still haven't initialized the segment metadata.
-	seg.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment:%s", opts.RootDir), opts.ParentLogger)
+	if opts.Logger == nil {
+		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment:%s", opts.RootDir))
+	} else {
+		seg.logger = opts.Logger
+	}
 	seg.topicName = opts.Topic
 	seg.partitionID = opts.PartitionID
 	seg.scanSizeBytes = opts.ScanSizeBytes
 	seg.initialize()
 	// Reinitialize logger with correct segment id.
-	seg.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment:%d", seg.ID()), opts.ParentLogger)
+	if opts.Logger == nil {
+		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment:%d", seg.ID()))
+	}
 	return seg, nil
 }
 

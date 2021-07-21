@@ -1,9 +1,13 @@
 package storage
 
 import (
+	"context"
 	"eeylops/server/base"
-	segments2 "eeylops/server/storage/segments"
+	sbase "eeylops/server/storage/base"
+	"eeylops/server/storage/segments"
+	"eeylops/util/logging"
 	"flag"
+	"fmt"
 	"github.com/golang/glog"
 	"io/ioutil"
 	"os"
@@ -54,7 +58,7 @@ type Partition struct {
 	// Max scan size bytes.
 	maxScanSizeBytes int
 	// List of segments in the partition.
-	segments []segments2.Segment
+	segments []segments.Segment
 	// Notification to ask background goroutines to exit.
 	backgroundJobDone        chan bool
 	partitionManagerDoneChan chan bool
@@ -64,8 +68,8 @@ type Partition struct {
 	disposer *StorageDisposer
 	// Flag to indicate whether the partition is open/closed.
 	closed bool
-	// Log ID string.
-	logIDStr string
+	// Partition logger
+	logger *logging.PrefixLogger
 }
 
 type PartitionOpts struct {
@@ -107,13 +111,15 @@ func NewPartition(opts PartitionOpts) *Partition {
 	if p.partitionID <= 0 {
 		glog.Fatalf("Partition ID must be defined. Partition ID must be > 0")
 	}
+	p.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("partition-%d", p.partitionID),
+		logging.NewPrefixLogger(p.topicName))
 	p.rootDir = opts.RootDirectory
 	if p.rootDir == "" {
-		glog.Fatalf("A data directory must be specified for topic: %s, partition: %d",
+		p.logger.Fatalf("A data directory must be specified for topic: %s, partition: %d",
 			p.topicName, p.partitionID)
 	}
 	if opts.TTLSeconds <= 0 {
-		glog.Infof("TTL seconds <= 0. Setting TTL to -1 instead for topic: %s, partition: %d",
+		p.logger.Infof("TTL seconds <= 0. Setting TTL to -1 instead for topic: %s, partition: %d",
 			p.topicName, p.partitionID)
 		p.ttlSeconds = -1
 	} else {
@@ -122,7 +128,7 @@ func NewPartition(opts PartitionOpts) *Partition {
 
 	if opts.ExpiredSegmentPollIntervalSecs <= 0 {
 		if *FlagExpiredSegmentMonitorIntervalSecs <= 0 {
-			glog.Fatalf("Expired segment monitor interval must be > 0")
+			p.logger.Fatalf("Expired segment monitor interval must be > 0")
 		}
 		p.expiredSegmentPollIntervalSecs = time.Duration(*FlagExpiredSegmentMonitorIntervalSecs) * time.Second
 	} else {
@@ -131,7 +137,7 @@ func NewPartition(opts PartitionOpts) *Partition {
 
 	if opts.LiveSegmentPollIntervalSecs == 0 {
 		if *FlagLiveSegmentMonitorIntervalSecs <= 0 {
-			glog.Fatalf("Live segment monitor interval must be > 0")
+			p.logger.Fatalf("Live segment monitor interval must be > 0")
 		}
 		p.liveSegmentPollIntervalSecs = time.Duration(*FlagLiveSegmentMonitorIntervalSecs) * time.Second
 	} else {
@@ -140,7 +146,7 @@ func NewPartition(opts PartitionOpts) *Partition {
 
 	if opts.NumRecordsPerSegmentThreshold <= 0 {
 		if *FlagNumRecordsInSegment <= 0 {
-			glog.Fatalf("Number of records in the segment must be > 0")
+			p.logger.Fatalf("Number of records in the segment must be > 0")
 		}
 		p.numRecordsPerSegment = *FlagNumRecordsInSegment
 	} else {
@@ -149,15 +155,14 @@ func NewPartition(opts PartitionOpts) *Partition {
 
 	if opts.MaxScanSizeBytes <= 0 {
 		if *FlagMaxScanSizeBytes <= 0 {
-			glog.Fatalf("Maximum scan size bytes must be > 0")
+			p.logger.Fatalf("Maximum scan size bytes must be > 0")
 		}
 		p.maxScanSizeBytes = *FlagMaxScanSizeBytes
 	} else {
 		p.maxScanSizeBytes = opts.MaxScanSizeBytes
 	}
-	p.logIDStr = "[" + p.topicName + ":" + strconv.Itoa(p.partitionID) + "]"
 	p.initialize()
-	glog.Infof("Partition initialized. Partition Config:\n------------------------------------------------"+
+	p.logger.Infof("Partition initialized. Partition Config:\n------------------------------------------------"+
 		"\nTopic Name: %s\nPartition ID: %d\nData Directory: %s\nTTL Seconds: %d"+
 		"\nNum Records Per Segment Threshold: %d\nMax Scan Size(bytes): %d"+
 		"\nExpired Segment Monitor Interval: %v\nLive Segment Monitor Interval: %v"+
@@ -172,10 +177,10 @@ func (p *Partition) initialize() {
 	p.snapshotChan = make(chan bool)
 	p.partitionManagerDoneChan = make(chan bool, 1)
 	p.disposer = DefaultDisposer()
-	glog.Infof("Initializing partition: %d", p.partitionID)
+	p.logger.Infof("Initializing partition: %d", p.partitionID)
 	err := os.MkdirAll(p.getSegmentRootDirectory(), 0774)
 	if err != nil {
-		glog.Fatalf("Unable to create segment root directory due to err: %s", err.Error())
+		p.logger.Fatalf("Unable to create segment root directory due to err: %s", err.Error())
 		return
 	}
 
@@ -183,22 +188,46 @@ func (p *Partition) initialize() {
 	segmentIds := p.getFileSystemSegments()
 	for ii, segmentID := range segmentIds {
 		// TODO: In the future, create a factory func here that will return segment based on type.
-		segment, err := segments2.NewBadgerSegment(p.getSegmentDirectory(segmentID))
+		opts := segments.BadgerSegmentOpts{
+			RootDir:       p.getSegmentDirectory(segmentID),
+			Logger:        logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segmentID), p.logger),
+			Topic:         p.topicName,
+			PartitionID:   uint(p.partitionID),
+			ScanSizeBytes: 16 * (1024 * 1024),
+		}
+		segment, err := segments.NewBadgerSegment(&opts)
 		if err != nil {
-			glog.Fatalf("%s Unable to initialize segment due to err: %s", p.logIDStr, err.Error())
+			p.logger.Fatalf("Unable to initialize segment due to err: %s", err.Error())
 			return
 		}
 		meta := segment.GetMetadata()
+		if meta.ID != uint64(segmentID) {
+			if ii != len(segmentIds)-1 {
+				p.logger.Fatalf("Found segment with no metadata even though we have more "+
+					"segments to initialize. Segment ID: %d", segmentID)
+			}
+			p.logger.Infof("Last segment: %d wasn't initialized properly in the previous incarnation. "+
+				"Reinitializing now!", segmentID)
+			prevSeg := p.segments[len(p.segments)-1]
+			metadata := segments.SegmentMetadata{
+				ID:               uint64(segmentID),
+				Immutable:        false,
+				Expired:          false,
+				CreatedTimestamp: time.Now(),
+				StartOffset:      prevSeg.GetMetadata().EndOffset + 1,
+			}
+			segment.SetMetadata(metadata)
+		}
 		if meta.Expired {
 			if len(p.segments) != 0 {
-				glog.Fatalf("%s Found an expired segment in the middle of segments. Segment ID: %d",
-					p.logIDStr, meta.ID)
+				p.logger.Fatalf("Found an expired segment in the middle of segments. Segment ID: %d",
+					meta.ID)
 			}
 			continue
 		}
 		if ii < len(segmentIds)-1 {
 			if !meta.Immutable {
-				glog.Fatalf("%s Found segment at index: %d(%d), %s to be live", p.logIDStr, ii, len(segmentIds),
+				p.logger.Fatalf("Found segment at index: %d(%d), %s to be live", ii, len(segmentIds),
 					meta.ToString())
 			}
 		}
@@ -208,8 +237,7 @@ func (p *Partition) initialize() {
 	// There are no segments in the backing file system. This must be the first time that the partition is being
 	// created.
 	if len(p.segments) == 0 {
-		glog.Infof("%s Did not find any segment in the backing store. Creating segment for first time",
-			p.logIDStr)
+		p.logger.Infof("Did not find any segment in the backing store. Creating segment for first time")
 		p.createNewSegmentWithLock()
 	}
 
@@ -225,7 +253,7 @@ func (p *Partition) initialize() {
 	expiredSegDirs := p.getExpiredFileSystemSegments()
 	createCB := func(segDir string) func(error) {
 		return func(err error) {
-			glog.Fatalf("%s Unable to delete seg dir: %s due to err: %s", p.logIDStr, segDir, err.Error())
+			p.logger.Fatalf("Unable to delete seg dir: %s due to err: %s", segDir, err.Error())
 		}
 	}
 	for _, segDir := range expiredSegDirs {
@@ -237,34 +265,20 @@ func (p *Partition) initialize() {
 }
 
 // Append records to the partition.
-func (p *Partition) Append(values [][]byte) error {
+func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sbase.AppendEntriesRet {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
+	var ret sbase.AppendEntriesRet
 	if p.closed {
-		return ErrPartitionClosed
+		ret.Error = ErrPartitionClosed
+		return &ret
 	}
 	seg := p.getLiveSegment()
-	err := seg.Append(values, -1)
-	if err != nil {
-		glog.Errorf("%s Unable to append entries to partition: %d due to err: %s", p.logIDStr, p.partitionID,
-			err.Error())
-		return ErrPartitionAppend
-	}
-	return nil
-}
-
-func (p *Partition) AppendV2(values [][]byte, tsNano int64, lastRLogIdx int64) error {
-	p.partitionCfgLock.RLock()
-	defer p.partitionCfgLock.RUnlock()
-	if p.closed {
-		return ErrPartitionClosed
-	}
-	seg := p.getLiveSegment()
-	err := seg.Append(segments2.makeMessageValues(values, tsNano), lastRLogIdx)
-	if err != nil {
-		glog.Errorf("%s Unable to append entries to partition: %d due to err: %s",
-			p.logIDStr, p.partitionID, err.Error())
-		return ErrPartitionAppend
+	segRet := seg.Append(ctx, arg)
+	if segRet.Error != nil {
+		p.logger.Errorf("Unable to append entries to partition: %d due to err: %s", ret.Error.Error())
+		ret.Error = ErrPartitionAppend
+		return &ret
 	}
 	return nil
 }
@@ -308,7 +322,7 @@ func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values []
 	}
 
 	// The values are present across multiple segments. Merge them before returning.
-	glog.V(1).Infof("%s Gathering values from multiple(%d) segments", p.logIDStr, len(segs))
+	p.logger.VInfof(1, "Gathering values from multiple(%d) segments", len(segs))
 	numPendingMsgs := numMessages
 	var nextStartOffset base.Offset
 	for ii, seg := range segs {
@@ -343,99 +357,6 @@ func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values []
 	return
 }
 
-// ScanV2 numMessages records from the partition from the given startOffset.
-func (p *Partition) ScanV2(startOffset base.Offset, numMessages uint64) ([][]byte, error, base.Offset) {
-	p.partitionCfgLock.RLock()
-	defer p.partitionCfgLock.RUnlock()
-	var values [][]byte
-	var nextOffset base.Offset
-	if p.closed {
-		return nil, ErrPartitionClosed, -1
-	}
-
-	// The start offset is no longer present. Ask client to start scanning from the current start offset of the
-	// partition.
-	if startOffset < p.currStartOffset {
-		return values, nil, p.currStartOffset
-	}
-	endOffset := startOffset + base.Offset(numMessages) - 1
-
-	// Get all the segments that contain our desired offsets.
-	segs := p.getSegments(startOffset, endOffset)
-	if segs == nil || len(segs) == 0 {
-		// The start offset is greater than the largest offset in the partition. There is nothing to scan.
-		return values, nil, -1
-	}
-	var scanSizeBytes int
-	scanSizeBytes = 0
-
-	// All offsets are present in the same segment.
-	currOffset := startOffset
-	if len(segs) == 1 {
-		segStartOffset := startOffset - segs[0].GetMetadata().StartOffset
-		tmpVals, tmpErrs := segs[0].Scan(segStartOffset, numMessages)
-		for ii, val := range tmpVals {
-			if ii != 0 {
-				currOffset++
-			}
-			if tmpErrs[ii] != nil {
-				return nil, ErrPartitionScan, startOffset
-			}
-			// Ensure that the batch size remains smaller than the max scan size.
-			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
-				// We are skipping this message so set the nextOffset to the currOffset since it will need to
-				// be scanned in the next scan call.
-				nextOffset = currOffset
-				break
-			}
-			nextOffset = currOffset + 1
-			scanSizeBytes += len(val)
-			body, _ := segments2.fetchValueFromMessage(val)
-			values = append(values, body)
-		}
-		return values, nil, nextOffset
-	}
-
-	// The values are present across multiple segments. Merge them before returning.
-	glog.V(1).Infof("%s Gathering values from multiple(%d) segments", p.logIDStr, len(segs))
-	numPendingMsgs := numMessages
-	var segStartOffset base.Offset
-	for ii, seg := range segs {
-		if numPendingMsgs == 0 {
-			return values, nil, nextOffset
-		}
-		if ii == 0 {
-			// First segment. Start scanning from the correct offset into the segment.
-			segStartOffset = startOffset - seg.GetMetadata().StartOffset
-		} else {
-			// Start scanning from the very first offset in the segment.
-			segStartOffset = 0
-		}
-		partialValues, partialErrs := seg.Scan(segStartOffset, numPendingMsgs)
-		numPendingMsgs -= uint64(len(partialValues))
-		for jj, val := range partialValues {
-			if (ii != 0) && (jj != 0) {
-				currOffset++
-			}
-			if partialErrs[jj] != nil {
-				return nil, ErrPartitionScan, startOffset
-			}
-			// Ensure that the batch size remains smaller than the max scan size.
-			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
-				nextOffset = currOffset
-				return values, nil, nextOffset
-			}
-			scanSizeBytes += len(val)
-			nextOffset = currOffset + 1
-
-			// Merge all partial values into a single list.
-			body, _ := segments2.fetchValueFromMessage(val)
-			values = append(values, body)
-		}
-	}
-	return values, nil, nextOffset
-}
-
 // Snapshot the partition.
 func (p *Partition) Snapshot() error {
 	if p.closed {
@@ -457,15 +378,15 @@ func (p *Partition) Close() {
 		meta := seg.GetMetadata()
 		err := seg.Close()
 		if err != nil {
-			glog.Fatalf("%s Failed to close segment: %d due to err: %s", p.logIDStr, meta.ID, err.Error())
+			p.logger.Fatalf("Failed to close segment: %d due to err: %s", meta.ID, err.Error())
 		}
 	}
 }
 
 // getSegments returns a list of segments that contains all the elements between the given start and end offsets.
 // This function assumes that a partitionCfgLock has been acquired.
-func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) []segments2.Segment {
-	var segs []segments2.Segment
+func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) []segments.Segment {
+	var segs []segments.Segment
 
 	// Find start offset segment.
 	startSegIdx := p.findOffset(0, len(p.segments)-1, startOffset)
@@ -507,7 +428,7 @@ func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) 
 }
 
 // getLiveSegment returns the current live segment. This function assumes that the partitionCfgLock has been acquired.
-func (p *Partition) getLiveSegment() segments2.Segment {
+func (p *Partition) getLiveSegment() segments.Segment {
 	return p.segments[len(p.segments)-1]
 }
 
@@ -536,7 +457,7 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset base.Offset) int
 }
 
 // offsetInSegment checks whether the given offset is in the segment or not.
-func (p *Partition) offsetInSegment(offset base.Offset, seg segments2.Segment) bool {
+func (p *Partition) offsetInSegment(offset base.Offset, seg segments.Segment) bool {
 	if seg.IsEmpty() {
 		return false
 	}
@@ -553,13 +474,13 @@ func (p *Partition) offsetInSegment(offset base.Offset, seg segments2.Segment) b
 //     2. Checks the segments that have expired and marks them for GC. GC is handled by another background goroutine.
 //     3. Checks the snapshotChan and saves the partition configuration when a snapshot is requested.
 func (p *Partition) partitionManager() {
-	glog.Infof("%s Partition manager has started", p.logIDStr)
+	p.logger.Infof("Partition manager has started")
 	liveSegTicker := time.NewTicker(p.liveSegmentPollIntervalSecs)
 	expTicker := time.NewTicker(p.expiredSegmentPollIntervalSecs)
 	for {
 		select {
 		case <-p.backgroundJobDone:
-			glog.Infof("%s Partition manager exiting", p.logIDStr)
+			p.logger.Infof("Partition manager exiting")
 			return
 		case <-liveSegTicker.C:
 			p.maybeCreateNewSegment()
@@ -573,7 +494,7 @@ func (p *Partition) partitionManager() {
 
 // maybeCreateNewSegment checks if a new segment needs to be created and if so, creates one.
 func (p *Partition) maybeCreateNewSegment() {
-	glog.Infof("%s Checking if new segment needs to be created", p.logIDStr)
+	p.logger.Infof("Checking if new segment needs to be created")
 	if p.shouldCreateNewSegment() {
 		p.createNewSegmentWithLock()
 	}
@@ -590,8 +511,8 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	metadata := seg.GetMetadata()
 	numRecords := metadata.EndOffset - metadata.StartOffset + 1
 	if numRecords >= base.Offset(p.numRecordsPerSegment) {
-		glog.Infof("%s Current live segment records(%d) has reached/exceeded threshold(%d). "+
-			"New segment is required", p.logIDStr, numRecords, p.numRecordsPerSegment)
+		p.logger.Infof("Current live segment records(%d) has reached/exceeded threshold(%d). "+
+			"New segment is required", numRecords, p.numRecordsPerSegment)
 		return true
 	}
 	return false
@@ -608,7 +529,7 @@ func (p *Partition) createNewSegmentWithLock() {
 
 // createNewSegment marks the current live segment immutable and creates a new live segment.
 func (p *Partition) createNewSegment() {
-	glog.Infof("%s Creating new segment", p.logIDStr)
+	p.logger.Infof("Creating new segment")
 	var startOffset base.Offset
 	var segID uint64
 
@@ -622,15 +543,21 @@ func (p *Partition) createNewSegment() {
 		prevMetadata := seg.GetMetadata()
 		err := seg.Close()
 		if err != nil {
-			glog.Fatalf("%s Failure while closing last segment: %d in partition %d due to err: %s",
-				p.logIDStr, prevMetadata.ID, p.partitionID, err.Error())
+			p.logger.Fatalf("Failure while closing last segment: %d in partition %d due to err: %s",
+				prevMetadata.ID, p.partitionID, err.Error())
 			return
 		}
-		seg, err = segments2.NewBadgerSegment(p.getSegmentDirectory(int(prevMetadata.ID)))
+		opts := segments.BadgerSegmentOpts{
+			RootDir:       p.getSegmentDirectory(int(prevMetadata.ID)),
+			Logger:        p.logger,
+			Topic:         p.topicName,
+			PartitionID:   uint(p.partitionID),
+			ScanSizeBytes: 0,
+		}
+		seg, err = segments.NewBadgerSegment(&opts)
 		if err != nil {
-			glog.Fatalf("%s Failure while closing and reopening last segment due to err: %s",
-				p.logIDStr, err.Error())
-			return
+			p.logger.Fatalf("Failure while closing and reopening last segment due to err: %s",
+				err.Error())
 		}
 		p.segments[len(p.segments)-1] = seg
 
@@ -639,12 +566,19 @@ func (p *Partition) createNewSegment() {
 		startOffset = prevMetadata.EndOffset + 1
 	}
 
-	newSeg, err := segments2.NewBadgerSegment(p.getSegmentDirectory(int(segID)))
+	opts := segments.BadgerSegmentOpts{
+		RootDir:       p.getSegmentDirectory(int(segID)),
+		Logger:        logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segID), p.logger),
+		Topic:         p.topicName,
+		PartitionID:   uint(p.partitionID),
+		ScanSizeBytes: 16 * (1024 * 1024),
+	}
+	newSeg, err := segments.NewBadgerSegment(&opts)
 	if err != nil {
-		glog.Fatalf("%s Unable to create new segment due to err: %s", p.logIDStr, err.Error())
+		p.logger.Fatalf("Unable to create new segment due to err: %s", err.Error())
 		return
 	}
-	metadata := segments2.SegmentMetadata{
+	metadata := segments.SegmentMetadata{
 		ID:               segID,
 		Immutable:        false,
 		Expired:          false,
@@ -659,7 +593,7 @@ func (p *Partition) createNewSegment() {
 // It also marks these segments for deletion after ensuring that the segment is not required by any
 // snapshots.
 func (p *Partition) maybeReclaimExpiredSegments() {
-	glog.Infof("%s Checking if segments need to be expired", p.logIDStr)
+	p.logger.Infof("Checking if segments need to be expired")
 	if p.shouldExpireSegment() {
 		p.expireSegments()
 	}
@@ -694,28 +628,28 @@ func (p *Partition) expireSegments() {
 		seg.MarkExpired()
 		err := seg.Close()
 		if err != nil {
-			glog.Fatalf("%s Unable to close segment due to err: %s", p.logIDStr, err.Error())
+			p.logger.Fatalf("Unable to close segment due to err: %s", err.Error())
 		}
 		segDir := p.getSegmentDirectory(segId)
 		expiredSegDirName := filepath.Base(segDir) + KExpiredSegmentDirSuffix
 		expiredSegDir := path.Join(filepath.Dir(segDir), expiredSegDirName)
-		glog.Infof("%s Renaming segment directory for segment: %d to %s", p.logIDStr, segId, expiredSegDir)
+		p.logger.Infof("Renaming segment directory for segment: %d to %s", segId, expiredSegDir)
 		err = os.Rename(segDir, expiredSegDir)
 		if err != nil {
-			glog.Fatalf("%s Unable to rename segment directory as expired due to err: %s",
-				p.logIDStr, err.Error())
+			p.logger.Fatalf("Unable to rename segment directory as expired due to err: %s",
+				err.Error())
 		}
 		p.disposer.Dispose(expiredSegDir, func(err error) {
 			if err != nil {
-				glog.Fatalf("%s Unable to delete segment: %d in partition: [%s:%d] due to err: %s",
-					p.logIDStr, segId, p.topicName, p.partitionID, err.Error())
+				p.logger.Fatalf("Unable to delete segment: %d in partition: [%s:%d] due to err: %s",
+					segId, p.topicName, p.partitionID, err.Error())
 			}
 		})
 	}
 }
 
 // removeExpiredSegments removes the expired segment(s) from segments.
-func (p *Partition) removeExpiredSegments() []segments2.Segment {
+func (p *Partition) removeExpiredSegments() []segments.Segment {
 	// Acquire write lock on partition as we are going to be changing segments.
 	p.partitionCfgLock.Lock()
 	defer p.partitionCfgLock.Unlock()
@@ -736,26 +670,26 @@ func (p *Partition) removeExpiredSegments() []segments2.Segment {
 		p.createNewSegment()
 		return nil
 	}
-	var expiredSegs []segments2.Segment
+	var expiredSegs []segments.Segment
 	expiredSegs, p.segments = p.segments[0:lastIdxExpired+1], p.segments[lastIdxExpired+1:]
 	return expiredSegs
 }
 
-func (p *Partition) isSegExpirable(metadata *segments2.SegmentMetadata) bool {
+func (p *Partition) isSegExpirable(metadata *segments.SegmentMetadata) bool {
 	now := time.Now().Unix()
 	its := metadata.ImmutableTimestamp.Unix()
 	lt := now - its
 	if !metadata.Immutable {
-		glog.V(0).Infof("%s Segment: %d is not immutable. Segment has not expired", p.logIDStr, metadata.ID)
+		p.logger.VInfof(1, "Segment: %d is not immutable. Segment has not expired", metadata.ID)
 		return false
 	}
 	if lt <= int64(p.ttlSeconds) {
-		glog.V(0).Infof("%s Segment: %d has not expired. Current life time: %d, TTL: %d seconds",
-			p.logIDStr, metadata.ID, lt, p.ttlSeconds)
+		p.logger.VInfof(1, "Segment: %d has not expired. Current life time: %d, TTL: %d seconds",
+			metadata.ID, lt, p.ttlSeconds)
 		return false
 	}
-	glog.Infof("%s Segment: %d can be expired. Current life time: %d seconds, TTL: %d seconds",
-		p.logIDStr, metadata.ID, lt, p.ttlSeconds)
+	p.logger.Infof("Segment: %d can be expired. Current life time: %d seconds, TTL: %d seconds",
+		metadata.ID, lt, p.ttlSeconds)
 	return true
 }
 
@@ -784,8 +718,7 @@ func (p *Partition) getSegmentDirectory(segmentID int) string {
 func (p *Partition) getFileSystemSegments() []int {
 	fileInfo, err := ioutil.ReadDir(p.getSegmentRootDirectory())
 	if err != nil {
-		glog.Fatalf("%s Unable to read partition directory and find segments due to err: %v",
-			p.logIDStr, err)
+		p.logger.Fatalf("Unable to read partition directory and find segments due to err: %v", err)
 		return nil
 	}
 	var segmentIDs []int
@@ -796,8 +729,7 @@ func (p *Partition) getFileSystemSegments() []int {
 			}
 			segmentID, err := strconv.Atoi(file.Name())
 			if err != nil {
-				glog.Fatalf("%s Unable to convert segment id to int due to err: %v",
-					p.logIDStr, err)
+				p.logger.Fatalf("Unable to convert segment id to int due to err: %v", err)
 				return nil
 			}
 			segmentIDs = append(segmentIDs, segmentID)
@@ -812,8 +744,7 @@ func (p *Partition) getFileSystemSegments() []int {
 		id := segmentIDs[ii]
 		prevID := segmentIDs[ii-1]
 		if prevID+1 != id {
-			glog.Fatalf("%s Found hole in segments. Prev Seg ID: %d, Curr Seg ID: %d",
-				p.logIDStr, prevID, id)
+			p.logger.Fatalf("Found hole in segments. Prev Seg ID: %d, Curr Seg ID: %d", prevID, id)
 		}
 	}
 	return segmentIDs
@@ -825,8 +756,7 @@ func (p *Partition) getExpiredFileSystemSegments() []string {
 	segRootDir := p.getSegmentRootDirectory()
 	fileInfo, err := ioutil.ReadDir(segRootDir)
 	if err != nil {
-		glog.Fatalf("%s Unable to read partition directory and find segments due to err: %v",
-			p.logIDStr, err)
+		p.logger.Fatalf("Unable to read partition directory and find segments due to err: %v", err)
 		return nil
 	}
 	var expiredSegs []string
