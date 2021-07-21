@@ -1,30 +1,16 @@
 package kv_store
 
 import (
+	"eeylops/util"
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
-	"os"
 	"testing"
 )
 
-func createBadgerKVStoreTestDir(t *testing.T, testName string) string {
-	dataDir := fmt.Sprintf("/tmp/badger_kv_store_test/%s", testName)
-	err := os.RemoveAll(dataDir)
-	if err != nil {
-		t.Fatalf("Unable to delete test directory: %s", dataDir)
-	}
-	err = os.MkdirAll(dataDir, 0774)
-	if err != nil {
-		glog.Fatalf("Unable to create test dir: %s", dataDir)
-	}
-	return dataDir
-}
-
 func TestBadgerKVStore(t *testing.T) {
-	glog.Infof("*******************************************************************************************\n\n")
-	glog.Infof("Starting TestBadgerKVStore")
-	testDir := createBadgerKVStoreTestDir(t, "TestBadgerKVStore")
+	util.LogTestMarker("TestBadgerKVStore")
+	testDir := util.CreateTestDir(t, "TestBadgerKVStore")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 1
 	opts.NumMemtables = 2
@@ -113,6 +99,7 @@ func TestBadgerKVStore(t *testing.T) {
 			scanner.Next()
 		}
 	}
+	scanner.Close()
 
 	glog.Infof("Testing put and get")
 	singleKey := "singleKey"

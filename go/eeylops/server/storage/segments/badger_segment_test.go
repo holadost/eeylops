@@ -136,6 +136,7 @@ func TestBadgerSegment(t *testing.T) {
 				logger.Fatalf("Offset mismatch. Expected offset: %d, Got Offset: %d", expectedOffset, offset)
 			}
 		}
+		logger.Infof("Successfully scanned messages")
 	}
 	endTs := time.Now().UnixNano()
 	f, l := bds.GetMsgTimestampRange()
