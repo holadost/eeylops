@@ -274,7 +274,11 @@ func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sb
 		return &ret
 	}
 	seg := p.getLiveSegment()
-	segRet := seg.Append(ctx, arg)
+	var sarg segments.AppendEntriesArg
+	sarg.Entries = arg.Entries
+	sarg.RLogIdx = arg.RLogIdx
+	sarg.Timestamp = arg.Timestamp
+	segRet := seg.Append(ctx, &sarg)
 	if segRet.Error != nil {
 		p.logger.Errorf("Unable to append entries to partition: %d due to err: %s", ret.Error.Error())
 		ret.Error = ErrPartitionAppend
@@ -284,77 +288,108 @@ func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sb
 }
 
 // Scan numMessages records from the partition from the given startOffset.
-func (p *Partition) Scan(startOffset base.Offset, numMessages uint64) (values [][]byte, errs []error) {
+func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.ScanEntriesRet {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
+	var ret sbase.ScanEntriesRet
 	if p.closed {
-		return nil, []error{ErrPartitionClosed}
+		ret.Error = ErrPartitionClosed
+		return &ret
 	}
-	numMsgsOffset := base.Offset(numMessages)
-	endOffset := startOffset + numMsgsOffset - 1
+	var startOffset base.Offset
+	var endOffset base.Offset
+	numMsgsOffset := base.Offset(arg.NumMessages)
+	if arg.StartOffset >= 0 {
+		endOffset = arg.StartOffset + numMsgsOffset - 1
+		startOffset = arg.StartOffset
+	} else {
 
+	}
 	// Get all the segments that contain our desired offsets.
 	segs := p.getSegments(startOffset, endOffset)
 	if segs == nil || len(segs) == 0 {
-		return
+		return &ret
 	}
-	var scanSizeBytes int
-	scanSizeBytes = 0
+
+	var sarg segments.ScanEntriesArg
+	sarg.StartOffset = arg.StartOffset
+	sarg.NumMessages = arg.NumMessages
+	sarg.StartTimestamp = arg.StartTimestamp
+	sarg.EndTimestamp = arg.EndTimestamp
 
 	// All offsets are present in the same segment.
 	if len(segs) == 1 {
-		segStartOffset := startOffset - segs[0].GetMetadata().StartOffset
-		tmpVals, tmpErrs := segs[0].Scan(segStartOffset, numMessages)
-		for ii, val := range tmpVals {
-			// Ensure that the batch size remains smaller than the max scan size.
-			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
-				break
-			}
-			scanSizeBytes += len(val)
-			values = append(values, val)
-			if tmpErrs[ii] != nil {
-				errs = append(errs, ErrPartitionScan)
+		seg := segs[0]
+		sret := seg.Scan(ctx, &sarg)
+		if sret.Error != nil {
+			ret.Error = sret.Error
+			ret.NextOffset = -1
+			return &ret
+		}
+		ret.Error = nil
+		ret.Values = sret.Values
+		if sret.NextOffset != -1 {
+			ret.NextOffset = sret.NextOffset
+		} else {
+			// NextOffset is -1. Check if there are any more segments after the current segment and if so,
+			// use the StartOffset of that segment as the NextOffset.
+			if p.getLiveSegment().ID() == seg.ID() {
+				ret.NextOffset = -1
 			} else {
-				errs = append(errs, nil)
+				idx := p.findSegmentByID(0, len(p.segments)-1, seg.ID())
+				if idx == len(p.segments)-1 {
+					// The current segment is also the latest segment. There is nothing more to scan.
+					p.logger.Warningf("Last segment in segments is not a live segment??")
+					ret.NextOffset = -1
+				}
+				nextSeg := p.segments[idx+1]
+				ret.NextOffset = nextSeg.GetMetadata().StartOffset
 			}
 		}
-		return
+		return &ret
 	}
 
 	// The values are present across multiple segments. Merge them before returning.
+	var scanSizeBytes int
+	scanSizeBytes = 0
 	p.logger.VInfof(1, "Gathering values from multiple(%d) segments", len(segs))
-	numPendingMsgs := numMessages
-	var nextStartOffset base.Offset
+	numPendingMsgs := arg.NumMessages
 	for ii, seg := range segs {
 		if numPendingMsgs == 0 {
-			return
+			break
 		}
+		var sarg segments.ScanEntriesArg
 		if ii == 0 {
-			// First segment. Start scanning from the correct offset into the segment.
-			nextStartOffset = startOffset - seg.GetMetadata().StartOffset
+			sarg.StartOffset = arg.StartOffset
+			sarg.StartTimestamp = arg.StartTimestamp
 		} else {
-			// Start scanning from the very first offset in the segment.
-			nextStartOffset = 0
+			sarg.StartOffset = seg.GetMetadata().StartOffset
 		}
-		partialValues, partialErrs := seg.Scan(nextStartOffset, numPendingMsgs)
-		numPendingMsgs -= uint64(len(partialValues))
-		for jj, val := range partialValues {
+		sarg.EndTimestamp = arg.EndTimestamp
+		sarg.NumMessages = numPendingMsgs
+		sarg.ScanSizeBytes = int64(p.maxScanSizeBytes - scanSizeBytes)
+		sret := seg.Scan(ctx, &sarg)
+		if sret.Error != nil {
+			ret.Error = ErrPartitionScan
+			ret.NextOffset = -1
+			return &ret
+		}
+		numPendingMsgs -= uint64(len(sret.Values))
+		for _, val := range sret.Values {
 			// Ensure that the batch size remains smaller than the max scan size.
-			if (len(val) + scanSizeBytes) > p.maxScanSizeBytes {
-				return
+			if (len(val.Value) + scanSizeBytes) > p.maxScanSizeBytes {
+				ret.Error = nil
+				ret.NextOffset = val.Offset // As this message is not being included.
+				return &ret
 			}
-			scanSizeBytes += len(val)
-
+			scanSizeBytes += len(val.Value)
 			// Merge all partial values into a single list.
-			values = append(values, val)
-			if partialErrs[jj] != nil {
-				errs = append(errs, ErrPartitionScan)
-			} else {
-				errs = append(errs, nil)
-			}
+			ret.Values = append(ret.Values, val)
 		}
 	}
-	return
+	ret.Error = nil
+	ret.NextOffset = ret.Values[len(ret.Values)-1].Offset + 1
+	return &ret
 }
 
 // Snapshot the partition.
@@ -389,7 +424,7 @@ func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) 
 	var segs []segments.Segment
 
 	// Find start offset segment.
-	startSegIdx := p.findOffset(0, len(p.segments)-1, startOffset)
+	startSegIdx := p.findOffsetInSegments(0, len(p.segments)-1, startOffset)
 	if startSegIdx == -1 {
 		// We did not find any segments that contains our offsets.
 		return segs
@@ -411,7 +446,7 @@ func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) 
 	}
 	// Slow path.
 	if endSegIdx == -1 {
-		endSegIdx = p.findOffset(startSegIdx, len(p.segments)-1, endOffset)
+		endSegIdx = p.findOffsetInSegments(startSegIdx, len(p.segments)-1, endOffset)
 	}
 	// Populate segments.
 	segs = append(segs, p.segments[startSegIdx])
@@ -432,9 +467,13 @@ func (p *Partition) getLiveSegment() segments.Segment {
 	return p.segments[len(p.segments)-1]
 }
 
-// findOffset finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
+func (p *Partition) scanSegment(ctx context.Context, seg segments.Segment, arg *segments.ScanEntriesArg) *segments.ScanEntriesRet {
+	return seg.Scan(ctx, arg)
+}
+
+// findOffsetInSegments finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
 // been acquired.
-func (p *Partition) findOffset(startIdx int, endIdx int, offset base.Offset) int {
+func (p *Partition) findOffsetInSegments(startIdx int, endIdx int, offset base.Offset) int {
 	// Base cases.
 	if startIdx > endIdx {
 		return -1
@@ -450,9 +489,51 @@ func (p *Partition) findOffset(startIdx int, endIdx int, offset base.Offset) int
 	if p.offsetInSegment(offset, p.segments[midIdx]) {
 		return midIdx
 	} else if offset < sOff {
-		return p.findOffset(0, midIdx-1, offset)
+		return p.findOffsetInSegments(0, midIdx-1, offset)
 	} else {
-		return p.findOffset(midIdx+1, endIdx, offset)
+		return p.findOffsetInSegments(midIdx+1, endIdx, offset)
+	}
+}
+
+func (p *Partition) findTimestampInSegments(startIdx int, endIdx int, timestamp int64) int {
+	if startIdx > endIdx {
+		return -1
+	}
+	if startIdx == endIdx {
+		if p.timestampInSegment(timestamp, p.segments[startIdx]) {
+			return startIdx
+		}
+		return -1
+	}
+	midIdx := startIdx + (endIdx-startIdx)/2
+	sts, _ := p.segments[midIdx].GetMsgTimestampRange()
+	if p.timestampInSegment(timestamp, p.segments[midIdx]) {
+		return midIdx
+	} else if timestamp < sts {
+		return p.findTimestampInSegments(0, midIdx-1, timestamp)
+	} else {
+		return p.findTimestampInSegments(midIdx+1, endIdx, timestamp)
+	}
+}
+
+func (p *Partition) findSegmentByID(startIdx int, endIdx int, segID int) int {
+	if startIdx > endIdx {
+		return -1
+	}
+	if startIdx == endIdx {
+		if p.segments[startIdx].ID() == segID {
+			return startIdx
+		}
+		return -1
+	}
+	midIdx := startIdx + (endIdx-startIdx)/2
+	currSegID := p.segments[midIdx].ID()
+	if currSegID == segID {
+		return midIdx
+	} else if segID < currSegID {
+		return p.findSegmentByID(0, midIdx-1, segID)
+	} else {
+		return p.findSegmentByID(midIdx+1, endIdx, segID)
 	}
 }
 
@@ -463,6 +544,17 @@ func (p *Partition) offsetInSegment(offset base.Offset, seg segments.Segment) bo
 	}
 	sOff, eOff := seg.GetRange()
 	if offset >= sOff && offset <= eOff {
+		return true
+	}
+	return false
+}
+
+func (p *Partition) timestampInSegment(timestamp int64, seg segments.Segment) bool {
+	if seg.IsEmpty() {
+		return false
+	}
+	sts, lts := seg.GetMsgTimestampRange()
+	if timestamp >= sts && timestamp <= lts {
 		return true
 	}
 	return false
