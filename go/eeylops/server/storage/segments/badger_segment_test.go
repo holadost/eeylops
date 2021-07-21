@@ -3,7 +3,6 @@ package segments
 import (
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
@@ -103,22 +102,23 @@ func TestBadgerSegment(t *testing.T) {
 		if iter == numIters-1 {
 			lastMsgTs = now
 		}
-		arg := sbase.AppendEntriesArg{
-			Entries:   values,
-			Timestamp: now,
-			RLogIdx:   lastRLogIdx,
+		var arg AppendEntriesArg
+		{
 		}
+		arg.Entries = values
+		arg.Timestamp = now
+		arg.RLogIdx = lastRLogIdx
 
 		ret := bds.Append(context.Background(), &arg)
 		if ret.Error != nil {
 			logger.Fatalf("Unable to append values to segment due to err: %s", ret.Error.Error())
 		}
-		sarg := sbase.ScanEntriesArg{
-			StartOffset:    base.Offset(iter*batchSize) + initialMeta.StartOffset,
-			NumMessages:    uint64(batchSize),
-			StartTimestamp: -1,
-			EndTimestamp:   -1,
-		}
+		sarg := ScanEntriesArg{}
+		sarg.StartOffset = base.Offset(iter*batchSize) + initialMeta.StartOffset
+		sarg.NumMessages = uint64(batchSize)
+		sarg.StartTimestamp = -1
+		sarg.EndTimestamp = -1
+
 		logger.Infof("Successfully appended messages. Now scanning messages using arg: %v", sarg)
 		sret := bds.Scan(context.Background(), &sarg)
 		if sret.Error != nil {

@@ -3,7 +3,6 @@ package segments
 import (
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	_ "github.com/lib/pq"
@@ -17,9 +16,9 @@ type Segment interface {
 	// Close the segment.
 	Close() error
 	// Append values to the segment.
-	Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sbase.AppendEntriesRet
+	Append(ctx context.Context, arg *AppendEntriesArg) *AppendEntriesRet
 	// Scan values from the segment.
-	Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.ScanEntriesRet
+	Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEntriesRet
 	// IsEmpty returns true if the segment is empty. False otherwise.
 	IsEmpty() bool
 	// Stats fetches the stats for this instance of segment.

@@ -128,10 +128,10 @@ func (seg *BadgerSegment) IsEmpty() bool {
 	return seg.nextOffSet == 0
 }
 
-func (seg *BadgerSegment) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sbase.AppendEntriesRet {
+func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *AppendEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
-	var ret sbase.AppendEntriesRet
+	var ret AppendEntriesRet
 	ret.Error = nil
 	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable {
 		seg.logger.Errorf("Segment is either closed, expired or immutable. Cannot append entries")
@@ -173,10 +173,10 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *sbase.AppendEntriesAr
 
 // Scan implements the Segment interface. It attempts to fetch numMessages starting from the given StartOffset or
 // StartTimestamp.
-func (seg *BadgerSegment) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.ScanEntriesRet {
+func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
-	var ret sbase.ScanEntriesRet
+	var ret ScanEntriesRet
 	if seg.closed || seg.metadata.Expired {
 		seg.logger.Errorf("Segment is already closed")
 		ret.Error = ErrSegmentClosed
@@ -245,6 +245,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *
 			Value:     val,
 			Timestamp: ts,
 		})
+		ret.NextOffset = offset + 1
 		if offset == endOffset {
 			break
 		}
@@ -358,7 +359,7 @@ func (seg *BadgerSegment) keyToOffset(key []byte) base.Offset {
 	return base.Offset(util.BytesToUint(key))
 }
 
-// Opens the segment.
+// Opens the segment. This method assumes that a segLock has been acquired.
 func (seg *BadgerSegment) open() {
 	// Gather the last replicated log index in the segment.
 	val, err := seg.dataDB.Get(kLastRLogIdxKeyBytes)
@@ -404,6 +405,6 @@ func (seg *BadgerSegment) open() {
 		}
 		itr.Close()
 	}
-	seg.logger.VInfof(1, "First Message TS: %d, Last Message TS: %d, Next Offset: %d, Last RLog Index: %d",
-		seg.firstMsgTs, seg.lastMsgTs, seg.nextOffSet, seg.lastRLogIdx)
+	seg.logger.VInfof(1, "First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
+		"Last RLog Index: %d", seg.firstMsgTs, seg.lastMsgTs, seg.nextOffSet, seg.lastRLogIdx)
 }
