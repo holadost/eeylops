@@ -1,26 +1,15 @@
 package segments
 
 import (
+	"context"
 	"eeylops/server/base"
+	sbase "eeylops/server/storage/base"
+	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
-	"os"
 	"testing"
 	"time"
 )
-
-func createTestDir(t *testing.T, testName string) string {
-	dataDir := fmt.Sprintf("/tmp/badger_segment_test/%s", testName)
-	err := os.RemoveAll(dataDir)
-	if err != nil {
-		t.Fatalf("Unable to delete test directory: %s", dataDir)
-	}
-	err = os.MkdirAll(dataDir, 0774)
-	if err != nil {
-		glog.Fatalf("Unable to create test dir: %s", dataDir)
-	}
-	return dataDir
-}
 
 func checkMetadata(t *testing.T, got *SegmentMetadata, expected *SegmentMetadata) {
 	glog.Infof("Metadata: %s", got.ToString())
@@ -46,31 +35,41 @@ func checkMetadata(t *testing.T, got *SegmentMetadata, expected *SegmentMetadata
 }
 
 func TestBadgerSegment(t *testing.T) {
-	dataDir := createTestDir(t, "TestBadgerSegment")
+	util.LogTestMarker("TestBadgerSegment")
+	dataDir := util.CreateTestDir(t, "TestBadgerSegment")
 	initialMeta := SegmentMetadata{
 		ID:               100,
 		Immutable:        false,
 		StartOffset:      10000,
-		EndOffset:        0,
+		EndOffset:        -1,
 		CreatedTimestamp: time.Now(),
 		ImmutableReason:  0,
 	}
-	bds, err := NewBadgerSegment(dataDir)
+	opts := BadgerSegmentOpts{
+		RootDir:       dataDir,
+		ParentLogger:  nil,
+		Topic:         "topic1",
+		PartitionID:   1,
+		ScanSizeBytes: 16 * (1024 * 1024), // 16MB
+	}
+	bds, err := NewBadgerSegment(&opts)
 	if err != nil {
 		t.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
 	bds.SetMetadata(initialMeta)
 	batchSize := 10
 	numIters := 20
+	lastRLogIdx := int64(0)
+	startTs := time.Now().UnixNano()
 	for iter := 0; iter < numIters; iter++ {
 		if iter%5 == 0 {
 			err = bds.Close()
 			if err != nil {
-				t.Fatalf("Failed to close segment due to err: %s", err.Error())
+				glog.Fatalf("Failed to close segment due to err: %s", err.Error())
 			}
-			bds, err = NewBadgerSegment(dataDir)
+			bds, err = NewBadgerSegment(&opts)
 			if err != nil {
-				t.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+				glog.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 			}
 			got := bds.GetMetadata()
 			checkMetadata(t, &got, &initialMeta)
@@ -78,35 +77,48 @@ func TestBadgerSegment(t *testing.T) {
 			if iter == 0 {
 				ex = initialMeta.StartOffset
 			} else {
-				ex = initialMeta.StartOffset + bds.nextOffSet - 1
+				ex = bds.nextOffSet - 1
 			}
 			if got.EndOffset != ex {
-				t.Fatalf("End offset mismatch. Expected: %d, Got: %d", ex, got.EndOffset)
+				glog.Fatalf("End offset mismatch. Expected: %d, Got: %d", ex, got.EndOffset)
 			}
 		}
 
 		glog.Infof("Starting iteration: %d", iter)
 		var values [][]byte
 		for ii := 0; ii < batchSize; ii++ {
-			values = append(values, []byte(fmt.Sprintf("value-%d", ii)))
+			values = append(values, []byte(fmt.Sprintf("value-%04d", ii)))
 		}
-		err = bds.Append(values)
-		if err != nil {
-			t.Fatalf("Unable to append values to segment due to err: %s", err.Error())
+		lastRLogIdx++
+		arg := sbase.AppendEntriesArg{
+			Entries:   values,
+			Timestamp: time.Now().UnixNano(),
+			RLogIdx:   lastRLogIdx,
 		}
-		vals, errs := bds.Scan(base.Offset(iter*batchSize), uint64(batchSize))
+
+		ret := bds.Append(context.Background(), &arg)
+		if ret.Error != nil {
+			glog.Fatalf("Unable to append values to segment due to err: %s", ret.Error.Error())
+		}
+		sarg := sbase.ScanEntriesArg{
+			StartOffset:    base.Offset(iter * batchSize),
+			NumMessages:    uint64(batchSize),
+			StartTimestamp: -1,
+			EndTimestamp:   -1,
+		}
+		sret := bds.Scan(context.Background(), &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Received error while scanning message. Error: %s", sret.Error.Error())
+		}
 		for ii := 0; ii < batchSize; ii++ {
-			if errs[ii] != nil {
-				t.Fatalf("Received error while scanning message: %d. Error: %s", ii, errs[ii].Error())
-			}
-			value := string(vals[ii])
-			expectedVal := fmt.Sprintf("value-%d", ii)
+			value := string(sret.Values[ii].Value)
+			expectedVal := fmt.Sprintf("value-%04d", ii)
 			if value != expectedVal {
-				t.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, value)
+				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, value)
 			}
 		}
 	}
-
+	endTs := time.Now().UnixNano()
 	// Mark segment as immutable and expired and check metadata again.
 	now := time.Now()
 	bds.MarkImmutable()
@@ -116,7 +128,7 @@ func TestBadgerSegment(t *testing.T) {
 		Immutable:          true,
 		Expired:            true,
 		StartOffset:        initialMeta.StartOffset,
-		EndOffset:          initialMeta.StartOffset + bds.nextOffSet - 1,
+		EndOffset:          bds.nextOffSet - 1,
 		CreatedTimestamp:   initialMeta.CreatedTimestamp,
 		ImmutableTimestamp: time.Time{},
 		ImmutableReason:    0,
@@ -124,33 +136,41 @@ func TestBadgerSegment(t *testing.T) {
 	metadata := bds.GetMetadata()
 	checkMetadata(t, &metadata, expected)
 	if !now.Before(metadata.ExpiredTimestamp) {
-		t.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		glog.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
 	if !now.Before(metadata.ImmutableTimestamp) {
-		t.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		glog.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
 
 	err = bds.Close()
 	if err != nil {
-		t.Fatalf("Failed to close segment due to err: %s", err.Error())
+		glog.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
-	bds, err = NewBadgerSegment(dataDir)
+	bds, err = NewBadgerSegment(&opts)
 	if err != nil {
-		t.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+		glog.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
 	metadata = bds.GetMetadata()
 	checkMetadata(t, &metadata, expected)
 	if !now.Before(metadata.ImmutableTimestamp) {
-		t.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		glog.Fatalf("Immutable timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
 	}
 	if !now.Before(metadata.ExpiredTimestamp) {
-		t.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+		glog.Fatalf("Expired timestamp mismatch. Now: %v, Immutable TS: %v", now, metadata.ImmutableTimestamp)
+	}
+	fts, lts := bds.GetMsgTimestampRange()
+	if !((fts > startTs) && (fts < endTs)) {
+		glog.Fatalf("First message timestamp(%d) must have been in the range (%d, %d)", fts, startTs, endTs)
+	}
+	if !((lts > startTs) && (lts < endTs) && (lts > fts)) {
+		glog.Fatalf("last message timestamp(%d) must have been in the range (%d, %d) and greater than %d",
+			lts, startTs, endTs, fts)
 	}
 	err = bds.Close()
 	if err != nil {
-		t.Fatalf("Failed to close segment due to err: %s", err.Error())
+		glog.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
 	if metadata.EndOffset != expected.EndOffset {
-		t.Fatalf("End offset mismatch. Expected: %d, Got: %d", expected.EndOffset, metadata.EndOffset)
+		glog.Fatalf("End offset mismatch. Expected: %d, Got: %d", expected.EndOffset, metadata.EndOffset)
 	}
 }
