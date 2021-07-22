@@ -130,7 +130,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	defer seg.segLock.RUnlock()
 	var ret AppendEntriesRet
 	ret.Error = nil
-	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable {
+	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable || !seg.openedOnce {
 		seg.logger.Errorf("Segment is either closed, expired or immutable. Cannot append entries")
 		ret.Error = ErrSegmentClosed
 		return &ret
@@ -150,7 +150,6 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	}
 	keys = append(keys, kLastRLogIdxKeyBytes)
 	values = append(values, util.UintToBytes(uint64(arg.RLogIdx)))
-
 	err := seg.dataDB.BatchPut(keys, values)
 	if err != nil {
 		seg.logger.Errorf("Unable to append entries in segment: %d due to err: %s", seg.ID(), err.Error())
@@ -173,7 +172,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	var ret ScanEntriesRet
-	if seg.closed || seg.metadata.Expired {
+	if seg.closed || seg.metadata.Expired || !seg.openedOnce {
 		seg.logger.Errorf("Segment is already closed")
 		ret.Error = ErrSegmentClosed
 		return &ret

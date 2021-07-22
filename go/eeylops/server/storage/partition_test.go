@@ -390,7 +390,7 @@ func TestPartitionManager(t *testing.T) {
 
 	// Test segment expiry.
 	currNumSegs := len(p.segments)
-	time.Sleep(sleepTime * 4)
+	time.Sleep(sleepTime * 5)
 	for iter := 0; iter < totalValues/opts.NumRecordsPerSegmentThreshold; iter++ {
 		p.Close()
 		p = NewPartition(opts)

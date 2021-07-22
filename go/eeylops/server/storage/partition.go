@@ -230,6 +230,7 @@ func (p *Partition) initialize() {
 					meta.ToString())
 			}
 		}
+		segment.Open()
 		p.segments = append(p.segments, segment)
 	}
 
