@@ -62,7 +62,7 @@ func (mdb *SegmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 		Key:   metadataKeyName,
 		Value: metadata.Serialize(),
 	}
-	glog.Infof("Putting metadata in segment metadata DB: %s", metadata.ToString())
+	glog.V(1).Infof("Putting metadata in segment metadata DB: %s", metadata.ToString())
 	tx := mdb.Db.Begin()
 	// defer tx.Close()
 	dbc := tx.Where("key = ?", metadataKeyName).First(&val)
@@ -71,7 +71,6 @@ func (mdb *SegmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 			tx.Rollback()
 			glog.Fatalf("Unable to get metadata due to err: %s", dbc.Error.Error())
 		} else {
-			glog.Infof("Inserting metadata for segment located at: %s", mdb.RootPath)
 			dbc = tx.Create(mm)
 			if dbc.Error != nil {
 				tx.Rollback()
@@ -81,7 +80,6 @@ func (mdb *SegmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 			return
 		}
 	}
-	glog.Infof("Updating metadata for segment located at: %s", mdb.RootPath)
 	dbc = tx.Model(mm).Where("key = ?", metadataKeyName).Updates(mm)
 	if dbc.Error != nil {
 		tx.Rollback()

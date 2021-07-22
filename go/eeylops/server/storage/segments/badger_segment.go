@@ -143,7 +143,6 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		return &ret
 	}
 	oldNextOffset := seg.nextOffSet
-	seg.logger.Infof("Appending %d messages starting from offset: %d", len(arg.Entries), seg.nextOffSet)
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
 	values := makeMessageValues(arg.Entries, arg.Timestamp)
 	if arg.RLogIdx <= seg.lastRLogIdx {
