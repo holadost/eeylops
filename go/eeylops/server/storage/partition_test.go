@@ -403,4 +403,39 @@ func TestPartitionManager(t *testing.T) {
 		currNumSegs = len(p.segments)
 		time.Sleep(sleepTime * 2)
 	}
+	var values [][]byte
+	for ii := 0; ii < numValuesPerBatch; ii++ {
+		token := make([]byte, valueSizeBytes)
+		rand.Read(token)
+		values = append(values, token)
+	}
+
+	// Append more values to the partition. The offset should start from totalValues.
+	glog.Infof("Appending messages after all segments have expired!")
+	aarg := sbase.AppendEntriesArg{
+		Entries:   values,
+		Timestamp: time.Now().UnixNano(),
+		RLogIdx:   int64(101),
+	}
+	aret := p.Append(defCtx, &aarg)
+	if aret.Error != nil {
+		glog.Fatalf("Append failed due to err: %s", aret.Error.Error())
+	}
+
+	glog.Infof("Scanning messages after all segments have expired and new messages were appended")
+	sarg.StartOffset = base.Offset(totalValues)
+	sarg.NumMessages = 20
+	sret = p.Scan(defCtx, &sarg)
+	expectedNumValues = opts.MaxScanSizeBytes / valueSizeBytes
+	expectedNextOffset := sarg.StartOffset + base.Offset(expectedNumValues)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != expectedNumValues {
+		glog.Fatalf("Expected only %d messages but we got: %d", expectedNumValues, len(sret.Values))
+	}
+	if sret.NextOffset != expectedNextOffset {
+		glog.Fatalf("Expected next offset: %d, got: %d", expectedNextOffset, sret.NextOffset)
+	}
+	p.Close()
 }
