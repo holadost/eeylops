@@ -303,11 +303,21 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 		endOffset = arg.StartOffset + numMsgsOffset - 1
 		startOffset = arg.StartOffset
 	} else {
-
+		// TODO: find start offset based on start and end timestamps.
 	}
 	// Get all the segments that contain our desired offsets.
+	fOffset, _ := p.segments[0].GetRange()
+	if arg.StartOffset < fOffset {
+		ret.NextOffset = fOffset
+		ret.Error = nil
+		return &ret
+	}
 	segs := p.getSegments(startOffset, endOffset)
 	if segs == nil || len(segs) == 0 {
+		// The start offset has still not been created in the partition.
+		// Set next offset to -1 indicating that the scan is complete.
+		ret.NextOffset = -1
+		ret.Error = nil
 		return &ret
 	}
 

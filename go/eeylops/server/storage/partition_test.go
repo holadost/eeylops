@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"eeylops/server/base"
 	sbase "eeylops/server/storage/base"
 	"eeylops/util"
 	"fmt"
@@ -23,6 +24,7 @@ func singleProduce(startIdx int, p *Partition, numValues int) {
 		Timestamp: ts,
 		RLogIdx:   ts / (1000),
 	}
+	glog.Infof("Appending %d values to partition", numValues)
 	pret := p.Append(context.Background(), &parg)
 	if pret.Error != nil {
 		glog.Fatalf("Append failed due to err: %s", pret.Error.Error())
@@ -200,98 +202,113 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 	glog.Infof("TestPartitionNewSegmentCreation finished successfully")
 }
 
-//func TestPartitionScan(t *testing.T) {
-//	util.LogTestMarker("TestPartitionScan")
-//	testDir := "/tmp/eeylops/TestPartitionScan"
-//	_ = os.RemoveAll(testDir)
-//	opts := PartitionOpts{
-//		TopicName:                      "topic1",
-//		PartitionID:                    1,
-//		RootDirectory:                  testDir,
-//		ExpiredSegmentPollIntervalSecs: 0,
-//		LiveSegmentPollIntervalSecs:    0,
-//		NumRecordsPerSegmentThreshold:  0,
-//		MaxScanSizeBytes:               0,
-//		TTLSeconds:                     86400 * 7,
-//	}
-//	p := NewPartition(opts)
-//	numSegs := 10
-//	numValsPerSeg := 100
-//	loadDataBasic(p, numSegs, numValsPerSeg)
-//	values, errs := p.Scan(0, 1)
-//	if errs == nil || len(errs) == 0 {
-//		glog.Fatalf("Did not receive any error codes for scan")
-//		return
-//	}
-//	if len(errs) != 1 {
-//		glog.Fatalf("Expected 1 value, got: %d", len(errs))
-//		return
-//	}
-//	if errs[0] != nil {
-//		glog.Fatalf("Unable to scan first offset due to err: %s", errs[0].Error())
-//		return
-//	}
-//	if string(values[0]) != "value-0" {
-//		glog.Fatalf("Value mismatch. Expected: value-0-0, got: %s", string(values[0]))
-//	}
-//
-//	startOffset := 121
-//	numMsgs := 100
-//	values, errs = p.Scan(base.Offset(startOffset), uint64(numMsgs))
-//	if errs == nil || len(errs) != numMsgs {
-//		if errs != nil {
-//			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
-//		}
-//		glog.Fatalf("Got nil errs")
-//		return
-//	}
-//	for ii, err := range errs {
-//		if err != nil {
-//			glog.Fatalf("Unexpected error while scanning offset: %d. Error: %s", ii+startOffset, err.Error())
-//			return
-//		}
-//
-//		expectedVal := fmt.Sprintf("value-%d", ii+startOffset)
-//		gotVal := string(values[ii])
-//
-//		if expectedVal != gotVal {
-//			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
-//			return
-//		}
-//	}
-//
-//	startOffset = 221
-//	numMsgs = (numSegs * numValsPerSeg) + startOffset
-//	expectedNumMsgs := (numSegs * numValsPerSeg) - startOffset
-//	values, errs = p.Scan(base.Offset(startOffset), uint64(numMsgs))
-//	if errs == nil || len(errs) != expectedNumMsgs {
-//		if errs != nil {
-//			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
-//		}
-//		glog.Fatalf("Got nil errs")
-//		return
-//	}
-//	for ii, err := range errs {
-//		if err != nil {
-//			glog.Fatalf("Unexpected error while scanning offset: %d. Error: %s", ii+startOffset, err.Error())
-//			return
-//		}
-//
-//		expectedVal := fmt.Sprintf("value-%d", ii+startOffset)
-//		gotVal := string(values[ii])
-//
-//		if expectedVal != gotVal {
-//			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
-//			return
-//		}
-//	}
-//
-//	values, errs = p.Scan(base.Offset(numSegs*numValsPerSeg), uint64(10))
-//	if len(errs) != 0 {
-//		glog.Fatalf("We got values back even though we never wrote to these offsets")
-//	}
-//	glog.Infof("TestPartitionScan finished successfully")
-//}
+func TestPartitionScan(t *testing.T) {
+	util.LogTestMarker("TestPartitionScan")
+	testDir := util.CreateTestDir(t, "TestPartitionScan")
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 0,
+		LiveSegmentPollIntervalSecs:    0,
+		NumRecordsPerSegmentThreshold:  0,
+		MaxScanSizeBytes:               0,
+		TTLSeconds:                     86400 * 7,
+	}
+	p := NewPartition(opts)
+	numSegs := 10
+	numValsPerSeg := 100
+	loadDataBasicWithNewSegments(p, numSegs, numValsPerSeg)
+	var sarg sbase.ScanEntriesArg
+	defCtx := context.Background()
+	sarg.StartOffset = 0
+	sarg.NumMessages = 1
+	sret := p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != 1 {
+		glog.Fatalf("Mismatch. Expected 1 value, got: %d", len(sret.Values))
+	}
+	gotVal := string(sret.Values[0].Value)
+	gotOffset := sret.Values[0].Offset
+	if gotVal != "value-0" {
+		glog.Fatalf("Value mismatch. Expected: value-0, got: %s", gotVal)
+	}
+	if gotOffset != 0 {
+		glog.Fatalf("Offset mismatch. Expected: 0, got: %d", gotOffset)
+	}
+	if sret.NextOffset != 1 {
+		glog.Fatalf("Offset mismatch. Expected Next Offset: 1, got: %d", gotOffset)
+	}
+
+	sarg.StartOffset = 121
+	sarg.NumMessages = 100
+	sarg.StartTimestamp = -1
+	sarg.EndTimestamp = -1
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected scan error: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != int(sarg.NumMessages) {
+		glog.Fatalf("Expected: %d values, got: %d", int(sarg.NumMessages), len(sret.Values))
+	}
+	for ii, val := range sret.Values {
+		expectedOffset := base.Offset(ii) + sarg.StartOffset
+		expectedVal := fmt.Sprintf("value-%d", expectedOffset)
+		gotVal = string(val.Value)
+		if expectedVal != gotVal {
+			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
+		}
+		if expectedOffset != val.Offset {
+			glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expectedOffset, val.Offset)
+		}
+	}
+	expectedNextOffset := sarg.StartOffset + base.Offset(sarg.NumMessages)
+	if sret.NextOffset != expectedNextOffset {
+		glog.Fatalf("Offset mismatch. Expected next offset: %d, got: %d", expectedNextOffset, sret.NextOffset)
+	}
+
+	sarg.StartOffset = 221
+	sarg.NumMessages = uint64(numSegs * numValsPerSeg)
+	expectedNumMsgs := (numSegs * numValsPerSeg) - int(sarg.StartOffset)
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning. Error: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != expectedNumMsgs {
+		glog.Fatalf("Num messages mismatch. Expected: %d, got: %d", expectedNumMsgs, len(sret.Values))
+	}
+	for ii, val := range sret.Values {
+		expectedOffset := base.Offset(ii) + sarg.StartOffset
+		expectedVal := fmt.Sprintf("value-%d", expectedOffset)
+		gotVal = string(val.Value)
+		if expectedVal != gotVal {
+			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
+		}
+		if expectedOffset != val.Offset {
+			glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expectedOffset, val.Offset)
+		}
+	}
+	if sret.NextOffset != base.Offset(numSegs*numValsPerSeg) {
+		glog.Fatalf("Expected next offset: %d, got: %d", base.Offset(numSegs*numValsPerSeg), sret.NextOffset)
+	}
+	sarg.StartOffset = base.Offset(numSegs*numValsPerSeg) + base.Offset(10)
+	sarg.NumMessages = 10
+
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning. Error: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != 0 {
+		glog.Fatalf("Num messages mismatch. Expected: 0, got: %d", len(sret.Values))
+	}
+	if sret.NextOffset != -1 {
+		glog.Fatalf("Expected next offset: -1, got: %d", sret.NextOffset)
+	}
+	glog.Infof("TestPartitionScan finished successfully")
+}
+
 //
 //func TestPartitionManager(t *testing.T) {
 //	util.LogTestMarker("TestPartitionManager")
