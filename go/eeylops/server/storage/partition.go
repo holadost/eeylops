@@ -344,17 +344,12 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 		} else {
 			// NextOffset is -1. Check if there are any more segments after the current segment and if so,
 			// use the StartOffset of that segment as the NextOffset.
-			if p.getLiveSegment().ID() == seg.ID() {
+			idx := p.findSegmentIdxByID(seg.ID())
+			if idx == len(p.segments)-1 {
 				ret.NextOffset = -1
 			} else {
-				idx := p.findSegmentByID(0, len(p.segments)-1, seg.ID())
-				if idx == len(p.segments)-1 {
-					// The current segment is also the latest segment. There is nothing more to scan.
-					p.logger.Warningf("Last segment in segments is not a live segment??")
-					ret.NextOffset = -1
-				}
-				nextSeg := p.segments[idx+1]
-				ret.NextOffset = nextSeg.GetMetadata().StartOffset
+				so, _ := p.segments[idx+1].GetRange()
+				ret.NextOffset = so
 			}
 		}
 		return &ret
@@ -479,10 +474,6 @@ func (p *Partition) getLiveSegment() segments.Segment {
 	return p.segments[len(p.segments)-1]
 }
 
-func (p *Partition) scanSegment(ctx context.Context, seg segments.Segment, arg *segments.ScanEntriesArg) *segments.ScanEntriesRet {
-	return seg.Scan(ctx, arg)
-}
-
 // findOffsetInSegments finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
 // been acquired.
 func (p *Partition) findOffsetInSegments(startIdx int, endIdx int, offset base.Offset) int {
@@ -528,25 +519,16 @@ func (p *Partition) findTimestampInSegments(startIdx int, endIdx int, timestamp 
 	}
 }
 
-func (p *Partition) findSegmentByID(startIdx int, endIdx int, segID int) int {
-	if startIdx > endIdx {
+func (p *Partition) findSegmentIdxByID(segID int) int {
+	fsegID := p.segments[0].ID()
+	if segID < fsegID {
 		return -1
 	}
-	if startIdx == endIdx {
-		if p.segments[startIdx].ID() == segID {
-			return startIdx
-		}
+	idx := segID - fsegID
+	if idx >= len(p.segments) {
 		return -1
 	}
-	midIdx := startIdx + (endIdx-startIdx)/2
-	currSegID := p.segments[midIdx].ID()
-	if currSegID == segID {
-		return midIdx
-	} else if segID < currSegID {
-		return p.findSegmentByID(0, midIdx-1, segID)
-	} else {
-		return p.findSegmentByID(midIdx+1, endIdx, segID)
-	}
+	return idx
 }
 
 // offsetInSegment checks whether the given offset is in the segment or not.
