@@ -280,7 +280,7 @@ func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sb
 	sarg.Timestamp = arg.Timestamp
 	segRet := seg.Append(ctx, &sarg)
 	if segRet.Error != nil {
-		p.logger.Errorf("Unable to append entries to partition: %d due to err: %s", ret.Error.Error())
+		p.logger.Errorf("Unable to append entries to partition due to err: %s", ret.Error.Error())
 		ret.Error = ErrPartitionAppend
 		return &ret
 	}
@@ -599,7 +599,7 @@ func (p *Partition) partitionManager() {
 
 // maybeCreateNewSegment checks if a new segment needs to be created and if so, creates one.
 func (p *Partition) maybeCreateNewSegment() {
-	p.logger.Infof("Checking if new segment needs to be created")
+	p.logger.VInfof(1, "Checking if new segment needs to be created")
 	if p.shouldCreateNewSegment() {
 		p.createNewSegmentSafe()
 	}
@@ -630,12 +630,12 @@ func (p *Partition) createNewSegmentSafe() {
 	if p.closed {
 		return
 	}
-	p.createNewSegment()
+	p.createNewSegmentUnsafe()
 }
 
-// createNewSegment marks the current live segment immutable and creates a new live segment. This method assumes
+// createNewSegmentUnsafe marks the current live segment immutable and creates a new live segment. This method assumes
 // that partitionCfgLock has been acquired in write mode as the segments slice will be modified.
-func (p *Partition) createNewSegment() {
+func (p *Partition) createNewSegmentUnsafe() {
 	p.logger.Infof("Creating new segment")
 	var startOffset base.Offset
 	var segID uint64
@@ -790,7 +790,7 @@ func (p *Partition) removeExpiredSegments() []segments.Segment {
 	if lastIdxExpired == len(p.segments)-1 {
 		// All segments can be expired. First remove all segments except the last one since we will require the
 		// last segment metadata to create the new segment.
-		p.createNewSegment()
+		p.createNewSegmentUnsafe()
 	}
 	expiredSegs, p.segments = p.segments[0:lastIdxExpired+1], p.segments[lastIdxExpired+1:]
 	return expiredSegs

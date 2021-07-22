@@ -1,8 +1,8 @@
 package logging
 
 import (
-	"eeylops/util/logging/glog"
 	"fmt"
+	"github.com/golang/glog"
 )
 
 type PrefixLogger struct {
@@ -31,28 +31,30 @@ func (logger *PrefixLogger) GetPrefix() string {
 }
 
 func (logger *PrefixLogger) Infof(format string, args ...interface{}) {
-	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	glog.Infof(newFormat, args...)
+	logStr := fmt.Sprintf(format, args...)
+	glog.InfoDepth(1, fmt.Sprintf("%s %s", logger.prefix, logStr))
 }
 
 func (logger *PrefixLogger) Errorf(format string, args ...interface{}) {
-	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	glog.Errorf(newFormat, args...)
+	logStr := fmt.Sprintf(format, args...)
+	glog.ErrorDepth(1, fmt.Sprintf("%s %s", logger.prefix, logStr))
 }
 
 func (logger *PrefixLogger) Warningf(format string, args ...interface{}) {
-	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	glog.Warningf(newFormat, args...)
+	logStr := fmt.Sprintf(format, args...)
+	glog.WarningDepth(1, fmt.Sprintf("%s %s", logger.prefix, logStr))
 }
 
 func (logger *PrefixLogger) Fatalf(format string, args ...interface{}) {
-	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	glog.Fatalf(newFormat, args...)
+	logStr := fmt.Sprintf(format, args...)
+	glog.FatalDepth(1, fmt.Sprintf("%s %s", logger.prefix, logStr))
 }
 
 func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
-	newFormat := fmt.Sprintf("%s %s", logger.prefix, format)
-	glog.V(glog.Level(v)).Infof(newFormat, args...)
+	if glog.V(glog.Level(v)) {
+		logStr := fmt.Sprintf(format, args...)
+		glog.InfoDepth(1, fmt.Sprintf("%s %s", logger.prefix, logStr))
+	}
 }
 
 func createPrefixStr(prefix string) string {
