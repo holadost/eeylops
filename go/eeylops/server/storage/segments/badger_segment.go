@@ -267,6 +267,7 @@ func (seg *BadgerSegment) MarkImmutable() {
 func (seg *BadgerSegment) MarkExpired() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
+	seg.logger.Infof("Marking segment as expired")
 	seg.metadata.Expired = true
 	seg.metadata.ExpiredTimestamp = time.Now()
 	seg.metadataDB.PutMetadata(seg.metadata)

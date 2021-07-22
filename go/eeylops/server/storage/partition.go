@@ -647,7 +647,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 	immutize := func() {
 		seg := p.segments[len(p.segments)-1]
 		segmentID := seg.ID()
-		p.logger.Infof("Immutizer: Marking segment: %d as immutable", segmentID)
+		p.logger.VInfof(1, "Marking segment: %d as immutable", segmentID)
 		seg.MarkImmutable()
 		err := seg.Close()
 		if err != nil {
@@ -809,7 +809,7 @@ func (p *Partition) isSegExpirable(metadata *segments.SegmentMetadata) bool {
 			metadata.ID, lt, p.ttlSeconds)
 		return false
 	}
-	p.logger.Infof("Segment: %d can be expired. Current life time: %d seconds, TTL: %d seconds",
+	p.logger.VInfof(1, "Segment: %d can be expired. Current life time: %d seconds, TTL: %d seconds",
 		metadata.ID, lt, p.ttlSeconds)
 	return true
 }
