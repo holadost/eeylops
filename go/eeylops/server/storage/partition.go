@@ -430,7 +430,7 @@ func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) 
 	var segs []segments.Segment
 
 	// Find start offset segment.
-	startSegIdx := p.findOffsetInSegments(0, len(p.segments)-1, startOffset)
+	startSegIdx := p.findSegmentIdxWithOffset(0, len(p.segments)-1, startOffset)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with offset: %d", startOffset)
 		// We did not find any segments that contains our offsets.
@@ -453,7 +453,7 @@ func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) 
 	}
 	// Slow path.
 	if endSegIdx == -1 {
-		endSegIdx = p.findOffsetInSegments(startSegIdx, len(p.segments)-1, endOffset)
+		endSegIdx = p.findSegmentIdxWithOffset(startSegIdx, len(p.segments)-1, endOffset)
 	}
 	// Populate segments.
 	segs = append(segs, p.segments[startSegIdx])
@@ -474,9 +474,9 @@ func (p *Partition) getLiveSegment() segments.Segment {
 	return p.segments[len(p.segments)-1]
 }
 
-// findOffsetInSegments finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
+// findSegmentIdxWithOffset finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
 // been acquired.
-func (p *Partition) findOffsetInSegments(startIdx int, endIdx int, offset base.Offset) int {
+func (p *Partition) findSegmentIdxWithOffset(startIdx int, endIdx int, offset base.Offset) int {
 	// Base cases.
 	if startIdx > endIdx {
 		return -1
@@ -492,13 +492,13 @@ func (p *Partition) findOffsetInSegments(startIdx int, endIdx int, offset base.O
 	if p.offsetInSegment(offset, p.segments[midIdx]) {
 		return midIdx
 	} else if offset < sOff {
-		return p.findOffsetInSegments(startIdx, midIdx-1, offset)
+		return p.findSegmentIdxWithOffset(startIdx, midIdx-1, offset)
 	} else {
-		return p.findOffsetInSegments(midIdx+1, endIdx, offset)
+		return p.findSegmentIdxWithOffset(midIdx+1, endIdx, offset)
 	}
 }
 
-func (p *Partition) findTimestampInSegments(startIdx int, endIdx int, timestamp int64) int {
+func (p *Partition) findSegmentIdxWithTimestamp(startIdx int, endIdx int, timestamp int64) int {
 	if startIdx > endIdx {
 		return -1
 	}
@@ -513,9 +513,9 @@ func (p *Partition) findTimestampInSegments(startIdx int, endIdx int, timestamp 
 	if p.timestampInSegment(timestamp, p.segments[midIdx]) {
 		return midIdx
 	} else if timestamp < sts {
-		return p.findTimestampInSegments(0, midIdx-1, timestamp)
+		return p.findSegmentIdxWithTimestamp(0, midIdx-1, timestamp)
 	} else {
-		return p.findTimestampInSegments(midIdx+1, endIdx, timestamp)
+		return p.findSegmentIdxWithTimestamp(midIdx+1, endIdx, timestamp)
 	}
 }
 
@@ -720,7 +720,7 @@ func (p *Partition) shouldExpireSegment() bool {
 
 // expireSegments expires all the required segments.
 func (p *Partition) expireSegments() {
-	expiredSegs := p.removeExpiredSegments()
+	expiredSegs := p.clearExpiredSegsAndMaybeCreateNewSeg()
 
 	// The expired segs have been removed from segments. We can now safely acquire the RLock and delete the
 	// segments
@@ -751,8 +751,8 @@ func (p *Partition) expireSegments() {
 	}
 }
 
-// removeExpiredSegments removes the expired segment(s) from segments.
-func (p *Partition) removeExpiredSegments() []segments.Segment {
+// clearExpiredSegsAndMaybeCreateNewSeg removes the expired segment(s) from segments.
+func (p *Partition) clearExpiredSegsAndMaybeCreateNewSeg() []segments.Segment {
 	// Acquire write lock on partition as we are going to be changing segments.
 	p.partitionCfgLock.Lock()
 	defer p.partitionCfgLock.Unlock()
@@ -770,8 +770,8 @@ func (p *Partition) removeExpiredSegments() []segments.Segment {
 	}
 	var expiredSegs []segments.Segment
 	if lastIdxExpired == len(p.segments)-1 {
-		// All segments can be expired. First remove all segments except the last one since we will require the
-		// last segment metadata to create the new segment.
+		// All segments have expired. Create a new segment before removing all expired segments.
+		// We use the unsafe new segment creation method since we have already acquired the lock.
 		p.createNewSegmentUnsafe()
 	}
 	expiredSegs, p.segments = p.segments[0:lastIdxExpired+1], p.segments[lastIdxExpired+1:]
