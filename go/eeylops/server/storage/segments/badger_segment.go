@@ -22,30 +22,28 @@ var (
 
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	dataDB        kv_store.KVStore      // Backing KV store to hold the data.
-	metadataDB    *SegmentMetadataDB    // Segment metadata ddb.
-	nextOffSet    base.Offset           // Next start offset for new appends.
-	segLock       sync.RWMutex          // A RW lock for the segment.
-	closed        bool                  // Flag that indicates whether the segment is closed.
-	rootDir       string                // Root directory of this segment.
-	metadata      *SegmentMetadata      // Cached segment metadata.
-	appendLock    sync.Mutex            // A lock for appends allowing only one append at a time.
-	lastRLogIdx   int64                 // Last replicated log index.
-	firstMsgTs    int64                 // First message timestamp.
-	lastMsgTs     int64                 // Last message timestamp.
-	openedOnce    bool                  // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
-	logger        *logging.PrefixLogger // Logger object.
-	topicName     string                // Topic name.
-	partitionID   uint                  // Partition ID.
-	scanSizeBytes int                   // Maximum scan size in bytes.
+	dataDB      kv_store.KVStore      // Backing KV store to hold the data.
+	metadataDB  *SegmentMetadataDB    // Segment metadata ddb.
+	nextOffSet  base.Offset           // Next start offset for new appends.
+	segLock     sync.RWMutex          // A RW lock for the segment.
+	closed      bool                  // Flag that indicates whether the segment is closed.
+	rootDir     string                // Root directory of this segment.
+	metadata    *SegmentMetadata      // Cached segment metadata.
+	appendLock  sync.Mutex            // A lock for appends allowing only one append at a time.
+	lastRLogIdx int64                 // Last replicated log index.
+	firstMsgTs  int64                 // First message timestamp.
+	lastMsgTs   int64                 // Last message timestamp.
+	openedOnce  bool                  // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
+	logger      *logging.PrefixLogger // Logger object.
+	topicName   string                // Topic name.
+	partitionID uint                  // Partition ID.
 }
 
 type BadgerSegmentOpts struct {
-	RootDir       string                // Root directory for the segment. This is a compulsory parameter.
-	Logger        *logging.PrefixLogger // Parent logger if any. Optional parameter.
-	Topic         string                // Topic name. Optional parameter.
-	PartitionID   uint                  // Partition ID. Optional parameter.
-	ScanSizeBytes int                   // Max scan size(in bytes). Optional parameter.
+	RootDir     string                // Root directory for the segment. This is a compulsory parameter.
+	Logger      *logging.PrefixLogger // Parent logger if any. Optional parameter.
+	Topic       string                // Topic name. Optional parameter.
+	PartitionID uint                  // Partition ID. Optional parameter.
 }
 
 // NewBadgerSegment initializes a new instance of badger segment.
@@ -63,7 +61,6 @@ func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
 	}
 	seg.topicName = opts.Topic
 	seg.partitionID = opts.PartitionID
-	seg.scanSizeBytes = opts.ScanSizeBytes
 	seg.initialize()
 	// Reinitialize logger with correct segment id.
 	if opts.Logger == nil {
@@ -221,7 +218,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 
 	scanner := seg.dataDB.CreateScanner(nil, sk, false)
 	defer scanner.Close()
-	bytesScannedSoFar := 0
+	bytesScannedSoFar := int64(0)
 	for ; scanner.Valid(); scanner.Next() {
 		key, msg, err := scanner.GetItem()
 		if err != nil {
@@ -233,9 +230,9 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 		}
 		offset := seg.keyToOffset(key)
 		val, ts := fetchValueFromMessage(msg)
-		if seg.scanSizeBytes > 0 {
-			bytesScannedSoFar += len(val)
-			if bytesScannedSoFar > seg.scanSizeBytes {
+		if arg.ScanSizeBytes > 0 {
+			bytesScannedSoFar += int64(len(val))
+			if bytesScannedSoFar > arg.ScanSizeBytes {
 				break
 			}
 		}

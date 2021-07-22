@@ -189,11 +189,10 @@ func (p *Partition) initialize() {
 	for ii, segmentID := range segmentIds {
 		// TODO: In the future, create a factory func here that will return segment based on type.
 		opts := segments.BadgerSegmentOpts{
-			RootDir:       p.getSegmentDirectory(segmentID),
-			Logger:        logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segmentID), p.logger),
-			Topic:         p.topicName,
-			PartitionID:   uint(p.partitionID),
-			ScanSizeBytes: 16 * (1024 * 1024),
+			RootDir:     p.getSegmentDirectory(segmentID),
+			Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segmentID), p.logger),
+			Topic:       p.topicName,
+			PartitionID: uint(p.partitionID),
 		}
 		segment, err := segments.NewBadgerSegment(&opts)
 		if err != nil {
@@ -326,6 +325,7 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 	sarg.NumMessages = arg.NumMessages
 	sarg.StartTimestamp = arg.StartTimestamp
 	sarg.EndTimestamp = arg.EndTimestamp
+	sarg.ScanSizeBytes = int64(p.maxScanSizeBytes)
 
 	// All offsets are present in the same segment.
 	if len(segs) == 1 {
@@ -653,11 +653,10 @@ func (p *Partition) createNewSegment() {
 			return
 		}
 		opts := segments.BadgerSegmentOpts{
-			RootDir:       p.getSegmentDirectory(segmentID),
-			Logger:        p.logger,
-			Topic:         p.topicName,
-			PartitionID:   uint(p.partitionID),
-			ScanSizeBytes: 0,
+			RootDir:     p.getSegmentDirectory(segmentID),
+			Logger:      p.logger,
+			Topic:       p.topicName,
+			PartitionID: uint(p.partitionID),
 		}
 		seg, err = segments.NewBadgerSegment(&opts)
 		if err != nil {
@@ -684,11 +683,10 @@ func (p *Partition) createNewSegment() {
 	}
 
 	opts := segments.BadgerSegmentOpts{
-		RootDir:       p.getSegmentDirectory(int(segID)),
-		Logger:        logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segID), p.logger),
-		Topic:         p.topicName,
-		PartitionID:   uint(p.partitionID),
-		ScanSizeBytes: 16 * (1024 * 1024),
+		RootDir:     p.getSegmentDirectory(int(segID)),
+		Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segID), p.logger),
+		Topic:       p.topicName,
+		PartitionID: uint(p.partitionID),
 	}
 	newSeg, err := segments.NewBadgerSegment(&opts)
 	if err != nil {

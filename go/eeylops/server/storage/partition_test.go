@@ -7,6 +7,7 @@ import (
 	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
+	"math/rand"
 	"os"
 	"testing"
 	"time"
@@ -324,76 +325,82 @@ func TestPartitionScan(t *testing.T) {
 	glog.Infof("TestPartitionScan finished successfully")
 }
 
-//
-//func TestPartitionManager(t *testing.T) {
-//	util.LogTestMarker("TestPartitionManager")
-//	testDir := "/tmp/eeylops/TestPartitionManager"
-//	_ = os.RemoveAll(testDir)
-//
-//	totalValues := 500
-//	numValuesPerBatch := 50
-//	valueSizeBytes := 100
-//	totalIters := totalValues / numValuesPerBatch
-//	opts := PartitionOpts{
-//		TopicName:                      "topic1",
-//		PartitionID:                    1,
-//		RootDirectory:                  testDir,
-//		ExpiredSegmentPollIntervalSecs: 1,
-//		LiveSegmentPollIntervalSecs:    1,
-//		NumRecordsPerSegmentThreshold:  100,
-//		MaxScanSizeBytes:               1500,
-//		TTLSeconds:                     86400 * 7,
-//	}
-//	sleepTime := 500*time.Millisecond + time.Duration(opts.ExpiredSegmentPollIntervalSecs)*time.Millisecond*1000
-//	opts.TTLSeconds = int((time.Duration(totalIters) * sleepTime) / time.Second)
-//	p := NewPartition(opts)
-//	defer p.Close()
-//	// Test live segment scans.
-//	for iter := 0; iter < totalIters; iter++ {
-//		glog.Infof("Sleeping for %v seconds to allow manager to scan live segment", sleepTime)
-//		time.Sleep(sleepTime)
-//		var values [][]byte
-//		for ii := 0; ii < numValuesPerBatch; ii++ {
-//			token := make([]byte, valueSizeBytes)
-//			rand.Read(token)
-//			values = append(values, token)
-//		}
-//		err := p.Append(values)
-//		if err != nil {
-//			glog.Fatalf("Append failed due to err: %s", err.Error())
-//		}
-//	}
-//	time.Sleep(sleepTime)
-//	if len(p.segments) != totalValues/opts.NumRecordsPerSegmentThreshold+1 {
-//		glog.Fatalf("Expected %d segments, got: %d", totalValues/opts.NumRecordsPerSegmentThreshold+1,
-//			len(p.segments))
-//	}
-//
-//	// Test scans with max scan size bytes.
-//	values, errs := p.Scan(0, 20)
-//	if len(errs) != opts.MaxScanSizeBytes/valueSizeBytes {
-//		glog.Fatalf("Expected upto 10 messages. Got: %d", len(errs))
-//	}
-//	for ii, err := range errs {
-//		if err != nil {
-//			glog.Fatalf("Unable to get offset: %d due to err: %s", ii, err.Error())
-//		}
-//	}
-//	if len(values) != opts.MaxScanSizeBytes/valueSizeBytes {
-//		glog.Fatalf("Expected only 10 messages but we got: %d", len(values))
-//	}
-//	currNumSegs := len(p.segments)
-//	time.Sleep(sleepTime * 4)
-//	for iter := 0; iter < totalValues/opts.NumRecordsPerSegmentThreshold; iter++ {
-//		p.Close()
-//		p = NewPartition(opts)
-//		if len(p.segments) == 1 {
-//			break
-//		}
-//		if len(p.segments) >= currNumSegs {
-//			glog.Fatalf("Found %d segments. Expected < %d segments", len(p.segments), currNumSegs)
-//		}
-//		currNumSegs = len(p.segments)
-//		time.Sleep(sleepTime * 2)
-//	}
-//}
+func TestPartitionManager(t *testing.T) {
+	util.LogTestMarker("TestPartitionManager")
+	testDir := util.CreateTestDir(t, "TestPartitionManager")
+	totalValues := 500
+	numValuesPerBatch := 50
+	valueSizeBytes := 100
+	totalIters := totalValues / numValuesPerBatch
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 1,
+		LiveSegmentPollIntervalSecs:    1,
+		NumRecordsPerSegmentThreshold:  100,
+		MaxScanSizeBytes:               1500,
+		TTLSeconds:                     86400 * 7,
+	}
+	defCtx := context.Background()
+	sleepTime := 500*time.Millisecond + time.Duration(opts.ExpiredSegmentPollIntervalSecs)*time.Millisecond*1000
+	opts.TTLSeconds = int((time.Duration(totalIters) * sleepTime) / time.Second)
+	p := NewPartition(opts)
+	defer p.Close()
+	// Test live segment scans.
+	for iter := 0; iter < totalIters; iter++ {
+		glog.Infof("Sleeping for %v seconds to allow manager to scan live segment", sleepTime)
+		time.Sleep(sleepTime)
+		var values [][]byte
+		for ii := 0; ii < numValuesPerBatch; ii++ {
+			token := make([]byte, valueSizeBytes)
+			rand.Read(token)
+			values = append(values, token)
+		}
+		aarg := sbase.AppendEntriesArg{
+			Entries:   values,
+			Timestamp: time.Now().UnixNano(),
+			RLogIdx:   int64(iter + 1),
+		}
+		aret := p.Append(defCtx, &aarg)
+		if aret.Error != nil {
+			glog.Fatalf("Append failed due to err: %s", aret.Error.Error())
+		}
+	}
+	time.Sleep(sleepTime)
+	if len(p.segments) != totalValues/opts.NumRecordsPerSegmentThreshold+1 {
+		glog.Fatalf("Expected %d segments, got: %d", totalValues/opts.NumRecordsPerSegmentThreshold+1,
+			len(p.segments))
+	}
+
+	// Test scans with max scan size bytes.
+	var sarg sbase.ScanEntriesArg
+	sarg.StartOffset = 0
+	sarg.NumMessages = 20
+	sarg.StartTimestamp = -1
+	sarg.EndTimestamp = -1
+	sret := p.Scan(defCtx, &sarg)
+	expectedNumValues := opts.MaxScanSizeBytes / valueSizeBytes
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != expectedNumValues {
+		glog.Fatalf("Expected only %d messages but we got: %d", expectedNumValues, len(sret.Values))
+	}
+
+	// Test segment expiry.
+	currNumSegs := len(p.segments)
+	time.Sleep(sleepTime * 4)
+	for iter := 0; iter < totalValues/opts.NumRecordsPerSegmentThreshold; iter++ {
+		p.Close()
+		p = NewPartition(opts)
+		if len(p.segments) == 1 {
+			break
+		}
+		if len(p.segments) >= currNumSegs {
+			glog.Fatalf("Found %d segments. Expected < %d segments", len(p.segments), currNumSegs)
+		}
+		currNumSegs = len(p.segments)
+		time.Sleep(sleepTime * 2)
+	}
+}

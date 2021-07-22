@@ -48,11 +48,10 @@ func TestBadgerSegment(t *testing.T) {
 		ImmutableReason:  0,
 	}
 	opts := BadgerSegmentOpts{
-		RootDir:       dataDir,
-		Logger:        nil,
-		Topic:         "topic1",
-		PartitionID:   1,
-		ScanSizeBytes: 16 * (1024 * 1024), // 16MB
+		RootDir:     dataDir,
+		Logger:      nil,
+		Topic:       "topic1",
+		PartitionID: 1,
 	}
 	bds, err := NewBadgerSegment(&opts)
 	if err != nil {
