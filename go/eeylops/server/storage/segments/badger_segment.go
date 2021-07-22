@@ -125,7 +125,7 @@ func (seg *BadgerSegment) Close() error {
 
 // IsEmpty implements the Segment interface. Returns true if the segment is empty. False otherwise.
 func (seg *BadgerSegment) IsEmpty() bool {
-	return seg.nextOffSet == 0
+	return seg.nextOffSet == seg.metadata.StartOffset
 }
 
 func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *AppendEntriesRet {
@@ -272,7 +272,6 @@ func (seg *BadgerSegment) MarkImmutable() {
 func (seg *BadgerSegment) MarkExpired() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
-	seg.logger.Infof("Marking segment as expired")
 	seg.metadata.Expired = true
 	seg.metadata.ExpiredTimestamp = time.Now()
 	seg.metadataDB.PutMetadata(seg.metadata)
@@ -371,6 +370,8 @@ func (seg *BadgerSegment) open() {
 			seg.lastMsgTs = -1
 			seg.lastRLogIdx = -1
 			return
+		} else {
+			seg.logger.Fatalf("Error while getting last log index. Error: %s", err.Error())
 		}
 	} else {
 		seg.lastRLogIdx = int64(util.BytesToUint(val))

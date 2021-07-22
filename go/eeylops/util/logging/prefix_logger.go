@@ -22,7 +22,8 @@ func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *Prefi
 	if parentLogger != nil {
 		actualPrefix = parentLogger.GetPrefix() + " " + createPrefixStr(prefix)
 	}
-	return NewPrefixLogger(actualPrefix)
+	logger := PrefixLogger{prefix: actualPrefix}
+	return &logger
 }
 
 func (logger *PrefixLogger) GetPrefix() string {

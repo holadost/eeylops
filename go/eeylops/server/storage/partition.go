@@ -284,7 +284,7 @@ func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sb
 		ret.Error = ErrPartitionAppend
 		return &ret
 	}
-	return nil
+	return &ret
 }
 
 // Scan numMessages records from the partition from the given startOffset.
@@ -426,6 +426,7 @@ func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) 
 	// Find start offset segment.
 	startSegIdx := p.findOffsetInSegments(0, len(p.segments)-1, startOffset)
 	if startSegIdx == -1 {
+		p.logger.Infof("Did not find any segment with offset: %d", startOffset)
 		// We did not find any segments that contains our offsets.
 		return segs
 	}
@@ -489,7 +490,7 @@ func (p *Partition) findOffsetInSegments(startIdx int, endIdx int, offset base.O
 	if p.offsetInSegment(offset, p.segments[midIdx]) {
 		return midIdx
 	} else if offset < sOff {
-		return p.findOffsetInSegments(0, midIdx-1, offset)
+		return p.findOffsetInSegments(startIdx, midIdx-1, offset)
 	} else {
 		return p.findOffsetInSegments(midIdx+1, endIdx, offset)
 	}
@@ -540,6 +541,7 @@ func (p *Partition) findSegmentByID(startIdx int, endIdx int, segID int) int {
 // offsetInSegment checks whether the given offset is in the segment or not.
 func (p *Partition) offsetInSegment(offset base.Offset, seg segments.Segment) bool {
 	if seg.IsEmpty() {
+		p.logger.Infof("Segment: %d is empty", seg.ID())
 		return false
 	}
 	sOff, eOff := seg.GetRange()
@@ -624,23 +626,24 @@ func (p *Partition) createNewSegment() {
 	p.logger.Infof("Creating new segment")
 	var startOffset base.Offset
 	var segID uint64
-
-	if len(p.segments) == 0 {
-		// First ever segment in the partition.
-		startOffset = 0
-		segID = 1
-	} else {
+	// A flag to indicate whether the current last segment is being marked as immutable.
+	isImmutizing := false
+	// Notification channel once last segment has been marked as immutable.
+	immutizeDone := make(chan interface{}, 1)
+	// This helper function marks the current last segment as immutable.
+	immutize := func() {
 		seg := p.segments[len(p.segments)-1]
+		segmentID := seg.ID()
+		p.logger.Infof("Immutizer: Marking segment: %d as immutable", segmentID)
 		seg.MarkImmutable()
-		prevMetadata := seg.GetMetadata()
 		err := seg.Close()
 		if err != nil {
 			p.logger.Fatalf("Failure while closing last segment: %d in partition %d due to err: %s",
-				prevMetadata.ID, p.partitionID, err.Error())
+				segmentID, p.partitionID, err.Error())
 			return
 		}
 		opts := segments.BadgerSegmentOpts{
-			RootDir:       p.getSegmentDirectory(int(prevMetadata.ID)),
+			RootDir:       p.getSegmentDirectory(segmentID),
 			Logger:        p.logger,
 			Topic:         p.topicName,
 			PartitionID:   uint(p.partitionID),
@@ -651,9 +654,21 @@ func (p *Partition) createNewSegment() {
 			p.logger.Fatalf("Failure while closing and reopening last segment due to err: %s",
 				err.Error())
 		}
+		seg.Open()
 		p.segments[len(p.segments)-1] = seg
-
-		// Save the segment ID and start offset.
+		immutizeDone <- true
+		close(immutizeDone)
+	}
+	if len(p.segments) == 0 {
+		// First ever segment in the partition.
+		p.logger.Infof("No segments found. Creating brand new segment starting at offset: 0")
+		startOffset = 0
+		segID = 1
+	} else {
+		seg := p.segments[len(p.segments)-1]
+		prevMetadata := seg.GetMetadata()
+		isImmutizing = true
+		go immutize()
 		segID = prevMetadata.ID + 1
 		startOffset = prevMetadata.EndOffset + 1
 	}
@@ -678,6 +693,10 @@ func (p *Partition) createNewSegment() {
 		StartOffset:      startOffset,
 	}
 	newSeg.SetMetadata(metadata)
+	newSeg.Open()
+	if isImmutizing {
+		<-immutizeDone
+	}
 	p.segments = append(p.segments, newSeg)
 }
 
@@ -685,7 +704,7 @@ func (p *Partition) createNewSegment() {
 // It also marks these segments for deletion after ensuring that the segment is not required by any
 // snapshots.
 func (p *Partition) maybeReclaimExpiredSegments() {
-	p.logger.Infof("Checking if segments need to be expired")
+	p.logger.VInfof(1, "Checking if segments need to be expired")
 	if p.shouldExpireSegment() {
 		p.expireSegments()
 	}
@@ -701,7 +720,6 @@ func (p *Partition) shouldExpireSegment() bool {
 	seg := p.segments[0]
 	metadata := seg.GetMetadata()
 	if !p.isSegExpirable(&metadata) {
-
 		return false
 	}
 	return true
@@ -758,8 +776,15 @@ func (p *Partition) removeExpiredSegments() []segments.Segment {
 		lastIdxExpired = ii
 	}
 	if lastIdxExpired == len(p.segments)-1 {
-		p.segments = nil
+		// All segments can be expired. First remove all segments except the last one since we will require the
+		// last segment metadata to create the new segment.
+		p.segments = p.segments[lastIdxExpired:]
+		if len(p.segments) != 1 {
+			p.logger.Fatalf("Expected one segment, got: %d", len(p.segments))
+		}
 		p.createNewSegment()
+		// Now remove the last expired segment as well.
+		p.segments = p.segments[1:]
 		return nil
 	}
 	var expiredSegs []segments.Segment
