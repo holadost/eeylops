@@ -293,9 +293,10 @@ func TestPartitionScan(t *testing.T) {
 	if sret.NextOffset != base.Offset(numSegs*numValsPerSeg) {
 		glog.Fatalf("Expected next offset: %d, got: %d", base.Offset(numSegs*numValsPerSeg), sret.NextOffset)
 	}
-	sarg.StartOffset = base.Offset(numSegs*numValsPerSeg) + base.Offset(10)
-	sarg.NumMessages = 10
 
+	// Scan non existent offsets.
+	sarg.StartOffset = base.Offset(numSegs * numValsPerSeg)
+	sarg.NumMessages = 10
 	sret = p.Scan(defCtx, &sarg)
 	if sret.Error != nil {
 		glog.Fatalf("Unexpected error while scanning. Error: %s", sret.Error.Error())
@@ -305,6 +306,20 @@ func TestPartitionScan(t *testing.T) {
 	}
 	if sret.NextOffset != -1 {
 		glog.Fatalf("Expected next offset: -1, got: %d", sret.NextOffset)
+	}
+
+	// Scan the last offset.
+	sarg.StartOffset = base.Offset(numSegs*numValsPerSeg) - 1
+	sarg.NumMessages = 10
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning. Error: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != 1 {
+		glog.Fatalf("Num messages mismatch. Expected: 1, got: %d", len(sret.Values))
+	}
+	if sret.NextOffset != base.Offset(numSegs*numValsPerSeg) {
+		glog.Fatalf("Expected next offset: %d, got: %d", base.Offset(numSegs*numValsPerSeg), sret.NextOffset)
 	}
 	glog.Infof("TestPartitionScan finished successfully")
 }
