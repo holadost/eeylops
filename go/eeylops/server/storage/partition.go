@@ -238,14 +238,14 @@ func (p *Partition) initialize() {
 	// created.
 	if len(p.segments) == 0 {
 		p.logger.Infof("Did not find any segment in the backing store. Creating segment for first time")
-		p.createNewSegmentWithLock()
+		p.createNewSegmentSafe()
 	}
 
 	// The last segment can be live or immutable. If immutable, create a new segment.
 	lastSeg := p.segments[len(p.segments)-1]
 	lastMeta := lastSeg.GetMetadata()
 	if lastMeta.Immutable {
-		p.createNewSegmentWithLock()
+		p.createNewSegmentSafe()
 	}
 	p.closed = false
 
@@ -601,7 +601,7 @@ func (p *Partition) partitionManager() {
 func (p *Partition) maybeCreateNewSegment() {
 	p.logger.Infof("Checking if new segment needs to be created")
 	if p.shouldCreateNewSegment() {
-		p.createNewSegmentWithLock()
+		p.createNewSegmentSafe()
 	}
 }
 
@@ -623,7 +623,8 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	return false
 }
 
-func (p *Partition) createNewSegmentWithLock() {
+// createNewSegmentSafe creates a new segment after acquiring the partitionCfgLock.
+func (p *Partition) createNewSegmentSafe() {
 	p.partitionCfgLock.Lock()
 	defer p.partitionCfgLock.Unlock()
 	if p.closed {
@@ -632,7 +633,8 @@ func (p *Partition) createNewSegmentWithLock() {
 	p.createNewSegment()
 }
 
-// createNewSegment marks the current live segment immutable and creates a new live segment.
+// createNewSegment marks the current live segment immutable and creates a new live segment. This method assumes
+// that partitionCfgLock has been acquired in write mode as the segments slice will be modified.
 func (p *Partition) createNewSegment() {
 	p.logger.Infof("Creating new segment")
 	var startOffset base.Offset
@@ -784,19 +786,12 @@ func (p *Partition) removeExpiredSegments() []segments.Segment {
 		}
 		lastIdxExpired = ii
 	}
+	var expiredSegs []segments.Segment
 	if lastIdxExpired == len(p.segments)-1 {
 		// All segments can be expired. First remove all segments except the last one since we will require the
 		// last segment metadata to create the new segment.
-		p.segments = p.segments[lastIdxExpired:]
-		if len(p.segments) != 1 {
-			p.logger.Fatalf("Expected one segment, got: %d", len(p.segments))
-		}
 		p.createNewSegment()
-		// Now remove the last expired segment as well.
-		p.segments = p.segments[1:]
-		return nil
 	}
-	var expiredSegs []segments.Segment
 	expiredSegs, p.segments = p.segments[0:lastIdxExpired+1], p.segments[lastIdxExpired+1:]
 	return expiredSegs
 }

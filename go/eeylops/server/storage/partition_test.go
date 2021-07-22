@@ -47,7 +47,7 @@ func loadDataBasicWithNewSegments(p *Partition, numSegments int, numValuesPerSeg
 		singleProduce(startIdx, p, numValuesPerSegment)
 		if numSegments != 1 {
 			// Create new segment.
-			p.createNewSegmentWithLock()
+			p.createNewSegmentSafe()
 		}
 	}
 }
