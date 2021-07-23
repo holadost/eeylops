@@ -143,7 +143,6 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	oldNextOffset := seg.nextOffSet
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
 	values, _ := makeMessageValues(arg.Entries, arg.Timestamp)
-
 	if arg.RLogIdx <= seg.lastRLogIdx {
 		seg.logger.Errorf("Invalid replicated log index: %d. Expected value greater than: %d",
 			arg.RLogIdx, seg.lastRLogIdx)
