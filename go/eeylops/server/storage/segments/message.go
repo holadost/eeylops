@@ -5,11 +5,13 @@ import (
 	flatbuf "github.com/google/flatbuffers/go"
 )
 
-func makeMessageValues(values [][]byte, ts int64) (retValues [][]byte) {
+func makeMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalSize int64) {
 	if len(values) == 0 {
 		return
 	}
+	totalSize = 0
 	for _, value := range values {
+		totalSize += int64(len(value))
 		builder := flatbuf.NewBuilder(len(value) + 8)
 		Message.MessageStartBodyVector(builder, len(value))
 		for ii := len(value) - 1; ii >= 0; ii-- {

@@ -17,7 +17,8 @@ import (
 )
 
 var (
-	kLastRLogIdxKeyBytes = []byte(kLastRLogIdxKey)
+	kLastRLogIdxKeyBytes          = []byte(kLastRLogIdxKey)
+	kTimestampIndexPrefixKeyBytes = []byte(kTimestampIndexKeyPrefix)
 )
 
 // BadgerSegment implements Segment where the data is backed using badger db.
@@ -141,7 +142,8 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	}
 	oldNextOffset := seg.nextOffSet
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
-	values := makeMessageValues(arg.Entries, arg.Timestamp)
+	values, _ := makeMessageValues(arg.Entries, arg.Timestamp)
+
 	if arg.RLogIdx <= seg.lastRLogIdx {
 		seg.logger.Errorf("Invalid replicated log index: %d. Expected value greater than: %d",
 			arg.RLogIdx, seg.lastRLogIdx)
@@ -342,6 +344,14 @@ func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base
 		keys = append(keys, seg.offsetToKey(ii))
 	}
 	return keys
+}
+
+func (seg *BadgerSegment) getValuesSize(values [][]byte) int {
+	totalSize := 0
+	for _, value := range values {
+		totalSize += len(value)
+	}
+	return totalSize
 }
 
 // Converts the given offset to a key representation for dataDB.

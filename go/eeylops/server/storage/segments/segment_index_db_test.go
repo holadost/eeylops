@@ -24,6 +24,7 @@ func TestNewSegmentIndexDB(t *testing.T) {
 		if ii == 0 {
 			firstAddTime = addnow
 		}
+		// We see roughly 3ms for add records on NVME drives.
 		err := idb.Add(addnow.UnixNano(), base.Offset(ii))
 		if err != nil {
 			glog.Fatalf("Unexpected error while adding entry: %s", err.Error())
@@ -42,6 +43,7 @@ func TestNewSegmentIndexDB(t *testing.T) {
 			ts = rand.Int63n(addnow.UnixNano()-firstAddTime.UnixNano()) + firstAddTime.UnixNano()
 		}
 		getnow := time.Now()
+		// This takes approximately 60us on NVME drives.
 		offset, err := idb.GetNearestOffsetLessThan(ts)
 		if err != nil {
 			glog.Fatalf("Unexpected error while getting nearest offset less than: %d. Err: %s", ts, err.Error())
