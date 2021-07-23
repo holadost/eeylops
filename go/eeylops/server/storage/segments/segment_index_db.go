@@ -85,11 +85,13 @@ func (idb *SegmentIndexDB) GetNearestOffsetLessThan(timestamp int64) (base.Offse
 		idb.logger.Errorf("Unable to prepare select query due to err: %s", err.Error())
 		return -1, ErrSegmentIndexDBBackend
 	}
+	defer pq.Close()
 	rows, err := pq.Query(timestamp)
 	if err != nil {
 		idb.logger.Errorf("Unable to fetch last offset with ts < %d due to err: %s", timestamp, err.Error())
 		return -1, ErrSegmentIndexDBBackend
 	}
+	defer rows.Close()
 	var offset base.Offset
 	var gbg interface{}
 	offset = -1
@@ -115,6 +117,7 @@ func (idb *SegmentIndexDB) execQuery(query string, args ...interface{}) error {
 		tx.Rollback()
 		return ErrSegmentIndexDBBackend
 	}
+	defer pq.Close()
 	if len(args) == 0 {
 		_, err = pq.Exec()
 	} else {
