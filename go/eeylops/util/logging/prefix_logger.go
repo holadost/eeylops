@@ -3,6 +3,7 @@ package logging
 import (
 	"fmt"
 	"github.com/golang/glog"
+	"sync"
 )
 
 type PrefixLogger struct {
@@ -24,6 +25,16 @@ func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *Prefi
 	}
 	logger := PrefixLogger{prefix: actualPrefix}
 	return &logger
+}
+
+var defaultLock sync.Once
+var defaultLogger *PrefixLogger
+
+func DefaultLogger() *PrefixLogger {
+	defaultLock.Do(func() {
+		defaultLogger = NewPrefixLogger("")
+	})
+	return defaultLogger
 }
 
 func (logger *PrefixLogger) GetPrefix() string {
@@ -58,5 +69,8 @@ func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
 }
 
 func createPrefixStr(prefix string) string {
+	if len(prefix) == 0 {
+		return ""
+	}
 	return "{" + prefix + "}"
 }

@@ -17,4 +17,7 @@ var (
 
 	ErrSegmentInvalidRLogIdx   = errors.New("ErrSegmentInvalidRLogIdx: invalid replicated log index")
 	ErrSegmentInvalidTimestamp = errors.New("ErrSegmentInvalidTimestamp: invalid timestamp")
+
+	// ErrSegmentIndexDBBackend is returned if there was an issue with the segment index db's backend.
+	ErrSegmentIndexDBBackend = errors.New("ErrSegmentInvalidTimestamp: invalid timestamp")
 )
