@@ -14,7 +14,7 @@ func TestNewSegmentIndexDB(t *testing.T) {
 	util.LogTestMarker(testName)
 	testDir := util.CreateTestDir(t, testName)
 	idb := NewSegmentIndexDB(testDir, nil)
-	numEntries := 100000
+	numEntries := 1000
 	var totalAddTime time.Duration
 	var totalGetTime time.Duration
 	var firstAddTime time.Time
