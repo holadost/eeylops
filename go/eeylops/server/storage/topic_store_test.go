@@ -2,6 +2,7 @@ package storage
 
 import (
 	"eeylops/server/base"
+	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -22,8 +23,7 @@ func createTopicStoreTestDir(t *testing.T, testName string) string {
 }
 
 func TestTopicStore(t *testing.T) {
-	glog.Infof("*******************************************************************************************\n\n")
-	glog.Infof("Starting TestTopicStore")
+	util.LogTestMarker("TestTopicStore")
 	testDir := createTopicStoreTestDir(t, "TestTopicStore")
 	numTopics := 100
 	closeReopenIterNum := 5
