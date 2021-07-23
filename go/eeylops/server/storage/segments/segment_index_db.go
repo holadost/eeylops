@@ -7,15 +7,17 @@ import (
 	"github.com/golang/glog"
 	"os"
 	"path"
+	"sync"
 )
 
 // SegmentIndexDB keeps the indexes for the segment. Currently, it only has a timestamp based index.
 type SegmentIndexDB struct {
-	Db       *sql.DB
-	Path     string
-	RootPath string
-	closed   bool
-	logger   *logging.PrefixLogger
+	Db          *sql.DB
+	Path        string
+	RootPath    string
+	closed      bool
+	logger      *logging.PrefixLogger
+	indexDBLock sync.RWMutex
 }
 
 const kCreateTableQuery = "CREATE TABLE IF NOT EXISTS timestamp_index (timestamp INTEGER, offset INTEGER)"
@@ -71,6 +73,8 @@ func (idb *SegmentIndexDB) Close() {
 }
 
 func (idb *SegmentIndexDB) Add(timestamp int64, offset base.Offset) error {
+	idb.indexDBLock.Lock()
+	defer idb.indexDBLock.Unlock()
 	err := idb.execQuery(kAddIndexQuery, timestamp, offset)
 	if err != nil {
 		idb.logger.Errorf("Unable to index (ts:%d, offset:%d) due to err: %s", timestamp, offset, err.Error())
@@ -80,6 +84,8 @@ func (idb *SegmentIndexDB) Add(timestamp int64, offset base.Offset) error {
 }
 
 func (idb *SegmentIndexDB) GetNearestOffsetLessThan(timestamp int64) (base.Offset, error) {
+	idb.indexDBLock.RLock()
+	defer idb.indexDBLock.RUnlock()
 	pq, err := idb.Db.Prepare(kfetchNearestOffsetQuery)
 	if err != nil {
 		idb.logger.Errorf("Unable to prepare select query due to err: %s", err.Error())
