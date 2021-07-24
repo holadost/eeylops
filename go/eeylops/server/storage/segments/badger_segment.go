@@ -466,7 +466,7 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 		return base.Offset(seg.timestampIndex[len(seg.timestampIndex)-1].Offset())
 	}
 
-	// Binary search index to find nearest offset.
+	// Binary search index to find nearest offset lesser than the given timestamp.
 	left := 0
 	right := len(seg.timestampIndex) - 1
 	nearestIdx := -1
@@ -479,12 +479,12 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 			// Move to the left half in the next iteration as the right half >= ts.
 			right = mid - 1
 		} else {
-			// Move to the right half in the next iteration as the left half <= mid.
-			left = mid + 1
 			// mid now could be the potential nearest index as the given timestamp is definitely not present to the
 			// leftside of mid(as all elements would be smaller than mid and hence couldn't be nearer than we are now).
-			// Note: It is still possible that we might find a candidate to the right of mid in subsequent iterations.
+			// It is still possible that we might find a candidate to the right of mid in subsequent iterations.
 			nearestIdx = mid
+			// Move to the right half in the next iteration as the left half <= mid.
+			left = mid + 1
 		}
 	}
 	if nearestIdx == -1 {
