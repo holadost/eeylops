@@ -25,26 +25,26 @@ var (
 
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	dataDB                     kv_store.KVStore            // Backing KV store to hold the data.
-	metadataDB                 *SegmentMetadataDB          // Segment metadata ddb.
-	nextOffSet                 base.Offset                 // Next start offset for new appends.
-	segLock                    sync.RWMutex                // A RW lock for the segment.
-	closed                     bool                        // Flag that indicates whether the segment is closed.
-	rootDir                    string                      // Root directory of this segment.
-	metadata                   *SegmentMetadata            // Cached segment metadata.
-	appendLock                 sync.Mutex                  // A lock for appends allowing only one append at a time.
-	lastRLogIdx                int64                       // Last replicated log index.
-	firstMsgTs                 int64                       // First message timestamp.
-	lastMsgTs                  int64                       // Last message timestamp.
-	openedOnce                 bool                        // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
-	logger                     *logging.PrefixLogger       // Logger object.
-	topicName                  string                      // Topic name.
-	partitionID                uint                        // Partition ID.
-	currentIndexBatchSizeBytes int64                       // Current index size in bytes.
-	timestampIndex             []*SegmentsFB.IndexEntry    // Timestamp index.
-	timestampIndexLock         sync.RWMutex                // This protects timestampIndex
-	timestampIndexChan         chan *SegmentsFB.IndexEntry // The channel where the timestamp indexes are forwarded.
-	segmentClosedChan          chan struct{}               // A channel to ask background goroutines to exit.
+	dataDB                     kv_store.KVStore         // Backing KV store to hold the data.
+	metadataDB                 *SegmentMetadataDB       // Segment metadata ddb.
+	nextOffSet                 base.Offset              // Next start offset for new appends.
+	segLock                    sync.RWMutex             // A RW lock for the segment.
+	closed                     bool                     // Flag that indicates whether the segment is closed.
+	rootDir                    string                   // Root directory of this segment.
+	metadata                   *SegmentMetadata         // Cached segment metadata.
+	appendLock                 sync.Mutex               // A lock for appends allowing only one append at a time.
+	lastRLogIdx                int64                    // Last replicated log index.
+	firstMsgTs                 int64                    // First message timestamp.
+	lastMsgTs                  int64                    // Last message timestamp.
+	openedOnce                 bool                     // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
+	logger                     *logging.PrefixLogger    // Logger object.
+	topicName                  string                   // Topic name.
+	partitionID                uint                     // Partition ID.
+	currentIndexBatchSizeBytes int64                    // Current index size in bytes.
+	timestampIndex             []*SegmentsFB.IndexEntry // Timestamp index.
+	timestampIndexLock         sync.RWMutex             // This protects timestampIndex
+	timestampIndexChan         chan []byte              // The channel where the timestamp indexes are forwarded.
+	segmentClosedChan          chan struct{}            // A channel to ask background goroutines to exit.
 
 }
 
@@ -88,6 +88,7 @@ func (seg *BadgerSegment) initialize() {
 		seg.logger.Infof("Did not find any metadata associated with this segment. This must be a new segment!")
 	}
 	seg.segmentClosedChan = make(chan struct{}, 1)
+	seg.timestampIndexChan = make(chan []byte, 128)
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
@@ -153,11 +154,13 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	oldNextOffset := seg.nextOffSet
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
 	values, totalSize := makeMessageValues(arg.Entries, arg.Timestamp)
+	var indexEntry []byte
+	indexEntry = nil
 	if seg.currentIndexBatchSizeBytes >= kIndexEveryNBytes {
 		seg.currentIndexBatchSizeBytes = 0
-		key := append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(len(seg.timestampIndex)))...)
-		keys = append(keys, key)
-		values = append(values, makeIndexEntry(arg.Timestamp, seg.nextOffSet))
+		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(len(seg.timestampIndex)))...))
+		indexEntry = makeIndexEntry(arg.Timestamp, seg.nextOffSet)
+		values = append(values, indexEntry)
 	}
 	seg.currentIndexBatchSizeBytes += totalSize
 
@@ -179,7 +182,9 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		// These were the first messages appended to the segment.
 		seg.firstMsgTs = arg.Timestamp
 	}
-
+	if indexEntry != nil {
+		seg.notifyIndexer(indexEntry)
+	}
 	// Save the replicated log index, last message timestamp and nextOffset for future appends and scans.
 	seg.lastRLogIdx = arg.RLogIdx
 	seg.lastMsgTs = arg.Timestamp
@@ -396,10 +401,26 @@ func (seg *BadgerSegment) indexer() {
 		case <-seg.segmentClosedChan:
 			seg.logger.VInfof(0, "Indexer exiting")
 			return
+		case tsVal := <-seg.timestampIndexChan:
+			seg.updateTimestampIndex(tsVal)
 		}
 	}
 }
 
+// This method is called by Append when a new index entry needs to be added to the timestamp index.
+func (seg *BadgerSegment) notifyIndexer(val []byte) {
+	seg.timestampIndexChan <- val
+}
+
+// This method is called by the indexer when it receives an index entry on timestampIndexChan.
+func (seg *BadgerSegment) updateTimestampIndex(val []byte) {
+	seg.timestampIndexLock.Lock()
+	defer seg.timestampIndexLock.Unlock()
+	seg.timestampIndex = append(seg.timestampIndex, SegmentsFB.GetRootAsIndexEntry(val, 0))
+}
+
+// This method is called when the segment is opened for the first time. This method should not be called
+// subsequently.
 func (seg *BadgerSegment) rebuildIndex() {
 	seg.logger.VInfof(0, "Rebuilding segment indexes")
 	startIdxKey := seg.numToIndexKey(0)
@@ -442,6 +463,7 @@ func (seg *BadgerSegment) rebuildIndex() {
 	seg.logger.VInfof(0, "Found %d index entries in segment", len(seg.timestampIndex))
 }
 
+// A helper method that lets us know if a key has started with the given prefix.
 func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool {
 	if len(key) < len(prefix) {
 		return false
