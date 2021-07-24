@@ -32,10 +32,11 @@ func makeMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalSize
 
 func makeMessageValuesV2(values [][]byte, ts int64) (retValues [][]byte, totalSize int64) {
 	totalSize = 0
-	for _, value := range values {
+	retValues = make([][]byte, len(values))
+	for ii, value := range values {
 		totalSize += int64(len(value))
 		newVal := append(util.UintToBytes(uint64(ts)), value...)
-		retValues = append(retValues, newVal)
+		retValues[ii] = newVal
 	}
 	return
 }
