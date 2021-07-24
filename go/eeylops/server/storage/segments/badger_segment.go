@@ -43,6 +43,7 @@ type BadgerSegment struct {
 	currentIndexBatchSizeBytes int64                    // Current index size in bytes.
 	timestampIndex             []*SegmentsFB.IndexEntry // Timestamp index.
 	timestampIndexLock         sync.RWMutex             // This protects timestampIndex
+	segmentClosedChan          chan struct{}
 }
 
 type BadgerSegmentOpts struct {
@@ -84,6 +85,7 @@ func (seg *BadgerSegment) initialize() {
 	if seg.metadata.ID == 0 {
 		seg.logger.Infof("Did not find any metadata associated with this segment. This must be a new segment!")
 	}
+	seg.segmentClosedChan = make(chan struct{}, 1)
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
@@ -119,6 +121,7 @@ func (seg *BadgerSegment) Close() error {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
 	seg.logger.Infof("Closing segment")
+	close(seg.segmentClosedChan)
 	seg.metadataDB.Close()
 	err := seg.dataDB.Close()
 	seg.metadataDB = nil
@@ -384,7 +387,19 @@ func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
 	return int(util.BytesToUint(key[len(kTimestampIndexPrefixKeyBytes):]))
 }
 
+func (seg *BadgerSegment) indexer() {
+	seg.rebuildIndex()
+	for {
+		select {
+		case <-seg.segmentClosedChan:
+			seg.logger.VInfof(0, "Indexer exiting")
+			return
+		}
+	}
+}
+
 func (seg *BadgerSegment) rebuildIndex() {
+	seg.logger.VInfof(0, "Rebuilding segment indexes")
 	startIdxKey := seg.numToIndexKey(0)
 	_, err := seg.dataDB.Get(startIdxKey)
 	if err != nil {
@@ -422,6 +437,7 @@ func (seg *BadgerSegment) rebuildIndex() {
 		seg.timestampIndex = append(seg.timestampIndex, entry)
 		count++
 	}
+	seg.logger.VInfof(0, "Found %d index entries in segment", len(seg.timestampIndex))
 }
 
 func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool {
@@ -436,6 +452,7 @@ func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool
 
 // Opens the segment. This method assumes that a segLock has been acquired.
 func (seg *BadgerSegment) open() {
+	go seg.indexer()
 	// Gather the last replicated log index in the segment.
 	val, err := seg.dataDB.Get(kLastRLogIdxKeyBytes)
 	if err != nil {
