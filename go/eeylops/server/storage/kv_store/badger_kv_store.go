@@ -320,11 +320,7 @@ func (kvStore *BadgerKVStore) Close() error {
 }
 
 func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte, reverse bool) Scanner {
-	// TODO: Handle prefix scans.
-	if len(prefix) > 0 {
-		glog.Warningf("Prefix scans are still not supported! Ignoring prefix during scans for now")
-	}
-	return newBadgerScanner(kvStore.db, startKey, reverse)
+	return newBadgerScanner(kvStore.db, prefix, startKey, reverse)
 }
 
 func generatePrefixKey(key []byte, prefix string) []byte {
@@ -336,15 +332,17 @@ type BadgerScanner struct {
 	iter     *badger.Iterator
 	txn      *badger.Txn
 	startKey []byte
+	prefix   []byte
 	reverse  bool
 }
 
-func newBadgerScanner(db *badger.DB, startKey []byte, reverse bool) *BadgerScanner {
+func newBadgerScanner(db *badger.DB, prefix []byte, startKey []byte, reverse bool) *BadgerScanner {
 	scanner := new(BadgerScanner)
 	scanner.db = db
 	scanner.iter = nil
 	scanner.startKey = startKey
 	scanner.reverse = reverse
+	scanner.prefix = prefix
 	scanner.initialize()
 	return scanner
 }
@@ -365,7 +363,10 @@ func (scanner *BadgerScanner) Rewind() {
 }
 
 func (scanner *BadgerScanner) Valid() bool {
-	return scanner.iter.Valid()
+	if scanner.prefix == nil || len(scanner.prefix) == 0 {
+		return scanner.iter.Valid()
+	}
+	return scanner.iter.ValidForPrefix(scanner.prefix)
 }
 
 func (scanner *BadgerScanner) Next() {

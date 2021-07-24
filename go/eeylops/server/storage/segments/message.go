@@ -1,7 +1,8 @@
 package segments
 
 import (
-	Message "eeylops/generated/flatbuf/server/storage/segments"
+	SegmentsFB "eeylops/generated/flatbuf/server/storage/segments"
+	"eeylops/server/base"
 	flatbuf "github.com/google/flatbuffers/go"
 )
 
@@ -13,23 +14,33 @@ func makeMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalSize
 	for _, value := range values {
 		totalSize += int64(len(value))
 		builder := flatbuf.NewBuilder(len(value) + 8)
-		Message.MessageStartBodyVector(builder, len(value))
+		SegmentsFB.MessageStartBodyVector(builder, len(value))
 		for ii := len(value) - 1; ii >= 0; ii-- {
 			builder.PrependByte(value[ii])
 		}
 		body := builder.EndVector(len(value))
-		Message.MessageStart(builder)
-		Message.MessageAddTimestamp(builder, ts)
-		Message.MessageAddBody(builder, body)
-		msg := Message.MessageEnd(builder)
+		SegmentsFB.MessageStart(builder)
+		SegmentsFB.MessageAddTimestamp(builder, ts)
+		SegmentsFB.MessageAddBody(builder, body)
+		msg := SegmentsFB.MessageEnd(builder)
 		builder.Finish(msg)
 		retValues = append(retValues, builder.FinishedBytes())
 	}
 	return
 }
 
+func makeIndexEntry(ts int64, offset base.Offset) []byte {
+	builder := flatbuf.NewBuilder(8)
+	SegmentsFB.IndexEntryStart(builder)
+	SegmentsFB.IndexEntryAddTimestamp(builder, ts)
+	SegmentsFB.IndexEntryAddOffset(builder, int64(offset))
+	msg := SegmentsFB.IndexEntryEnd(builder)
+	builder.Finish(msg)
+	return builder.FinishedBytes()
+}
+
 func fetchValueFromMessage(message []byte) ([]byte, int64) {
-	msgFb := Message.GetRootAsMessage(message, 0)
+	msgFb := SegmentsFB.GetRootAsMessage(message, 0)
 	retVal := make([]byte, msgFb.BodyLength())
 	for ii := 0; ii < msgFb.BodyLength(); ii++ {
 		retVal[ii] = byte(msgFb.Body(ii))
@@ -38,5 +49,5 @@ func fetchValueFromMessage(message []byte) ([]byte, int64) {
 }
 
 func fetchTimestampFromMessage(message []byte) int64 {
-	return Message.GetRootAsMessage(message, 0).Timestamp()
+	return SegmentsFB.GetRootAsMessage(message, 0).Timestamp()
 }

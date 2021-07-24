@@ -1,6 +1,9 @@
 package util
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"github.com/golang/glog"
+)
 
 func UintToBytes(num uint64) []byte {
 	val := make([]byte, 8)
@@ -9,5 +12,8 @@ func UintToBytes(num uint64) []byte {
 }
 
 func BytesToUint(num []byte) uint64 {
+	if len(num) != 8 {
+		glog.Fatalf("Expected 8 bytes, got: %d", len(num))
+	}
 	return binary.BigEndian.Uint64(num)
 }
