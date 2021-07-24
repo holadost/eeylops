@@ -624,7 +624,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 	// A flag to indicate whether the current last segment is being marked as immutable.
 	isImmutizing := false
 	// Notification channel once last segment has been marked as immutable.
-	immutizeDone := make(chan interface{}, 1)
+	immutizeDone := make(chan struct{}, 1)
 	// This helper function marks the current last segment as immutable.
 	immutize := func() {
 		seg := p.segments[len(p.segments)-1]
@@ -650,7 +650,6 @@ func (p *Partition) createNewSegmentUnsafe() {
 		}
 		seg.Open()
 		p.segments[len(p.segments)-1] = seg
-		immutizeDone <- true
 		close(immutizeDone)
 	}
 	if len(p.segments) == 0 {
