@@ -25,25 +25,27 @@ var (
 
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	dataDB                     kv_store.KVStore         // Backing KV store to hold the data.
-	metadataDB                 *SegmentMetadataDB       // Segment metadata ddb.
-	nextOffSet                 base.Offset              // Next start offset for new appends.
-	segLock                    sync.RWMutex             // A RW lock for the segment.
-	closed                     bool                     // Flag that indicates whether the segment is closed.
-	rootDir                    string                   // Root directory of this segment.
-	metadata                   *SegmentMetadata         // Cached segment metadata.
-	appendLock                 sync.Mutex               // A lock for appends allowing only one append at a time.
-	lastRLogIdx                int64                    // Last replicated log index.
-	firstMsgTs                 int64                    // First message timestamp.
-	lastMsgTs                  int64                    // Last message timestamp.
-	openedOnce                 bool                     // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
-	logger                     *logging.PrefixLogger    // Logger object.
-	topicName                  string                   // Topic name.
-	partitionID                uint                     // Partition ID.
-	currentIndexBatchSizeBytes int64                    // Current index size in bytes.
-	timestampIndex             []*SegmentsFB.IndexEntry // Timestamp index.
-	timestampIndexLock         sync.RWMutex             // This protects timestampIndex
-	segmentClosedChan          chan struct{}
+	dataDB                     kv_store.KVStore            // Backing KV store to hold the data.
+	metadataDB                 *SegmentMetadataDB          // Segment metadata ddb.
+	nextOffSet                 base.Offset                 // Next start offset for new appends.
+	segLock                    sync.RWMutex                // A RW lock for the segment.
+	closed                     bool                        // Flag that indicates whether the segment is closed.
+	rootDir                    string                      // Root directory of this segment.
+	metadata                   *SegmentMetadata            // Cached segment metadata.
+	appendLock                 sync.Mutex                  // A lock for appends allowing only one append at a time.
+	lastRLogIdx                int64                       // Last replicated log index.
+	firstMsgTs                 int64                       // First message timestamp.
+	lastMsgTs                  int64                       // Last message timestamp.
+	openedOnce                 bool                        // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
+	logger                     *logging.PrefixLogger       // Logger object.
+	topicName                  string                      // Topic name.
+	partitionID                uint                        // Partition ID.
+	currentIndexBatchSizeBytes int64                       // Current index size in bytes.
+	timestampIndex             []*SegmentsFB.IndexEntry    // Timestamp index.
+	timestampIndexLock         sync.RWMutex                // This protects timestampIndex
+	timestampIndexChan         chan *SegmentsFB.IndexEntry // The channel where the timestamp indexes are forwarded.
+	segmentClosedChan          chan struct{}               // A channel to ask background goroutines to exit.
+
 }
 
 type BadgerSegmentOpts struct {
