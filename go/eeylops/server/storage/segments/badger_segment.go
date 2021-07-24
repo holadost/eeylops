@@ -26,7 +26,7 @@ var (
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
 	dataDB                     kv_store.KVStore         // Backing KV store to hold the data.
-	metadataDB                 *SegmentMetadataDB       // Segment metadata ddb.
+	metadataDB                 *SegmentMetadataDB       // Segment metadata DB.
 	nextOffSet                 base.Offset              // Next start offset for new appends.
 	segLock                    sync.RWMutex             // A RW lock for the segment.
 	closed                     bool                     // Flag that indicates whether the segment is closed.
@@ -153,7 +153,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		return &ret
 	}
 	if arg.Timestamp < seg.lastMsgTs {
-		seg.logger.Errorf("Invalid timestamp. Expected timestamp >= %d", seg.lastMsgTs)
+		seg.logger.Errorf("Invalid timestamp: %d. Expected timestamp >= %d", arg.Timestamp, seg.lastMsgTs)
 		ret.Error = ErrSegmentInvalidTimestamp
 		return &ret
 	}
@@ -451,6 +451,46 @@ func (seg *BadgerSegment) updateTimestampIndex(val []byte) {
 		return
 	}
 	seg.timestampIndex = append(seg.timestampIndex, SegmentsFB.GetRootAsIndexEntry(val, 0))
+}
+
+// getNearestSmallerOffsetFromIndex returns the first offset that is smaller than the given timestamp. This method
+// assumes that segLock has been acquired.
+func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset {
+	seg.timestampIndexLock.RLock()
+	defer seg.timestampIndexLock.RUnlock()
+	if len(seg.timestampIndex) == 0 {
+		// There are no indexes. Return the smallest offset.
+		return seg.metadata.StartOffset
+	}
+	if ts > seg.timestampIndex[len(seg.timestampIndex)-1].Timestamp() {
+		return base.Offset(seg.timestampIndex[len(seg.timestampIndex)-1].Offset())
+	}
+
+	// Binary search index to find nearest offset.
+	left := 0
+	right := len(seg.timestampIndex) - 1
+	nearestIdx := -1
+	for {
+		if left > right {
+			break
+		}
+		mid := left + (right-left)/2
+		if seg.timestampIndex[mid].Timestamp() >= ts {
+			// Move to the left half in the next iteration as the right half >= ts.
+			right = mid - 1
+		} else {
+			// Move to the right half in the next iteration as the left half <= mid.
+			left = mid + 1
+			// mid now could be the potential nearest index as the given timestamp is definitely not present to the
+			// leftside of mid(as all elements would be smaller than mid and hence couldn't be nearer than we are now).
+			// Note: It is still possible that we might find a candidate to the right of mid in subsequent iterations.
+			nearestIdx = mid
+		}
+	}
+	if nearestIdx == -1 {
+		return base.Offset(-1)
+	}
+	return base.Offset(seg.timestampIndex[nearestIdx].Offset())
 }
 
 // rebuildIndexes is called by the indexer when the segment is opened for the first time.
