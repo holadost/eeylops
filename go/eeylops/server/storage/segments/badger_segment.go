@@ -45,7 +45,7 @@ type BadgerSegment struct {
 	timestampIndexLock         sync.RWMutex             // This protects timestampIndex
 	timestampIndexChan         chan []byte              // The channel where the timestamp indexes are forwarded.
 	segmentClosedChan          chan struct{}            // A channel to ask background goroutines to exit.
-
+	rebuildIndexOnce           sync.Once                // Mutex to protect us from building indexes only once.
 }
 
 type BadgerSegmentOpts struct {
@@ -99,6 +99,12 @@ func (seg *BadgerSegment) initialize() {
 	seg.dataDB = kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
 }
 
+// ID returns the segment id.
+func (seg *BadgerSegment) ID() int {
+	return int(seg.metadata.ID)
+}
+
+// Open opens the segment.
 func (seg *BadgerSegment) Open() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
@@ -109,10 +115,6 @@ func (seg *BadgerSegment) Open() {
 	seg.openedOnce = true
 	seg.closed = false
 	seg.open()
-}
-
-func (seg *BadgerSegment) ID() int {
-	return int(seg.metadata.ID)
 }
 
 // Close implements the Segment interface. It closes the connection to the underlying
@@ -137,26 +139,41 @@ func (seg *BadgerSegment) IsEmpty() bool {
 	return seg.nextOffSet == seg.metadata.StartOffset
 }
 
+// Append appends the given entries to the segment.
 func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *AppendEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	var ret AppendEntriesRet
 	ret.Error = nil
+
+	// Sanity checks.
 	if seg.closed || seg.metadata.Expired || seg.metadata.Immutable || !seg.openedOnce {
 		seg.logger.Errorf("Segment is either closed, expired or immutable. Cannot append entries")
 		ret.Error = ErrSegmentClosed
 		return &ret
 	}
 	if arg.Timestamp < seg.lastMsgTs {
+		seg.logger.Errorf("Invalid timestamp. Expected timestamp >= %d", seg.lastMsgTs)
 		ret.Error = ErrSegmentInvalidTimestamp
 		return &ret
 	}
+	if arg.RLogIdx <= seg.lastRLogIdx {
+		seg.logger.Errorf("Invalid replicated log index: %d. Expected value greater than: %d",
+			arg.RLogIdx, seg.lastRLogIdx)
+		ret.Error = ErrSegmentInvalidRLogIdx
+		return &ret
+	}
+
 	oldNextOffset := seg.nextOffSet
+	// Convert entries into (key, value) pairs
 	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
 	values, totalSize := makeMessageValues(arg.Entries, arg.Timestamp)
+
+	// Add an index entry if required.
 	var indexEntry []byte
 	indexEntry = nil
 	if seg.currentIndexBatchSizeBytes >= kIndexEveryNBytes {
+		// We have crossed the threshold. Add an index entry with the current timestamp.
 		seg.currentIndexBatchSizeBytes = 0
 		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(len(seg.timestampIndex)))...))
 		indexEntry = makeIndexEntry(arg.Timestamp, seg.nextOffSet)
@@ -164,25 +181,25 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	}
 	seg.currentIndexBatchSizeBytes += totalSize
 
-	if arg.RLogIdx <= seg.lastRLogIdx {
-		seg.logger.Errorf("Invalid replicated log index: %d. Expected value greater than: %d",
-			arg.RLogIdx, seg.lastRLogIdx)
-		ret.Error = ErrSegmentInvalidRLogIdx
-		return &ret
-	}
+	// Update replicated log index as well.
 	keys = append(keys, kLastRLogIdxKeyBytes)
 	values = append(values, util.UintToBytes(uint64(arg.RLogIdx)))
+
+	// Persist entries.
 	err := seg.dataDB.BatchPut(keys, values)
 	if err != nil {
 		seg.logger.Errorf("Unable to append entries in segment: %d due to err: %s", seg.ID(), err.Error())
 		ret.Error = ErrSegmentBackend
 		return &ret
 	}
+
+	// Update segment internal states.
 	if oldNextOffset == seg.metadata.StartOffset {
-		// These were the first messages appended to the segment.
+		// These were the first messages appended to the segment. Save the first message timestamp.
 		seg.firstMsgTs = arg.Timestamp
 	}
 	if indexEntry != nil {
+		// Notify indexer with the new index entry that was created.
 		seg.notifyIndexer(indexEntry)
 	}
 	// Save the replicated log index, last message timestamp and nextOffset for future appends and scans.
@@ -192,8 +209,8 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	return &ret
 }
 
-// Scan implements the Segment interface. It attempts to fetch numMessages starting from the given StartOffset or
-// StartTimestamp.
+// Scan attempts to fetch the requested number of messages sequentially starting from the entry with the given
+// StartOffset or StartTimestamp. Only one of StartOffset or StartTimestamp must be provided.
 func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
@@ -218,7 +235,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 
 	if (seg.nextOffSet == seg.metadata.StartOffset+1) || (arg.StartOffset >= seg.nextOffSet) {
 		// Either the segment is empty or it does not contain our desired offset yet.
-		seg.logger.Warningf("Requested offset: %d is not present in this segment. "+
+		seg.logger.VInfof(1, "Requested offset: %d is not present in this segment. "+
 			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffSet)
 		ret.Error = nil
 		ret.Values = nil
@@ -230,7 +247,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 	var sk []byte
 	tmpNumMsgs = base.Offset(arg.NumMessages)
 
-	// Compute the keys that need to be fetched. Start offset has been provided.
+	// Compute the keys that need to be fetched using the start offset.
 	if arg.StartOffset >= 0 {
 		if arg.StartOffset+tmpNumMsgs >= seg.nextOffSet {
 			tmpNumMsgs = seg.nextOffSet - arg.StartOffset
@@ -254,13 +271,14 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 			break
 		}
 		offset := seg.keyToOffset(key)
-		val, ts := fetchValueFromMessage(msg)
+		msgFB := SegmentsFB.GetRootAsMessage(msg, 0)
 		if arg.ScanSizeBytes > 0 {
-			bytesScannedSoFar += int64(len(val))
+			bytesScannedSoFar += int64(msgFB.BodyLength())
 			if bytesScannedSoFar > arg.ScanSizeBytes {
 				break
 			}
 		}
+		val, ts := fetchValueFromMessageFB(msgFB)
 		ret.Values = append(ret.Values, &sbase.ScanValue{
 			Offset:    offset,
 			Value:     val,
@@ -370,12 +388,12 @@ func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base
 	return keys
 }
 
-// Converts the given offset to a key representation for dataDB.
+// offsetToKey converts the given offset to a key representation for dataDB.
 func (seg *BadgerSegment) offsetToKey(offset base.Offset) []byte {
 	return append(KOffSetPrefixBytes, util.UintToBytes(uint64(offset))...)
 }
 
-// Converts the key representation of the offset(from dataDB) back to base.Offset type.
+// keyToOffset converts the key representation of the offset(from dataDB) to base.Offset type.
 func (seg *BadgerSegment) keyToOffset(key []byte) base.Offset {
 	if len(key) != len(KOffSetPrefixBytes)+8 {
 		seg.logger.Fatalf("Given key: %s is not an offset key", string(key))
@@ -383,10 +401,12 @@ func (seg *BadgerSegment) keyToOffset(key []byte) base.Offset {
 	return base.Offset(util.BytesToUint(key[len(KOffSetPrefixBytes):]))
 }
 
+// numToIndexKey converts the given number to a key representation for dataDB.
 func (seg *BadgerSegment) numToIndexKey(num int) []byte {
 	return append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(num))...)
 }
 
+// indexKeyToNum converts the given index key to its numeric representation.
 func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
 	if len(key) != len(kTimestampIndexPrefixKeyBytes)+8 {
 		seg.logger.Fatalf("Expected timestamp index key. Got: %s", string(key))
@@ -394,8 +414,16 @@ func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
 	return int(util.BytesToUint(key[len(kTimestampIndexPrefixKeyBytes):]))
 }
 
+// hasValueExpired returns true if the value has expired. False otherwise.
+func (seg *BadgerSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
+	return false
+}
+
+// indexer is a background goroutine that is started when the segment is first opened. It scans dataDB and
+// rebuilds an in memory timestamp index. It then waits for new indexes that were created and updates the
+// in memory timestamp index.
 func (seg *BadgerSegment) indexer() {
-	seg.rebuildIndex()
+	seg.rebuildIndexes()
 	for {
 		select {
 		case <-seg.segmentClosedChan:
@@ -407,60 +435,67 @@ func (seg *BadgerSegment) indexer() {
 	}
 }
 
-// This method is called by Append when a new index entry needs to be added to the timestamp index.
+// notifyIndexer is called by Append when a new index entry needs to be added to the timestamp index.
 func (seg *BadgerSegment) notifyIndexer(val []byte) {
 	seg.timestampIndexChan <- val
 }
 
-// This method is called by the indexer when it receives an index entry on timestampIndexChan.
+// updateTimestampIndex is called by the indexer when it receives an index entry on timestampIndexChan.
 func (seg *BadgerSegment) updateTimestampIndex(val []byte) {
+	// Acquire write lock on the timestamp index as we are about to modify it.
 	seg.timestampIndexLock.Lock()
 	defer seg.timestampIndexLock.Unlock()
+
+	if seg.closed || !seg.openedOnce {
+		seg.logger.Warningf("Either segment is closed or never opened. Skipping timestamp index updates")
+		return
+	}
 	seg.timestampIndex = append(seg.timestampIndex, SegmentsFB.GetRootAsIndexEntry(val, 0))
 }
 
-// This method is called when the segment is opened for the first time. This method should not be called
-// subsequently.
-func (seg *BadgerSegment) rebuildIndex() {
-	seg.logger.VInfof(0, "Rebuilding segment indexes")
-	startIdxKey := seg.numToIndexKey(0)
-	_, err := seg.dataDB.Get(startIdxKey)
-	if err != nil {
-		if err == kv_store.ErrKVStoreKeyNotFound {
-			seg.logger.VInfof(1, "No indexes found. Nothing to rebuild")
-			return
-		}
-		seg.logger.Fatalf("Error while attempting to fetch timestamp index. Error: %s", err.Error())
-	}
-	seg.timestampIndexLock.Lock()
-	defer seg.timestampIndexLock.Unlock()
-	// Clear the index.
-	seg.timestampIndex = nil
-
-	// Scan the DB for keys with the timestamp index prefix and rebuild timestampIndex.
-	itr := seg.dataDB.CreateScanner(kTimestampIndexPrefixKeyBytes, startIdxKey, false)
-	defer itr.Close()
-	itr.Seek(startIdxKey)
-	count := 0
-	for ; itr.Valid(); itr.Next() {
-		key, val, err := itr.GetItem()
+// rebuildIndexes is called by the indexer when the segment is opened for the first time.
+func (seg *BadgerSegment) rebuildIndexes() {
+	seg.rebuildIndexOnce.Do(func() {
+		seg.logger.VInfof(1, "Rebuilding segment indexes")
+		startIdxKey := seg.numToIndexKey(0)
+		_, err := seg.dataDB.Get(startIdxKey)
 		if err != nil {
-			seg.logger.Fatalf("Unable to initialize index due to scan err: %s", err.Error())
+			if err == kv_store.ErrKVStoreKeyNotFound {
+				seg.logger.VInfof(1, "No indexes found. Nothing to rebuild")
+				return
+			}
+			seg.logger.Fatalf("Error while attempting to fetch timestamp index. Error: %s", err.Error())
 		}
-		// Sanity check to make sure that the key is of the expected type.
-		if !seg.doesKeyStartWithPrefix(key, kTimestampIndexPrefixKeyBytes) {
-			seg.logger.Fatalf("Did not expect other keys in index prefix scan. Got key: %s", string(key))
+		seg.timestampIndexLock.Lock()
+		defer seg.timestampIndexLock.Unlock()
+		// Clear the index.
+		seg.timestampIndex = nil
+
+		// Scan the DB for keys with the timestamp index prefix and rebuild timestampIndex.
+		itr := seg.dataDB.CreateScanner(kTimestampIndexPrefixKeyBytes, startIdxKey, false)
+		defer itr.Close()
+		itr.Seek(startIdxKey)
+		count := 0
+		for ; itr.Valid(); itr.Next() {
+			key, val, err := itr.GetItem()
+			if err != nil {
+				seg.logger.Fatalf("Unable to initialize index due to scan err: %s", err.Error())
+			}
+			// Sanity check to make sure that the key is of the expected type.
+			if !seg.doesKeyStartWithPrefix(key, kTimestampIndexPrefixKeyBytes) {
+				seg.logger.Fatalf("Did not expect other keys in index prefix scan. Got key: %s", string(key))
+			}
+			idxNum := seg.indexKeyToNum(key)
+			// Sanity check to make sure that the entry is monotonically increasing.
+			if idxNum != count {
+				seg.logger.Fatalf("Expected to find index id: %d, got: %d", count, idxNum)
+			}
+			entry := SegmentsFB.GetRootAsIndexEntry(val, 0)
+			seg.timestampIndex = append(seg.timestampIndex, entry)
+			count++
 		}
-		idxNum := seg.indexKeyToNum(key)
-		// Sanity check to make sure that the entry is monotonically increasing.
-		if idxNum != count {
-			seg.logger.Fatalf("Expected to find index id: %d, got: %d", count, idxNum)
-		}
-		entry := SegmentsFB.GetRootAsIndexEntry(val, 0)
-		seg.timestampIndex = append(seg.timestampIndex, entry)
-		count++
-	}
-	seg.logger.VInfof(0, "Found %d index entries in segment", len(seg.timestampIndex))
+		seg.logger.VInfof(1, "Found %d index entries persisted in segment", len(seg.timestampIndex))
+	})
 }
 
 // A helper method that lets us know if a key has started with the given prefix.
@@ -474,7 +509,7 @@ func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool
 	return true
 }
 
-// Opens the segment. This method assumes that a segLock has been acquired.
+// Opens the segment. This method assumes that segLock has been acquired.
 func (seg *BadgerSegment) open() {
 	go seg.indexer()
 	// Gather the last replicated log index in the segment.

@@ -41,6 +41,10 @@ func makeIndexEntry(ts int64, offset base.Offset) []byte {
 
 func fetchValueFromMessage(message []byte) ([]byte, int64) {
 	msgFb := SegmentsFB.GetRootAsMessage(message, 0)
+	return fetchValueFromMessageFB(msgFb)
+}
+
+func fetchValueFromMessageFB(msgFb *SegmentsFB.Message) ([]byte, int64) {
 	retVal := make([]byte, msgFb.BodyLength())
 	for ii := 0; ii < msgFb.BodyLength(); ii++ {
 		retVal[ii] = byte(msgFb.Body(ii))
@@ -49,5 +53,10 @@ func fetchValueFromMessage(message []byte) ([]byte, int64) {
 }
 
 func fetchTimestampFromMessage(message []byte) int64 {
-	return SegmentsFB.GetRootAsMessage(message, 0).Timestamp()
+	msgFb := SegmentsFB.GetRootAsMessage(message, 0)
+	return fetchTimestampFromMessageFB(msgFb)
+}
+
+func fetchTimestampFromMessageFB(msgFb *SegmentsFB.Message) int64 {
+	return msgFb.Timestamp()
 }
