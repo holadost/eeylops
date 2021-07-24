@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
+	"math/rand"
 	"testing"
+	"time"
 )
 
 func TestBadgerKVStore(t *testing.T) {
@@ -118,4 +120,40 @@ func TestBadgerKVStore(t *testing.T) {
 		glog.Fatalf("Value mismatch. Expected: %s, Got: %s", singleVal, val)
 	}
 	glog.Infof("Badger KV store test finished successfully")
+}
+
+func TestBadgerKVStore_BatchPut(t *testing.T) {
+	util.LogTestMarker("TestBadgerKVStore_BatchPut")
+	testDir := util.CreateTestDir(t, "TestBadgerKVStore_BatchPut")
+	opts := badger.DefaultOptions(testDir)
+	opts.NumMemtables = 3
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	store := NewBadgerKVStore(testDir, opts)
+	batchSize := 10
+	numIters := 1000
+	// Batch write values
+	token := make([]byte, 1024*1024)
+	rand.Read(token)
+	glog.Infof("Testing Batch Put")
+	start := time.Now()
+	var values [][]byte
+	for ii := 0; ii < batchSize; ii++ {
+		values = append(values, token)
+	}
+	for iter := 0; iter < numIters; iter++ {
+		var keys [][]byte
+		for ii := 0; ii < batchSize; ii++ {
+			key := make([]byte, 16)
+			rand.Read(key)
+			keys = append(keys, key)
+		}
+		err := store.BatchPut(keys, values)
+		if err != nil {
+			glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
+			return
+		}
+	}
+	elapsed := time.Since(start)
+	glog.Infof("Total time: %v, average time: %v", elapsed, elapsed/time.Duration(numIters))
 }
