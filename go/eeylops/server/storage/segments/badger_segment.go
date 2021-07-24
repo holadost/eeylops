@@ -460,9 +460,9 @@ func (seg *BadgerSegment) open() {
 		var sk []byte
 		// TODO: Ugly hack here currently. When scanning in forward direction, the timestamp index keys come first.
 		// TODO: Prefix scans as a result return immediately since the very first key does not contain our prefix.
-		// TODO: So for forward scans, we set the start key forecefully. For reverse scans, we luck out because
+		// TODO: So for forward scans, we set the start key forcefully. For reverse scans, we luck out because
 		// TODO: the offset keys are the last keys in the DB and hence no start key is required. If we did, this would
-		// TODO: fail since we don't the last key(this method infac initializes the last offset in the segment).
+		// TODO: fail since we don't know the last key(this method in fact initializes the last offset in the segment).
 		// TODO: The clean fix would be to have the KV store provide a CF notion that would protect us from these
 		// TODO: sort of scenarios.
 		if !dir {
