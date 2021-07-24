@@ -25,27 +25,36 @@ var (
 
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
-	dataDB                     kv_store.KVStore         // Backing KV store to hold the data.
-	metadataDB                 *SegmentMetadataDB       // Segment metadata DB.
-	nextOffSet                 base.Offset              // Next start offset for new appends.
-	segLock                    sync.RWMutex             // A RW lock for the segment.
-	closed                     bool                     // Flag that indicates whether the segment is closed.
-	rootDir                    string                   // Root directory of this segment.
-	metadata                   *SegmentMetadata         // Cached segment metadata.
-	appendLock                 sync.Mutex               // A lock for appends allowing only one append at a time.
-	lastRLogIdx                int64                    // Last replicated log index.
-	firstMsgTs                 int64                    // First message timestamp.
-	lastMsgTs                  int64                    // Last message timestamp.
-	openedOnce                 bool                     // A flag to indicate if the segment was opened once. A segment cannot be closed and reopened.
-	logger                     *logging.PrefixLogger    // Logger object.
-	topicName                  string                   // Topic name.
-	partitionID                uint                     // Partition ID.
+	segLock     sync.RWMutex       // A RW lock for the segment.
+	rootDir     string             // Root directory of this segment.
+	topicName   string             // Topic name.
+	partitionID uint               // Partition ID.
+	dataDB      kv_store.KVStore   // Backing KV store to hold the data.
+	metadataDB  *SegmentMetadataDB // Segment metadata DB.
+
+	// Flags that indicate whether segment has been opened and closed.
+	closed            bool          // Flag that indicates whether the segment is closed.
+	openedOnce        bool          // A flag to indicate if the segment was opened once. Segment cannot be reopened.
+	segmentClosedChan chan struct{} // A channel to ask background goroutines to exit.
+
+	// Segment metadata.
+	liveStateLock sync.RWMutex     // Protects access to nextOffset, firstMsgTs, lastMsgTs and lastRLogIdx
+	metadata      *SegmentMetadata // Cached segment metadata.
+	nextOffset    base.Offset      // Next start offset for new appends.
+	lastRLogIdx   int64            // Last replicated log index.
+	firstMsgTs    int64            // First message timestamp.
+	lastMsgTs     int64            // Last message timestamp.
+
+	// Segment logger.
+	logger *logging.PrefixLogger // Logger object.
+
+	// States used for timestamp based indexes on messages written to the segment.
 	currentIndexBatchSizeBytes int64                    // Current index size in bytes.
 	timestampIndex             []*SegmentsFB.IndexEntry // Timestamp index.
 	timestampIndexLock         sync.RWMutex             // This protects timestampIndex
 	timestampIndexChan         chan []byte              // The channel where the timestamp indexes are forwarded.
-	segmentClosedChan          chan struct{}            // A channel to ask background goroutines to exit.
 	rebuildIndexOnce           sync.Once                // Mutex to protect us from building indexes only once.
+
 }
 
 type BadgerSegmentOpts struct {
@@ -136,7 +145,7 @@ func (seg *BadgerSegment) Close() error {
 
 // IsEmpty implements the Segment interface. Returns true if the segment is empty. False otherwise.
 func (seg *BadgerSegment) IsEmpty() bool {
-	return seg.nextOffSet == seg.metadata.StartOffset
+	return seg.nextOffset == seg.metadata.StartOffset
 }
 
 // Append appends the given entries to the segment.
@@ -164,9 +173,9 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		return &ret
 	}
 
-	oldNextOffset := seg.nextOffSet
+	oldNextOffset := seg.nextOffset
 	// Convert entries into (key, value) pairs
-	keys := seg.generateKeys(seg.nextOffSet, base.Offset(len(arg.Entries)))
+	keys := seg.generateKeys(seg.nextOffset, base.Offset(len(arg.Entries)))
 	values, totalSize := makeMessageValues(arg.Entries, arg.Timestamp)
 
 	// Add an index entry if required.
@@ -176,7 +185,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		// We have crossed the threshold. Add an index entry with the current timestamp.
 		seg.currentIndexBatchSizeBytes = 0
 		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(len(seg.timestampIndex)))...))
-		indexEntry = makeIndexEntry(arg.Timestamp, seg.nextOffSet)
+		indexEntry = makeIndexEntry(arg.Timestamp, seg.nextOffset)
 		values = append(values, indexEntry)
 	}
 	seg.currentIndexBatchSizeBytes += totalSize
@@ -194,18 +203,24 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	}
 
 	// Update segment internal states.
+	firstMsgTs := int64(-1)
 	if oldNextOffset == seg.metadata.StartOffset {
 		// These were the first messages appended to the segment. Save the first message timestamp.
-		seg.firstMsgTs = arg.Timestamp
+		firstMsgTs = arg.Timestamp
 	}
 	if indexEntry != nil {
 		// Notify indexer with the new index entry that was created.
 		seg.notifyIndexer(indexEntry)
 	}
 	// Save the replicated log index, last message timestamp and nextOffset for future appends and scans.
+	seg.liveStateLock.Lock()
+	defer seg.liveStateLock.Unlock()
+	if firstMsgTs != -1 {
+		seg.firstMsgTs = firstMsgTs
+	}
 	seg.lastRLogIdx = arg.RLogIdx
 	seg.lastMsgTs = arg.Timestamp
-	seg.nextOffSet += base.Offset(len(arg.Entries))
+	seg.nextOffset += base.Offset(len(arg.Entries))
 	return &ret
 }
 
@@ -215,28 +230,27 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	var ret ScanEntriesRet
+	if arg.StartOffset == -1 && arg.StartTimestamp == -1 {
+		seg.logger.Fatalf("Both StartOffset and StartTimestamp cannot be undefined")
+	}
+
 	if seg.closed || seg.metadata.Expired || !seg.openedOnce {
 		seg.logger.Errorf("Segment is already closed")
 		ret.Error = ErrSegmentClosed
 		return &ret
 	}
-	if arg.StartOffset == -1 && arg.StartTimestamp == -1 {
-		seg.logger.Fatalf("Both StartOffset and StartTimestamp cannot be undefined")
-	}
-
 	// Sanity checks to see if the segment contains our start offset.
 	if (arg.StartOffset >= 0) && (arg.StartOffset < seg.metadata.StartOffset) {
 		// The start offset does not belong to this segment.
 		seg.logger.Errorf("Start offset does not belong to this segment. Given start offset: %d, "+
-			"Seg start offset: %d, Segment next offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffSet)
+			"Seg start offset: %d, Segment next offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
 		ret.Error = ErrSegmentInvalid
 		return &ret
 	}
-
-	if (seg.nextOffSet == seg.metadata.StartOffset+1) || (arg.StartOffset >= seg.nextOffSet) {
+	if seg.IsEmpty() || (arg.StartOffset >= seg.nextOffset) {
 		// Either the segment is empty or it does not contain our desired offset yet.
 		seg.logger.VInfof(1, "Requested offset: %d is not present in this segment. "+
-			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffSet)
+			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
 		ret.Error = nil
 		ret.Values = nil
 		ret.NextOffset = -1
@@ -249,8 +263,8 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 
 	// Compute the keys that need to be fetched using the start offset.
 	if arg.StartOffset >= 0 {
-		if arg.StartOffset+tmpNumMsgs >= seg.nextOffSet {
-			tmpNumMsgs = seg.nextOffSet - arg.StartOffset
+		if arg.StartOffset+tmpNumMsgs >= seg.nextOffset {
+			tmpNumMsgs = seg.nextOffset - arg.StartOffset
 		}
 		endOffset = arg.StartOffset + tmpNumMsgs - 1
 		sk = seg.offsetToKey(arg.StartOffset)
@@ -299,8 +313,12 @@ func (seg *BadgerSegment) MarkImmutable() {
 	seg.logger.Infof("Marking segment as immutable")
 	seg.metadata.Immutable = true
 	seg.metadata.ImmutableTimestamp = time.Now()
-	if seg.nextOffSet > seg.metadata.StartOffset {
-		seg.metadata.EndOffset = seg.nextOffSet - 1
+	if !seg.IsEmpty() {
+		// The liveStateLock is not required here since we can be sure there are no appends happening at this
+		//time(as we have a write lock on the segment). Lets acquire the lock however for paranoia reasons.
+		seg.liveStateLock.RLock()
+		defer seg.liveStateLock.RUnlock()
+		seg.metadata.EndOffset = seg.nextOffset - 1
 		seg.metadata.FirstMsgTimestamp = time.Unix(0, seg.firstMsgTs)
 		seg.metadata.LastMsgTimestamp = time.Unix(0, seg.lastMsgTs)
 	}
@@ -324,10 +342,12 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 	seg.segLock.RUnlock()
 
 	if !metadata.Immutable {
-		if seg.nextOffSet == metadata.StartOffset {
+		seg.liveStateLock.RLock()
+		defer seg.liveStateLock.RUnlock()
+		if seg.nextOffset == metadata.StartOffset {
 			metadata.EndOffset = -1
 		} else {
-			metadata.EndOffset = seg.nextOffSet - 1
+			metadata.EndOffset = seg.nextOffset - 1
 		}
 		metadata.FirstMsgTimestamp = time.Unix(0, seg.firstMsgTs)
 		metadata.LastMsgTimestamp = time.Unix(0, seg.lastMsgTs)
@@ -343,10 +363,12 @@ func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 	sOff = seg.metadata.StartOffset
 	eOff = seg.metadata.EndOffset
 	if !seg.metadata.Immutable {
-		if seg.nextOffSet == sOff {
+		seg.liveStateLock.RLock()
+		defer seg.liveStateLock.RUnlock()
+		if seg.nextOffset == sOff {
 			eOff = -1
 		} else {
-			eOff = seg.nextOffSet - 1
+			eOff = seg.nextOffset - 1
 		}
 	}
 	return
@@ -356,10 +378,11 @@ func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 func (seg *BadgerSegment) GetMsgTimestampRange() (fMsgTs int64, lMsgTs int64) {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
-	if seg.nextOffSet == seg.metadata.StartOffset {
-		// Segment is empty.
+	if seg.IsEmpty() {
 		return
 	}
+	seg.liveStateLock.RLock()
+	defer seg.liveStateLock.RUnlock()
 	fMsgTs = seg.firstMsgTs
 	lMsgTs = seg.lastMsgTs
 	return
@@ -557,7 +580,7 @@ func (seg *BadgerSegment) open() {
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// Segment is empty.
-			seg.nextOffSet = seg.metadata.StartOffset
+			seg.nextOffset = seg.metadata.StartOffset
 			seg.firstMsgTs = -1
 			seg.lastMsgTs = -1
 			seg.lastRLogIdx = -1
@@ -599,7 +622,7 @@ func (seg *BadgerSegment) open() {
 			ts := fetchTimestampFromMessage(item)
 			if dir {
 				// We are scanning in reverse direction. Set last append ts and next offset.
-				seg.nextOffSet = seg.keyToOffset(key) + 1
+				seg.nextOffset = seg.keyToOffset(key) + 1
 				seg.lastMsgTs = ts
 			} else {
 				// Scanning in forward direction. Set the first append timestamp.
@@ -610,5 +633,5 @@ func (seg *BadgerSegment) open() {
 		itr.Close()
 	}
 	seg.logger.VInfof(0, "First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
-		"Last RLog Index: %d", seg.firstMsgTs, seg.lastMsgTs, seg.nextOffSet, seg.lastRLogIdx)
+		"Last RLog Index: %d", seg.firstMsgTs, seg.lastMsgTs, seg.nextOffset, seg.lastRLogIdx)
 }
