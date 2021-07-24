@@ -3,6 +3,7 @@ package segments
 import (
 	SegmentsFB "eeylops/generated/flatbuf/server/storage/segments"
 	"eeylops/server/base"
+	"eeylops/util"
 	flatbuf "github.com/google/flatbuffers/go"
 )
 
@@ -25,6 +26,16 @@ func makeMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalSize
 		msg := SegmentsFB.MessageEnd(builder)
 		builder.Finish(msg)
 		retValues = append(retValues, builder.FinishedBytes())
+	}
+	return
+}
+
+func makeMessageValuesV2(values [][]byte, ts int64) (retValues [][]byte, totalSize int64) {
+	totalSize = 0
+	for _, value := range values {
+		totalSize += int64(len(value))
+		newVal := append(util.UintToBytes(uint64(ts)), value...)
+		retValues = append(retValues, newVal)
 	}
 	return
 }

@@ -6,6 +6,8 @@ import (
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
+	"github.com/golang/glog"
+	"math/rand"
 	"testing"
 	"time"
 )
@@ -36,7 +38,6 @@ func checkMetadata(t *testing.T, got *SegmentMetadata, expected *SegmentMetadata
 }
 
 func TestBadgerSegment(t *testing.T) {
-	fmt.Println("Started badger tests!")
 	util.LogTestMarker("TestBadgerSegment")
 	dataDir := util.CreateTestDir(t, "TestBadgerSegment")
 	initialMeta := SegmentMetadata{
@@ -209,4 +210,53 @@ func TestBadgerSegment(t *testing.T) {
 	if err != nil {
 		logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
+}
+
+func TestBadgerSegment_Append(t *testing.T) {
+	util.LogTestMarker("TestBadgerSegment_Append")
+	dataDir := util.CreateTestDir(t, "TestBadgerSegment_Append")
+	initialMeta := SegmentMetadata{
+		ID:               100,
+		Immutable:        false,
+		StartOffset:      10000,
+		EndOffset:        -1,
+		CreatedTimestamp: time.Now(),
+		ImmutableReason:  0,
+	}
+	opts := BadgerSegmentOpts{
+		RootDir:     dataDir,
+		Logger:      nil,
+		Topic:       "topic1",
+		PartitionID: 1,
+	}
+	bds, err := NewBadgerSegment(&opts)
+	if err != nil {
+		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+	}
+	bds.SetMetadata(initialMeta)
+	bds.Open()
+	batchSize := 10
+	numIters := 1000
+	lastRLogIdx := int64(0)
+	token := make([]byte, 1024*1024)
+	rand.Read(token)
+	var values [][]byte
+	for ii := 0; ii < batchSize; ii++ {
+		values = append(values, token)
+	}
+	now := time.Now().UnixNano()
+	var arg AppendEntriesArg
+	arg.Entries = values
+	arg.Timestamp = now
+	start := time.Now()
+	for iter := 0; iter < numIters; iter++ {
+		lastRLogIdx++
+		arg.RLogIdx = lastRLogIdx
+		ret := bds.Append(context.Background(), &arg)
+		if ret.Error != nil {
+			logger.Fatalf("Unable to append values to segment due to err: %s", ret.Error.Error())
+		}
+	}
+	elapsed := time.Since(start)
+	glog.Infof("Total time: %v, average time: %v", elapsed, elapsed/time.Duration(numIters))
 }
