@@ -1,9 +1,0 @@
-// myschema.fbs
-namespace server.storage.segments;
-
-table Message {
-  timestamp:long;
-  body: [byte];
-}
-
-root_type Message;

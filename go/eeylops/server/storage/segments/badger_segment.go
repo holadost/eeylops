@@ -176,7 +176,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	oldNextOffset := seg.nextOffset
 	// Convert entries into (key, value) pairs
 	keys := seg.generateKeys(seg.nextOffset, base.Offset(len(arg.Entries)))
-	values, totalSize := makeMessageValues(arg.Entries, arg.Timestamp)
+	values, totalSize := PrepareMessageValues(arg.Entries, arg.Timestamp)
 
 	// Add an index entry if required.
 	var indexEntry []byte
@@ -276,7 +276,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 	defer scanner.Close()
 	bytesScannedSoFar := int64(0)
 	for ; scanner.Valid(); scanner.Next() {
-		key, msg, err := scanner.GetItem()
+		key, val, err := scanner.GetItem()
 		if err != nil {
 			seg.logger.Errorf("Failed to scan offset due to scan backend err: %s", err.Error())
 			ret.Error = ErrSegmentBackend
@@ -285,18 +285,18 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 			break
 		}
 		offset := seg.keyToOffset(key)
-		msgFB := SegmentsFB.GetRootAsMessage(msg, 0)
+		var msg Message
+		msg.InitializeFromRaw(val)
 		if arg.ScanSizeBytes > 0 {
-			bytesScannedSoFar += int64(msgFB.BodyLength())
-			if bytesScannedSoFar > arg.ScanSizeBytes {
+			bytesScannedSoFar += int64(msg.GetBodySize())
+			if bytesScannedSoFar >= arg.ScanSizeBytes {
 				break
 			}
 		}
-		val, ts := fetchValueFromMessageFB(msgFB)
 		ret.Values = append(ret.Values, &sbase.ScanValue{
 			Offset:    offset,
-			Value:     val,
-			Timestamp: ts,
+			Value:     msg.GetBody(),
+			Timestamp: msg.GetTimestamp(),
 		})
 		ret.NextOffset = offset + 1
 		if offset == endOffset {
@@ -619,14 +619,15 @@ func (seg *BadgerSegment) open() {
 			}
 
 			// Set next offset and last appended timestamp for segment.
-			ts := fetchTimestampFromMessage(item)
+			var msg Message
+			msg.InitializeFromRaw(item)
 			if dir {
 				// We are scanning in reverse direction. Set last append ts and next offset.
 				seg.nextOffset = seg.keyToOffset(key) + 1
-				seg.lastMsgTs = ts
+				seg.lastMsgTs = msg.GetTimestamp()
 			} else {
 				// Scanning in forward direction. Set the first append timestamp.
-				seg.firstMsgTs = ts
+				seg.firstMsgTs = msg.GetTimestamp()
 			}
 			break
 		}
