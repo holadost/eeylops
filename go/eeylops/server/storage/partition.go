@@ -358,7 +358,6 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 	// The values are present across multiple segments. Merge them before returning.
 	var scanSizeBytes int
 	scanSizeBytes = 0
-	p.logger.VInfof(1, "Gathering values from multiple(%d) segments", len(segs))
 	numPendingMsgs := arg.NumMessages
 	for ii, seg := range segs {
 		if numPendingMsgs == 0 {
