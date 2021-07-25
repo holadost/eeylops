@@ -1,23 +1,17 @@
 package segments
 
 import (
-	SegmentsFB "eeylops/generated/flatbuf/server/storage/segments"
+	"bytes"
 	"eeylops/server/base"
 	"eeylops/util"
+	"encoding/gob"
 	"github.com/golang/glog"
-	flatbuf "github.com/google/flatbuffers/go"
 )
 
 type Message struct {
 	body      []byte
 	timestamp int64
 	raw       []byte
-}
-
-func NewMessage() *Message {
-	msg := new(Message)
-	msg.Clear()
-	return msg
 }
 
 func (msg *Message) Clear() {
@@ -91,12 +85,48 @@ func PrepareMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalS
 	return
 }
 
-func makeIndexEntry(ts int64, offset base.Offset) []byte {
-	builder := flatbuf.NewBuilder(8)
-	SegmentsFB.IndexEntryStart(builder)
-	SegmentsFB.IndexEntryAddTimestamp(builder, ts)
-	SegmentsFB.IndexEntryAddOffset(builder, int64(offset))
-	msg := SegmentsFB.IndexEntryEnd(builder)
-	builder.Finish(msg)
-	return builder.FinishedBytes()
+type TimestampIndexEntry struct {
+	Timestamp int64
+	Offset    base.Offset
+}
+
+func (tse *TimestampIndexEntry) Clear() {
+	tse.Timestamp = -1
+	tse.Offset = -1
+}
+
+func (tse *TimestampIndexEntry) GetTimestamp() int64 {
+	return tse.Timestamp
+}
+
+func (tse *TimestampIndexEntry) SetTimestamp(ts int64) {
+	tse.Timestamp = ts
+}
+
+func (tse *TimestampIndexEntry) GetOffset() base.Offset {
+	return tse.Offset
+}
+
+func (tse *TimestampIndexEntry) SetOffset(offset base.Offset) {
+	tse.Offset = offset
+}
+
+func (tse *TimestampIndexEntry) InitializeFromRaw(raw []byte) {
+	tse.Clear()
+	dec := gob.NewDecoder(bytes.NewBuffer(raw))
+	err := dec.Decode(tse)
+	if err != nil {
+		glog.Fatalf("Unable to initialize timestamp index entry from raw input: %s due to err: %s",
+			string(raw), err.Error())
+	}
+}
+
+func (tse *TimestampIndexEntry) Serialize() []byte {
+	var w bytes.Buffer
+	enc := gob.NewEncoder(&w)
+	err := enc.Encode(tse)
+	if err != nil {
+		glog.Fatalf("Unable to prepare index entry due to err: %s", err.Error())
+	}
+	return w.Bytes()
 }

@@ -3,7 +3,6 @@ package segments
 import (
 	"bytes"
 	"context"
-	SegmentsFB "eeylops/generated/flatbuf/server/storage/segments"
 	"eeylops/server/base"
 	sbase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
@@ -50,9 +49,9 @@ type BadgerSegment struct {
 
 	// States used for timestamp based indexes on messages written to the segment.
 	currentIndexBatchSizeBytes int64                    // Current index size in bytes.
-	timestampIndex             []*SegmentsFB.IndexEntry // Timestamp index.
+	timestampIndex             []TimestampIndexEntry    // Timestamp index.
 	timestampIndexLock         sync.RWMutex             // This protects timestampIndex
-	timestampIndexChan         chan []byte              // The channel where the timestamp indexes are forwarded.
+	timestampIndexChan         chan TimestampIndexEntry // The channel where the timestamp indexes are forwarded.
 	rebuildIndexOnce           sync.Once                // Mutex to protect us from building indexes only once.
 
 }
@@ -97,7 +96,7 @@ func (seg *BadgerSegment) initialize() {
 		seg.logger.Infof("Did not find any metadata associated with this segment. This must be a new segment!")
 	}
 	seg.segmentClosedChan = make(chan struct{}, 1)
-	seg.timestampIndexChan = make(chan []byte, 128)
+	seg.timestampIndexChan = make(chan TimestampIndexEntry, 128)
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
@@ -179,14 +178,15 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	values, totalSize := PrepareMessageValues(arg.Entries, arg.Timestamp)
 
 	// Add an index entry if required.
-	var indexEntry []byte
-	indexEntry = nil
+	var tse TimestampIndexEntry
+	tse.Clear()
 	if seg.currentIndexBatchSizeBytes >= kIndexEveryNBytes {
 		// We have crossed the threshold. Add an index entry with the current timestamp.
 		seg.currentIndexBatchSizeBytes = 0
 		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(len(seg.timestampIndex)))...))
-		indexEntry = makeIndexEntry(arg.Timestamp, seg.nextOffset)
-		values = append(values, indexEntry)
+		tse.SetTimestamp(arg.Timestamp)
+		tse.SetOffset(seg.nextOffset)
+		values = append(values, tse.Serialize())
 	}
 	seg.currentIndexBatchSizeBytes += totalSize
 
@@ -208,9 +208,9 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		// These were the first messages appended to the segment. Save the first message timestamp.
 		firstMsgTs = arg.Timestamp
 	}
-	if indexEntry != nil {
+	if tse.GetTimestamp() != -1 {
 		// Notify indexer with the new index entry that was created.
-		seg.notifyIndexer(indexEntry)
+		seg.notifyIndexer(tse)
 	}
 	// Save the replicated log index, last message timestamp and nextOffset for future appends and scans.
 	seg.liveStateLock.Lock()
@@ -452,19 +452,19 @@ func (seg *BadgerSegment) indexer() {
 		case <-seg.segmentClosedChan:
 			seg.logger.VInfof(0, "Indexer exiting")
 			return
-		case tsVal := <-seg.timestampIndexChan:
-			seg.updateTimestampIndex(tsVal)
+		case tse := <-seg.timestampIndexChan:
+			seg.updateTimestampIndex(tse)
 		}
 	}
 }
 
 // notifyIndexer is called by Append when a new index entry needs to be added to the timestamp index.
-func (seg *BadgerSegment) notifyIndexer(val []byte) {
-	seg.timestampIndexChan <- val
+func (seg *BadgerSegment) notifyIndexer(tse TimestampIndexEntry) {
+	seg.timestampIndexChan <- tse
 }
 
 // updateTimestampIndex is called by the indexer when it receives an index entry on timestampIndexChan.
-func (seg *BadgerSegment) updateTimestampIndex(val []byte) {
+func (seg *BadgerSegment) updateTimestampIndex(tse TimestampIndexEntry) {
 	// Acquire write lock on the timestamp index as we are about to modify it.
 	seg.timestampIndexLock.Lock()
 	defer seg.timestampIndexLock.Unlock()
@@ -473,7 +473,7 @@ func (seg *BadgerSegment) updateTimestampIndex(val []byte) {
 		seg.logger.Warningf("Either segment is closed or never opened. Skipping timestamp index updates")
 		return
 	}
-	seg.timestampIndex = append(seg.timestampIndex, SegmentsFB.GetRootAsIndexEntry(val, 0))
+	seg.timestampIndex = append(seg.timestampIndex, tse)
 }
 
 // getNearestSmallerOffsetFromIndex returns the first offset that is smaller than the given timestamp. This method
@@ -485,8 +485,8 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 		// There are no indexes. Return the smallest offset.
 		return seg.metadata.StartOffset
 	}
-	if ts > seg.timestampIndex[len(seg.timestampIndex)-1].Timestamp() {
-		return base.Offset(seg.timestampIndex[len(seg.timestampIndex)-1].Offset())
+	if ts > seg.timestampIndex[len(seg.timestampIndex)-1].GetTimestamp() {
+		return seg.timestampIndex[len(seg.timestampIndex)-1].GetOffset()
 	}
 
 	// Binary search index to find nearest offset lesser than the given timestamp.
@@ -498,7 +498,7 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 			break
 		}
 		mid := left + (right-left)/2
-		if seg.timestampIndex[mid].Timestamp() >= ts {
+		if seg.timestampIndex[mid].GetTimestamp() >= ts {
 			// Move to the left half in the next iteration as the right half >= ts.
 			right = mid - 1
 		} else {
@@ -513,7 +513,7 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 	if nearestIdx == -1 {
 		return base.Offset(-1)
 	}
-	return base.Offset(seg.timestampIndex[nearestIdx].Offset())
+	return seg.timestampIndex[nearestIdx].GetOffset()
 }
 
 // rebuildIndexes is called by the indexer when the segment is opened for the first time.
@@ -553,8 +553,9 @@ func (seg *BadgerSegment) rebuildIndexes() {
 			if idxNum != count {
 				seg.logger.Fatalf("Expected to find index id: %d, got: %d", count, idxNum)
 			}
-			entry := SegmentsFB.GetRootAsIndexEntry(val, 0)
-			seg.timestampIndex = append(seg.timestampIndex, entry)
+			var tse TimestampIndexEntry
+			tse.InitializeFromRaw(val)
+			seg.timestampIndex = append(seg.timestampIndex, tse)
 			count++
 		}
 		seg.logger.VInfof(1, "Found %d index entries persisted in segment", len(seg.timestampIndex))

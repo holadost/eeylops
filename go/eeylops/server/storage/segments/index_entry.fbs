@@ -1,9 +1,0 @@
-// myschema.fbs
-namespace server.storage.segments;
-
-table IndexEntry {
-  timestamp:long;
-  offset:long;
-}
-
-root_type IndexEntry;
