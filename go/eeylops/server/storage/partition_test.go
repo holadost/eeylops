@@ -384,8 +384,8 @@ func TestPartitionManager(t *testing.T) {
 	if sret.Error != nil {
 		glog.Fatalf("Unexpected error while scanning: %s", sret.Error.Error())
 	}
-	if len(sret.Values) != expectedNumValues {
-		glog.Fatalf("Expected only %d messages but we got: %d", expectedNumValues, len(sret.Values))
+	if len(sret.Values) > expectedNumValues {
+		glog.Fatalf("Expected <= %d messages but we got: %d", expectedNumValues, len(sret.Values))
 	}
 
 	// Test segment expiry.
@@ -431,8 +431,9 @@ func TestPartitionManager(t *testing.T) {
 	if sret.Error != nil {
 		glog.Fatalf("Unexpected error while scanning: %s", sret.Error.Error())
 	}
-	if len(sret.Values) != expectedNumValues {
-		glog.Fatalf("Expected only %d messages but we got: %d", expectedNumValues, len(sret.Values))
+	if len(sret.Values) != expectedNumValues && len(sret.Values) != expectedNumValues-1 {
+		glog.Fatalf("Expected only (%d or %d) messages but we got: %d", expectedNumValues-1,
+			expectedNumValues, len(sret.Values))
 	}
 	if sret.NextOffset != expectedNextOffset {
 		glog.Fatalf("Expected next offset: %d, got: %d", expectedNextOffset, sret.NextOffset)

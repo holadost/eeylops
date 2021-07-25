@@ -289,7 +289,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 		msg.InitializeFromRaw(val)
 		if arg.ScanSizeBytes > 0 {
 			bytesScannedSoFar += int64(msg.GetBodySize())
-			if bytesScannedSoFar >= arg.ScanSizeBytes {
+			if bytesScannedSoFar > arg.ScanSizeBytes {
 				break
 			}
 		}

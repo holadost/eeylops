@@ -21,6 +21,6 @@ func CreateTestDir(t *testing.T, testName string) string {
 }
 
 func LogTestMarker(testName string) {
-	glog.Infof("\n\n============================================================ %s "+
-		"============================================================\n\n", testName)
+	glog.InfoDepth(1, fmt.Sprintf("\n\n============================================================ %s "+
+		"============================================================\n\n", testName))
 }

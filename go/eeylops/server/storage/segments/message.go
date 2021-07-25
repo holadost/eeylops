@@ -76,11 +76,11 @@ func PrepareMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalS
 	totalSize = 0
 	retValues = make([][]byte, len(values))
 	for ii, value := range values {
+		totalSize += int64(len(value))
 		var msg Message
 		msg.SetTimestamp(ts)
 		msg.SetBody(value)
 		retValues[ii] = msg.Serialize()
-		totalSize += int64(len(retValues[ii]))
 	}
 	return
 }
