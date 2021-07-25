@@ -28,6 +28,7 @@ type BadgerSegment struct {
 	rootDir     string             // Root directory of this segment.
 	topicName   string             // Topic name.
 	partitionID uint               // Partition ID.
+	ttlSeconds  int64              // TTL seconds for a message.
 	dataDB      kv_store.KVStore   // Backing KV store to hold the data.
 	metadataDB  *SegmentMetadataDB // Segment metadata DB.
 
@@ -256,25 +257,42 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 		ret.NextOffset = -1
 		return &ret
 	}
+
+	// Compute start and end offsets for the scan.
+	var startOffset base.Offset
+	if arg.StartOffset >= 0 {
+		startOffset = arg.StartOffset
+	} else {
+		if arg.StartTimestamp <= 0 {
+			seg.logger.Fatalf("Expected timestamp to be > 0")
+		}
+		var err error
+		startOffset, err = seg.findFirstOffsetWithTimestampGE(arg.StartTimestamp)
+		if err != nil {
+			seg.logger.Errorf("Failed to find start offset due to err: %s", err.Error())
+			ret.Error = ErrSegmentBackend
+			return &ret
+		}
+	}
+	if startOffset == -1 {
+		seg.logger.Errorf("Unable to determine any good start offset for start offset: %d, start timestamp: %d",
+			arg.StartOffset, arg.StartTimestamp)
+		ret.Error = ErrSegmentInvalid
+		return &ret
+	}
 	var tmpNumMsgs base.Offset
 	var endOffset base.Offset
 	var sk []byte
 	tmpNumMsgs = base.Offset(arg.NumMessages)
-
-	// Compute the keys that need to be fetched using the start offset.
-	if arg.StartOffset >= 0 {
-		if arg.StartOffset+tmpNumMsgs >= seg.nextOffset {
-			tmpNumMsgs = seg.nextOffset - arg.StartOffset
-		}
-		endOffset = arg.StartOffset + tmpNumMsgs - 1
-		sk = seg.offsetToKey(arg.StartOffset)
-	} else if arg.StartTimestamp > 0 {
-		// TODO: Use index db and scan the store to find the sk. Set the endOffset accordingly.
+	if startOffset+tmpNumMsgs >= seg.nextOffset {
+		tmpNumMsgs = seg.nextOffset - startOffset
 	}
-
+	endOffset = startOffset + tmpNumMsgs - 1
+	sk = seg.offsetToKey(startOffset)
 	scanner := seg.dataDB.CreateScanner(KOffSetPrefixBytes, sk, false)
 	defer scanner.Close()
 	bytesScannedSoFar := int64(0)
+	// now := time.Now().UnixNano()
 	for ; scanner.Valid(); scanner.Next() {
 		key, val, err := scanner.GetItem()
 		if err != nil {
@@ -287,9 +305,19 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 		offset := seg.keyToOffset(key)
 		var msg Message
 		msg.InitializeFromRaw(val)
+		//if seg.hasValueExpired(msg.GetTimestamp(), now) {
+		//	// Skip this value as it has already expired.
+		//	continue
+		//}
 		if arg.ScanSizeBytes > 0 {
 			bytesScannedSoFar += int64(msg.GetBodySize())
 			if bytesScannedSoFar > arg.ScanSizeBytes {
+				break
+			}
+		}
+		if arg.EndTimestamp > 0 {
+			if msg.GetTimestamp() >= arg.EndTimestamp {
+				// Return all records smaller than EndTimestamp.
 				break
 			}
 		}
@@ -302,6 +330,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 		if offset == endOffset {
 			break
 		}
+
 	}
 	return &ret
 }
@@ -375,17 +404,15 @@ func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 }
 
 // GetMsgTimestampRange returns the first and last message unix timestamps(in nanoseconds).
-func (seg *BadgerSegment) GetMsgTimestampRange() (fMsgTs int64, lMsgTs int64) {
+func (seg *BadgerSegment) GetMsgTimestampRange() (int64, int64) {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	if seg.IsEmpty() {
-		return
+		return -1, -1
 	}
 	seg.liveStateLock.RLock()
 	defer seg.liveStateLock.RUnlock()
-	fMsgTs = seg.firstMsgTs
-	lMsgTs = seg.lastMsgTs
-	return
+	return seg.firstMsgTs, seg.lastMsgTs
 }
 
 // SetMetadata sets the metadata for the segment.
@@ -399,6 +426,30 @@ func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
 // Stats returns the stats of the segment.
 func (seg *BadgerSegment) Stats() {
 
+}
+
+// findFirstOffsetWithTimestampGE finds the first offset in the segment whose timestamp >= given ts.
+func (seg *BadgerSegment) findFirstOffsetWithTimestampGE(ts int64) (base.Offset, error) {
+	startOffsetHint := seg.getNearestSmallerOffsetFromIndex(ts)
+	if startOffsetHint == -1 {
+		return -1, ErrSegmentInvalidTimestamp
+	}
+	scanner := seg.dataDB.CreateScanner(KOffSetPrefixBytes, seg.offsetToKey(startOffsetHint), false)
+	for ; scanner.Valid(); scanner.Next() {
+		key, val, err := scanner.GetItem()
+		if err != nil {
+			seg.logger.Errorf("Failure while scanning the segment. Error: %s", err.Error())
+			return -1, ErrSegmentBackend
+		}
+		offset := seg.keyToOffset(key)
+		var msg Message
+		msg.InitializeFromRaw(val)
+		if ts > msg.GetTimestamp() {
+			continue
+		}
+		return offset, nil
+	}
+	return -1, nil
 }
 
 // generateKeys generates keys based on the given startOffset and numMessages.
@@ -439,6 +490,9 @@ func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
 
 // hasValueExpired returns true if the value has expired. False otherwise.
 func (seg *BadgerSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
+	if (nowNano-tsNano)/(10e9) >= seg.ttlSeconds {
+		return true
+	}
 	return false
 }
 
