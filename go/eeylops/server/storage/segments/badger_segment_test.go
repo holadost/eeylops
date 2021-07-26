@@ -1,6 +1,7 @@
 package segments
 
 import (
+	"bytes"
 	"context"
 	"eeylops/server/base"
 	"eeylops/util"
@@ -34,6 +35,70 @@ func checkMetadata(t *testing.T, got *SegmentMetadata, expected *SegmentMetadata
 	if got.Expired != expected.Expired {
 		logger.Fatalf("Expired mismatch. Expected: %v, Got: %v",
 			expected.Expired, got.Expired)
+	}
+}
+
+type testWorkload struct {
+	lastOffsetAppended base.Offset
+}
+
+func newTestWorkload() *testWorkload {
+	var tw testWorkload
+	tw.lastOffsetAppended = -1
+	return &tw
+}
+
+func (tw *testWorkload) appendMessages(startOffset base.Offset, seg *BadgerSegment, numMessages int, payloadSize int,
+	timestamp int64, rlogIdx int64) {
+	if startOffset <= tw.lastOffsetAppended {
+		glog.Fatalf("Incorrect start offset provided. Last offset appended to segment: %d, provided: %d",
+			tw.lastOffsetAppended, startOffset)
+	}
+	msg := make([]byte, payloadSize)
+	rand.Read(msg)
+	var values [][]byte
+	for ii := startOffset; ii < startOffset+base.Offset(numMessages); ii++ {
+		value := append(append([]byte("value-"), util.UintToBytes(uint64(ii))...), msg...)
+		values = append(values, value)
+	}
+	arg := &AppendEntriesArg{}
+	arg.Entries = values
+	arg.Timestamp = timestamp
+	arg.RLogIdx = rlogIdx
+	ret := seg.Append(context.Background(), arg)
+	if ret.Error != nil {
+		glog.Fatalf("Got error while appending: %s", ret.Error.Error())
+	}
+	tw.lastOffsetAppended = startOffset + base.Offset(len(values)) - 1
+}
+
+func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages int, startTs int64, endTs int64) {
+	var arg ScanEntriesArg
+	arg.StartTimestamp = startTs
+	arg.EndTimestamp = endTs
+	arg.NumMessages = uint64(numMessages)
+	ret := seg.Scan(context.Background(), &arg)
+	if ret.Error != nil {
+		glog.Fatalf("Got error while scanning: %s", ret.Error.Error())
+	}
+	if len(ret.Values) > numMessages {
+		glog.Fatalf("Expected <= %d messages, got: %d", numMessages, len(ret.Values))
+	}
+	for _, value := range ret.Values {
+		if !((value.Timestamp >= startTs) && (value.Timestamp < endTs)) {
+			glog.Fatalf("Expected value timestamp: %d to fall between [%d, %d]", value.Timestamp, startTs, endTs)
+		}
+		if value.Offset > tw.lastOffsetAppended {
+			glog.Fatalf("Incorrect offset. Expected offset <= %d, got: %d", tw.lastOffsetAppended, value.Offset)
+		}
+		valueBytes, offsetNumBytes := value.Value[0:6], value.Value[6:14]
+		if bytes.Compare(valueBytes, []byte("value-")) != 0 {
+			glog.Fatalf("Value mismatch. Expected: value-, got: %s", string(valueBytes))
+		}
+		valOffset := base.Offset(util.BytesToUint(offsetNumBytes))
+		if valOffset != value.Offset {
+			glog.Fatalf("Offset mismatch. Expected offset: %d, got from value: %d", value.Offset, valOffset)
+		}
 	}
 }
 
@@ -211,6 +276,48 @@ func TestBadgerSegment(t *testing.T) {
 	if err != nil {
 		logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
+}
+
+func TestBadgerSegment_Scan(t *testing.T) {
+	util.LogTestMarker("TestBadgerSegment_Scan")
+	dataDir := util.CreateTestDir(t, "TestBadgerSegment_Scan")
+	initialMeta := SegmentMetadata{
+		ID:               100,
+		Immutable:        false,
+		StartOffset:      10000,
+		EndOffset:        -1,
+		CreatedTimestamp: time.Now(),
+		ImmutableReason:  0,
+	}
+	opts := BadgerSegmentOpts{
+		RootDir:     dataDir,
+		Logger:      nil,
+		Topic:       "topic1",
+		PartitionID: 1,
+		TTLSeconds:  86400,
+	}
+	bds, err := NewBadgerSegment(&opts)
+	if err != nil {
+		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+	}
+	bds.SetMetadata(initialMeta)
+	bds.Open()
+	batchSize := 10
+	numIters := 5
+	var timestamps []int64
+	lastRLogIdx := int64(0)
+	tw := newTestWorkload()
+	for ii := 0; ii < numIters; ii++ {
+		now := time.Now().UnixNano()
+		tw.appendMessages(base.Offset(ii*batchSize), bds, batchSize, 4096, now, lastRLogIdx)
+		lastRLogIdx++
+		timestamps = append(timestamps, now)
+		time.Sleep(time.Millisecond * 10)
+	}
+	for ii := 0; ii < numIters-1; ii++ {
+		tw.scanMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1])
+	}
+
 }
 
 func TestBadgerSegment_Append(t *testing.T) {
