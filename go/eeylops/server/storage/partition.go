@@ -187,12 +187,12 @@ func (p *Partition) initialize() {
 	// Initialize segments.
 	segmentIds := p.getFileSystemSegments()
 	for ii, segmentID := range segmentIds {
-		// TODO: In the future, create a factory func here that will return segment based on type.
 		opts := segments.BadgerSegmentOpts{
 			RootDir:     p.getSegmentDirectory(segmentID),
 			Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segmentID), p.logger),
 			Topic:       p.topicName,
 			PartitionID: uint(p.partitionID),
+			TTLSeconds:  p.ttlSeconds,
 		}
 		segment, err := segments.NewBadgerSegment(&opts)
 		if err != nil {
@@ -641,6 +641,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 			Logger:      p.logger,
 			Topic:       p.topicName,
 			PartitionID: uint(p.partitionID),
+			TTLSeconds:  p.ttlSeconds,
 		}
 		seg, err = segments.NewBadgerSegment(&opts)
 		if err != nil {
@@ -670,6 +671,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 		Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segID), p.logger),
 		Topic:       p.topicName,
 		PartitionID: uint(p.partitionID),
+		TTLSeconds:  p.ttlSeconds,
 	}
 	newSeg, err := segments.NewBadgerSegment(&opts)
 	if err != nil {

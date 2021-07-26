@@ -62,6 +62,7 @@ type BadgerSegmentOpts struct {
 	Logger      *logging.PrefixLogger // Parent logger if any. Optional parameter.
 	Topic       string                // Topic name. Optional parameter.
 	PartitionID uint                  // Partition ID. Optional parameter.
+	TTLSeconds  int                   // TTL seconds for messages.
 }
 
 // NewBadgerSegment initializes a new instance of badger segment.
