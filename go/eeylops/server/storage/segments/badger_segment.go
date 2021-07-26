@@ -396,7 +396,7 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 				seg.logger.Errorf("Unable to find any live records in the segment")
 				ret.Error = nil
 				ret.NextOffset = -1
-				return -1, errors.New("no live records found in segment")
+				return -1, ErrSegmentNoRecordsWithTimestamp
 			}
 		} else {
 			// The value hasn't expired. Check if only one value was requested and if so, we can return early here
@@ -409,7 +409,7 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 				})
 				ret.Error = nil
 				ret.NextOffset = arg.StartOffset + 1
-				return -1, errors.New("scan finished, we can return early")
+				return -1, errSegmentScanDoneEarly
 			}
 		}
 	} else {
@@ -428,7 +428,7 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 			seg.logger.VInfof(1, "Unable to find any messages with timestamp >= %d", arg.StartTimestamp)
 			ret.Error = nil
 			ret.NextOffset = -1
-			return -1, errors.New("no live records found in segment")
+			return -1, ErrSegmentNoRecordsWithTimestamp
 		}
 	}
 	// Sanity check to make sure that we have a start offset.

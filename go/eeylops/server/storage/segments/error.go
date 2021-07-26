@@ -4,7 +4,6 @@ import "errors"
 
 var (
 	// ErrSegmentGeneric when we have an unexpected segment error.
-	ErrSegmentGeneric = errors.New("ErrSegmentGeneric: generic segment error")
 
 	// ErrSegmentBackend when we have an unexpected segment error.
 	ErrSegmentBackend = errors.New("ErrSegmentBackend: segment backend error")
@@ -18,6 +17,9 @@ var (
 	ErrSegmentInvalidRLogIdx   = errors.New("ErrSegmentInvalidRLogIdx: invalid replicated log index")
 	ErrSegmentInvalidTimestamp = errors.New("ErrSegmentInvalidTimestamp: invalid timestamp")
 
-	// ErrSegmentIndexDBBackend is returned if there was an issue with the segment index db's backend.
-	ErrSegmentIndexDBBackend = errors.New("ErrSegmentInvalidTimestamp: invalid timestamp")
+	// ErrSegmentNoRecordsWithTimestamp is returned when no live records were found in the segment.
+	ErrSegmentNoRecordsWithTimestamp = errors.New("no records found in segment with given timestamp")
+
+	// errSegmentScanDoneEarly is returned when the scan finished early. Used internally.
+	errSegmentScanDoneEarly = errors.New("scan finished. return early")
 )
