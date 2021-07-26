@@ -207,13 +207,16 @@ func (p *Partition) initialize() {
 			}
 			p.logger.Infof("Last segment: %d wasn't initialized properly in the previous incarnation. "+
 				"Reinitializing now!", segmentID)
-			prevSeg := p.segments[len(p.segments)-1]
 			metadata := segments.SegmentMetadata{
 				ID:               uint64(segmentID),
 				Immutable:        false,
 				Expired:          false,
 				CreatedTimestamp: time.Now(),
-				StartOffset:      prevSeg.GetMetadata().EndOffset + 1,
+				StartOffset:      0, // Setting it to 0 in case the very first initialization failed.
+			}
+			if len(p.segments) != 0 {
+				prevSeg := p.segments[len(p.segments)-1]
+				metadata.StartOffset = prevSeg.GetMetadata().EndOffset + 1
 			}
 			segment.SetMetadata(metadata)
 		}
