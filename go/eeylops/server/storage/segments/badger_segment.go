@@ -344,7 +344,7 @@ func (seg *BadgerSegment) Stats() {
 }
 
 // sanitizeScanArg is a helper method to Scan that checks if the arguments provided are fine. If not, it populates
-// ret and returns an error.
+// ret and returns an error. This method assumes that the segLock has been acquired.
 func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesRet) error {
 	ret.Error = nil
 	if arg.StartOffset == -1 && arg.StartTimestamp == -1 {
@@ -373,10 +373,11 @@ func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesR
 	return ret.Error
 }
 
-// computeStartOffsetForScan computes the first offset from where the scan should start. If no such offset if found,
-// or if an offset is found and that was the only offset requested(in which case we populate ret and we can return
-// early and avoid reeading this message again), this method  will return an error. Otherwise, it will return the
-// start offset from where the can should start.
+// computeStartOffsetForScan is a helper method for Scan that computes the first offset from where the scan should
+// start. If no such offset if found, or if an offset is found and that was the only offset requested(in which case we
+// populate ret and we can return early and avoid re-reading this message again), this method  will return an error.
+// Otherwise, it will return the start offset from where the scan should start. This method assumes that the segLock
+// has been acquired.
 func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *ScanEntriesRet) (base.Offset, error) {
 	now := time.Now().UnixNano()
 	var startOffset base.Offset
@@ -440,7 +441,7 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 	return startOffset, nil
 }
 
-// scanMessages scans messages from the segment from the given startOffset.
+// scanMessages is a helper method for Scan which scans messages from the segment from the given startOffset.
 func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet, startOffset base.Offset) {
 	var tmpNumMsgs base.Offset
 	var endOffset base.Offset
@@ -562,6 +563,17 @@ func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
 		seg.logger.Fatalf("Expected timestamp index key. Got: %s", string(key))
 	}
 	return int(util.BytesToUint(key[len(kTimestampIndexPrefixKeyBytes):]))
+}
+
+// A helper method that lets us know if a key has started with the given prefix.
+func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool {
+	if len(key) < len(prefix) {
+		return false
+	}
+	if bytes.Compare(key[0:len(prefix)], prefix) != 0 {
+		return false
+	}
+	return true
 }
 
 // hasValueExpired returns true if the value has expired. False otherwise.
@@ -695,17 +707,6 @@ func (seg *BadgerSegment) rebuildIndexes() {
 	})
 }
 
-// A helper method that lets us know if a key has started with the given prefix.
-func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool {
-	if len(key) < len(prefix) {
-		return false
-	}
-	if bytes.Compare(key[0:len(prefix)], prefix) != 0 {
-		return false
-	}
-	return true
-}
-
 // Opens the segment. This method assumes that segLock has been acquired.
 func (seg *BadgerSegment) open() {
 	go seg.indexer()
@@ -767,6 +768,6 @@ func (seg *BadgerSegment) open() {
 		}
 		itr.Close()
 	}
-	seg.logger.VInfof(0, "First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
+	seg.logger.VInfof(1, "First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
 		"Last RLog Index: %d", seg.firstMsgTs, seg.lastMsgTs, seg.nextOffset, seg.lastRLogIdx)
 }
