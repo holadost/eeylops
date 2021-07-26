@@ -480,6 +480,74 @@ func TestBadgerSegment_Append(t *testing.T) {
 	glog.Infof("Total time: %v, average time: %v", elapsed, elapsed/time.Duration(numIters))
 }
 
+func TestBadgerSegment_AppendScanBM(t *testing.T) {
+	util.LogTestMarker("TestBadgerSegment_ScanBM")
+	dataDir := util.CreateTestDir(t, "TestBadgerSegment_ScanBM")
+	initialMeta := SegmentMetadata{
+		ID:               100,
+		Immutable:        false,
+		StartOffset:      0,
+		EndOffset:        -1,
+		CreatedTimestamp: time.Now(),
+		ImmutableReason:  0,
+	}
+	opts := BadgerSegmentOpts{
+		RootDir:     dataDir,
+		Logger:      nil,
+		Topic:       "topic1",
+		PartitionID: 1,
+		TTLSeconds:  86400,
+	}
+	bds, err := NewBadgerSegment(&opts)
+	if err != nil {
+		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+	}
+	bds.SetMetadata(initialMeta)
+	bds.Open()
+	batchSize := 10
+	numIters := 1000
+	lastRLogIdx := int64(0)
+	token := make([]byte, 32*1024) // 32KB
+	rand.Read(token)
+	var values [][]byte
+	for ii := 0; ii < batchSize; ii++ {
+		values = append(values, token)
+	}
+	now := time.Now().UnixNano()
+	var arg AppendEntriesArg
+	arg.Entries = values
+	arg.Timestamp = now
+	start := time.Now()
+	for iter := 0; iter < numIters; iter++ {
+		lastRLogIdx++
+		arg.RLogIdx = lastRLogIdx
+		ret := bds.Append(context.Background(), &arg)
+		if ret.Error != nil {
+			logger.Fatalf("Unable to append values to segment due to err: %s", ret.Error.Error())
+		}
+	}
+	elapsed := time.Since(start)
+	glog.Infof("Total time: %v, average time: %v", elapsed, elapsed/time.Duration(numIters))
+
+	// Scanning entries.
+	var sarg ScanEntriesArg
+	sarg.StartOffset = 0
+	sarg.NumMessages = uint64(batchSize)
+	sarg.StartTimestamp = -1
+	sarg.EndTimestamp = -1
+	defCtx := context.Background()
+	start = time.Now()
+	for iter := 0; iter < numIters; iter++ {
+		sarg.StartOffset = base.Offset(iter * batchSize)
+		sret := bds.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			logger.Fatalf("Unable to scan values due to err: %s", sret.Error.Error())
+		}
+	}
+	elapsed = time.Since(start)
+	glog.Infof("Total scan time: %v, Avg scan time: %v", elapsed, elapsed/time.Duration(numIters))
+}
+
 func TestBadgerSegment_Stress(t *testing.T) {
 	testName := "TestBadgerSegment_Stress"
 	util.LogTestMarker(testName)
