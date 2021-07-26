@@ -578,10 +578,7 @@ func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool
 
 // hasValueExpired returns true if the value has expired. False otherwise.
 func (seg *BadgerSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
-	seg.logger.Infof("Now Nano: %d, TS: %d, TTL: %d secs, Diff: %d", nowNano, tsNano, seg.ttlSeconds,
-		(nowNano-tsNano)/(10e9))
 	if (nowNano-tsNano)/(10e9) >= int64(seg.ttlSeconds) {
-		seg.logger.Infof("The value has expired!")
 		return true
 	}
 	return false
