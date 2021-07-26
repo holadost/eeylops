@@ -97,7 +97,7 @@ func prepareMessageValues(values [][]byte, ts int64, currIndexBatchSizeBytes int
 		valSize := int64(len(retValues[ii]))
 		pendingBeforeNextIndex -= valSize
 		if pendingBeforeNextIndex <= 0 {
-			pendingBeforeNextIndex = 0
+			pendingBeforeNextIndex = kIndexEveryNBytes
 			var entry TimestampIndexEntry
 			entry.SetOffset(nextOffset + base.Offset(ii))
 			entry.SetTimestamp(ts)
