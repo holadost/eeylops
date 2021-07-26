@@ -299,6 +299,8 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 		ret.Error = ErrPartitionClosed
 		return &ret
 	}
+
+	// Find the correct segments and start offset from where we must start scanning.
 	var startOffset base.Offset
 	numMsgsOffset := base.Offset(arg.NumMessages)
 	var segs []segments.Segment
@@ -339,6 +341,8 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 		startOffset, _ = p.segments[idx].GetRange()
 		segs = append(segs, p.segments[idx])
 	}
+
+	// Scan messages.
 	var sarg segments.ScanEntriesArg
 	sarg.StartOffset = startOffset
 	sarg.NumMessages = arg.NumMessages
