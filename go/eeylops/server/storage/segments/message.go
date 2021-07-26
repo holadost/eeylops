@@ -85,6 +85,28 @@ func PrepareMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalS
 	return
 }
 
+func prepareMessageValues(values [][]byte, ts int64, currIndexBatchSizeBytes int64, nextOffset base.Offset) ([][]byte, []TimestampIndexEntry, int64) {
+	var tse []TimestampIndexEntry
+	retValues := make([][]byte, len(values))
+	pendingBeforeNextIndex := kIndexEveryNBytes - currIndexBatchSizeBytes
+	for ii, value := range values {
+		var msg Message
+		msg.SetTimestamp(ts)
+		msg.SetBody(value)
+		retValues[ii] = msg.Serialize()
+		valSize := int64(len(retValues[ii]))
+		pendingBeforeNextIndex -= valSize
+		if pendingBeforeNextIndex <= 0 {
+			pendingBeforeNextIndex = 0
+			var entry TimestampIndexEntry
+			entry.SetOffset(nextOffset + base.Offset(ii))
+			entry.SetTimestamp(ts)
+			tse = append(tse, entry)
+		}
+	}
+	return retValues, tse, kIndexEveryNBytes - pendingBeforeNextIndex
+}
+
 type TimestampIndexEntry struct {
 	Timestamp int64
 	Offset    base.Offset

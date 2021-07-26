@@ -50,11 +50,11 @@ type BadgerSegment struct {
 	logger *logging.PrefixLogger // Logger object.
 
 	// States used for timestamp based indexes on messages written to the segment.
-	currentIndexBatchSizeBytes int64                    // Current index size in bytes.
-	timestampIndex             []TimestampIndexEntry    // Timestamp index.
-	timestampIndexLock         sync.RWMutex             // This protects timestampIndex
-	timestampIndexChan         chan TimestampIndexEntry // The channel where the timestamp indexes are forwarded.
-	rebuildIndexOnce           sync.Once                // Mutex to protect us from building indexes only once.
+	currentIndexBatchSizeBytes int64                      // Current index size in bytes.
+	timestampIndex             []TimestampIndexEntry      // Timestamp index.
+	timestampIndexLock         sync.RWMutex               // This protects timestampIndex
+	timestampIndexChan         chan []TimestampIndexEntry // The channel where the timestamp indexes are forwarded.
+	rebuildIndexOnce           sync.Once                  // Mutex to protect us from building indexes only once.
 
 }
 
@@ -100,7 +100,7 @@ func (seg *BadgerSegment) initialize() {
 		seg.logger.Infof("Did not find any metadata associated with this segment. This must be a new segment!")
 	}
 	seg.segmentClosedChan = make(chan struct{}, 1)
-	seg.timestampIndexChan = make(chan TimestampIndexEntry, 128)
+	seg.timestampIndexChan = make(chan []TimestampIndexEntry, 128)
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
@@ -179,20 +179,16 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	oldNextOffset := seg.nextOffset
 	// Convert entries into (key, value) pairs
 	keys := seg.generateKeys(seg.nextOffset, base.Offset(len(arg.Entries)))
-	values, totalSize := PrepareMessageValues(arg.Entries, arg.Timestamp)
+	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp, seg.currentIndexBatchSizeBytes, seg.nextOffset)
 
 	// Add an index entry if required.
-	var tse TimestampIndexEntry
-	tse.Clear()
-	if seg.currentIndexBatchSizeBytes >= kIndexEveryNBytes {
-		// We have crossed the threshold. Add an index entry with the current timestamp.
-		seg.currentIndexBatchSizeBytes = 0
-		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(len(seg.timestampIndex)))...))
+	currIndexSize := len(seg.timestampIndex)
+	for ii, tse := range tsEntries {
+		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(currIndexSize+ii))...))
 		tse.SetTimestamp(arg.Timestamp)
 		tse.SetOffset(seg.nextOffset)
 		values = append(values, tse.Serialize())
 	}
-	seg.currentIndexBatchSizeBytes += totalSize
 
 	// Update replicated log index as well.
 	keys = append(keys, kLastRLogIdxKeyBytes)
@@ -207,13 +203,8 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	}
 
 	// Update segment internal states.
-	if tse.GetTimestamp() != -1 {
-		// Notify indexer with the new index entry that was created.
-		seg.notifyIndexer(tse)
-	}
-	// Save the replicated log index, first and last message timestamps and nextOffset for future appends and scans.
 	seg.liveStateLock.Lock()
-	defer seg.liveStateLock.Unlock()
+	seg.currentIndexBatchSizeBytes = nextIndexBatchSizeBytes
 	if oldNextOffset == seg.metadata.StartOffset {
 		// These were the first messages appended to the segment. Save the first message timestamp.
 		seg.firstMsgTs = arg.Timestamp
@@ -221,6 +212,12 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	seg.lastRLogIdx = arg.RLogIdx
 	seg.lastMsgTs = arg.Timestamp
 	seg.nextOffset += base.Offset(len(arg.Entries))
+	seg.liveStateLock.Unlock()
+
+	if len(tsEntries) > 0 {
+		// Notify indexer with the new index entry that was created.
+		seg.notifyIndexer(tsEntries)
+	}
 	return &ret
 }
 
@@ -597,19 +594,19 @@ func (seg *BadgerSegment) indexer() {
 		case <-seg.segmentClosedChan:
 			seg.logger.VInfof(1, "Indexer exiting")
 			return
-		case tse := <-seg.timestampIndexChan:
-			seg.updateTimestampIndex(tse)
+		case entries := <-seg.timestampIndexChan:
+			seg.updateTimestampIndex(entries)
 		}
 	}
 }
 
 // notifyIndexer is called by Append when a new index entry needs to be added to the timestamp index.
-func (seg *BadgerSegment) notifyIndexer(tse TimestampIndexEntry) {
-	seg.timestampIndexChan <- tse
+func (seg *BadgerSegment) notifyIndexer(entries []TimestampIndexEntry) {
+	seg.timestampIndexChan <- entries
 }
 
 // updateTimestampIndex is called by the indexer when it receives an index entry on timestampIndexChan.
-func (seg *BadgerSegment) updateTimestampIndex(tse TimestampIndexEntry) {
+func (seg *BadgerSegment) updateTimestampIndex(entries []TimestampIndexEntry) {
 	// Acquire write lock on the timestamp index as we are about to modify it.
 	seg.timestampIndexLock.Lock()
 	defer seg.timestampIndexLock.Unlock()
@@ -618,7 +615,7 @@ func (seg *BadgerSegment) updateTimestampIndex(tse TimestampIndexEntry) {
 		seg.logger.Warningf("Either segment is closed or never opened. Skipping timestamp index updates")
 		return
 	}
-	seg.timestampIndex = append(seg.timestampIndex, tse)
+	seg.timestampIndex = append(seg.timestampIndex, entries...)
 }
 
 // getNearestSmallerOffsetFromIndex returns the first offset that is smaller than the given timestamp. This method
