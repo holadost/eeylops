@@ -440,3 +440,115 @@ func TestPartitionManager(t *testing.T) {
 	}
 	p.Close()
 }
+
+func TestPartitionStress(t *testing.T) {
+	util.LogTestMarker("TestPartitionStress")
+	testDir := util.CreateTestDir(t, "TestPartitionStress")
+	pMap := make(map[int]*Partition)
+	for ii := 0; ii < 5; ii++ {
+		opts := PartitionOpts{
+			TopicName:                      "topic1",
+			PartitionID:                    ii + 1,
+			RootDirectory:                  testDir,
+			ExpiredSegmentPollIntervalSecs: 1,
+			LiveSegmentPollIntervalSecs:    1,
+			NumRecordsPerSegmentThreshold:  10000,
+			MaxScanSizeBytes:               15 * 1024 * 1024,
+			TTLSeconds:                     86400 * 7,
+		}
+		p := NewPartition(opts)
+		pMap[ii] = p
+	}
+	psw := newPartitionStressWorkload(pMap, 1, 4096, 10, 2000)
+	psw.start()
+	time.Sleep(time.Second * 20)
+	psw.stop()
+}
+
+type partitionStressWorkload struct {
+	partitionMap             map[int]*Partition
+	topicName                string
+	numConsumersPerPartition int
+	doneChan                 chan struct{}
+	dataSizeBytes            int
+	batchSize                int
+	consumerDelayMs          time.Duration // Consumer delay in ms.
+}
+
+func newPartitionStressWorkload(partitionMap map[int]*Partition, numConsumerPerPartition int, payloadSizeBytes int, batchSize int, consumerDelayMs int) *partitionStressWorkload {
+	psw := new(partitionStressWorkload)
+	psw.numConsumersPerPartition = 2
+	psw.doneChan = make(chan struct{})
+	psw.dataSizeBytes = payloadSizeBytes
+	psw.partitionMap = partitionMap
+	psw.numConsumersPerPartition = numConsumerPerPartition
+	psw.batchSize = batchSize
+	psw.consumerDelayMs = time.Duration(consumerDelayMs) * time.Millisecond
+	return psw
+}
+
+func (psw *partitionStressWorkload) start() {
+	glog.Infof("Starting workloads")
+	for key, _ := range psw.partitionMap {
+		go psw.producer(key)
+		for ii := 0; ii < psw.numConsumersPerPartition; ii++ {
+			go psw.consumer(key, ii)
+		}
+	}
+}
+
+func (psw *partitionStressWorkload) stop() {
+	glog.Infof("Stopping workloads")
+	close(psw.doneChan)
+}
+
+func (psw *partitionStressWorkload) producer(partitionID int) {
+	token := make([]byte, psw.dataSizeBytes)
+	rand.Read(token)
+	var entries [][]byte
+	for ii := 0; ii < psw.batchSize; ii++ {
+		entries = append(entries, token)
+	}
+	ticker := time.NewTicker(time.Millisecond * 5)
+	for {
+		select {
+		case <-psw.doneChan:
+			glog.Infof("Producer for partition: %d exiting", partitionID)
+			return
+		case <-ticker.C:
+			now := time.Now().UnixNano()
+			arg := sbase.AppendEntriesArg{
+				Entries:   entries,
+				Timestamp: now,
+				RLogIdx:   now,
+			}
+			p := psw.partitionMap[partitionID]
+			ret := p.Append(context.Background(), &arg)
+			if ret.Error != nil {
+				glog.Fatalf("Unexpected error while appending to partition: %d", partitionID)
+			}
+		}
+	}
+}
+
+func (psw *partitionStressWorkload) consumer(partitionID int, consumerID int) {
+	for {
+		time.Sleep(psw.consumerDelayMs)
+		scanner := NewPartitionScanner(psw.partitionMap[partitionID], 0)
+		count := 0
+		for scanner.Rewind(); scanner.Valid(); scanner.Next() {
+			item, err := scanner.Get()
+			if err != nil {
+				glog.Fatalf("Unexpected error from consumer: %d while scanning partition: %d", consumerID, partitionID)
+			}
+			if item.Offset != base.Offset(count) {
+				glog.Fatalf("Wrong message got from partition. Expected: %d, got: %d", count, item.Offset)
+			}
+			count++
+		}
+		_, ok := <-psw.doneChan
+		if !ok {
+			glog.Infof("Consumer: %d, partition: %d exiting", consumerID, partitionID)
+		}
+	}
+}

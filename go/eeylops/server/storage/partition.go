@@ -300,32 +300,47 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 		return &ret
 	}
 	var startOffset base.Offset
-	var endOffset base.Offset
 	numMsgsOffset := base.Offset(arg.NumMessages)
+	var segs []segments.Segment
 	if arg.StartOffset >= 0 {
+		var endOffset base.Offset
+		// Offset scans.
 		endOffset = arg.StartOffset + numMsgsOffset - 1
 		startOffset = arg.StartOffset
+		fOffset, _ := p.segments[0].GetRange()
+		if arg.StartOffset < fOffset {
+			ret.NextOffset = fOffset
+			ret.Error = nil
+			return &ret
+		}
+		segs = p.getSegments(startOffset, endOffset)
+		if segs == nil || len(segs) == 0 {
+			// The start offset has still not been created in the partition.
+			// Set next offset to -1 indicating that the scan is complete.
+			ret.NextOffset = -1
+			ret.Error = nil
+			return &ret
+		}
 	} else {
-		// TODO: find start offset based on start and end timestamps.
+		// Timestamp scans.
+		if arg.StartTimestamp <= 0 {
+			p.logger.Errorf("Invalid inputs. Either timestamp/offset must be provided")
+			ret.Error = ErrPartitionScan
+			ret.NextOffset = -1
+			return &ret
+		}
+		idx := p.findSegmentIdxWithTimestamp(0, len(p.segments)-1, arg.StartTimestamp)
+		if idx == -1 {
+			p.logger.Warningf("Did not find any messages with ts >= %d in partition", arg.StartTimestamp)
+			ret.Error = nil
+			ret.NextOffset = -1
+			return &ret
+		}
+		startOffset, _ = p.segments[idx].GetRange()
+		segs = append(segs, p.segments[idx])
 	}
-	// Get all the segments that contain our desired offsets.
-	fOffset, _ := p.segments[0].GetRange()
-	if arg.StartOffset < fOffset {
-		ret.NextOffset = fOffset
-		ret.Error = nil
-		return &ret
-	}
-	segs := p.getSegments(startOffset, endOffset)
-	if segs == nil || len(segs) == 0 {
-		// The start offset has still not been created in the partition.
-		// Set next offset to -1 indicating that the scan is complete.
-		ret.NextOffset = -1
-		ret.Error = nil
-		return &ret
-	}
-
 	var sarg segments.ScanEntriesArg
-	sarg.StartOffset = arg.StartOffset
+	sarg.StartOffset = startOffset
 	sarg.NumMessages = arg.NumMessages
 	sarg.StartTimestamp = arg.StartTimestamp
 	sarg.EndTimestamp = arg.EndTimestamp
