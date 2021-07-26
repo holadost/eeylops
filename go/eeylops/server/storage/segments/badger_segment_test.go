@@ -53,6 +53,7 @@ func TestBadgerSegment(t *testing.T) {
 		Logger:      nil,
 		Topic:       "topic1",
 		PartitionID: 1,
+		TTLSeconds:  86400,
 	}
 	bds, err := NewBadgerSegment(&opts)
 	if err != nil {
@@ -228,6 +229,7 @@ func TestBadgerSegment_Append(t *testing.T) {
 		Logger:      nil,
 		Topic:       "topic1",
 		PartitionID: 1,
+		TTLSeconds:  86400,
 	}
 	bds, err := NewBadgerSegment(&opts)
 	if err != nil {

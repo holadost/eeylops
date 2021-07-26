@@ -8,6 +8,7 @@ import (
 	"eeylops/server/storage/kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
+	"errors"
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
 	"os"
@@ -28,7 +29,7 @@ type BadgerSegment struct {
 	rootDir     string             // Root directory of this segment.
 	topicName   string             // Topic name.
 	partitionID uint               // Partition ID.
-	ttlSeconds  int64              // TTL seconds for a message.
+	ttlSeconds  int                // TTL seconds for a message.
 	dataDB      kv_store.KVStore   // Backing KV store to hold the data.
 	metadataDB  *SegmentMetadataDB // Segment metadata DB.
 
@@ -80,6 +81,7 @@ func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
 	}
 	seg.topicName = opts.Topic
 	seg.partitionID = opts.PartitionID
+	seg.ttlSeconds = opts.TTLSeconds
 	seg.initialize()
 	// Reinitialize logger with correct segment id.
 	if opts.Logger == nil {
@@ -232,107 +234,19 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	var ret ScanEntriesRet
-	if arg.StartOffset == -1 && arg.StartTimestamp == -1 {
-		seg.logger.Fatalf("Both StartOffset and StartTimestamp cannot be undefined")
-	}
-
-	if seg.closed || seg.metadata.Expired || !seg.openedOnce {
-		seg.logger.Errorf("Segment is already closed")
-		ret.Error = ErrSegmentClosed
-		return &ret
-	}
-	// Sanity checks to see if the segment contains our start offset.
-	if (arg.StartOffset >= 0) && (arg.StartOffset < seg.metadata.StartOffset) {
-		// The start offset does not belong to this segment.
-		seg.logger.Errorf("Start offset does not belong to this segment. Given start offset: %d, "+
-			"Seg start offset: %d, Segment next offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
-		ret.Error = ErrSegmentInvalid
-		return &ret
-	}
-	if seg.IsEmpty() || (arg.StartOffset >= seg.nextOffset) {
-		// Either the segment is empty or it does not contain our desired offset yet.
-		seg.logger.VInfof(1, "Requested offset: %d is not present in this segment. "+
-			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
-		ret.Error = nil
-		ret.Values = nil
-		ret.NextOffset = -1
+	// Sanitize arguments.
+	if err := seg.sanitizeScanArg(arg, &ret); err != nil {
 		return &ret
 	}
 
 	// Compute start and end offsets for the scan.
-	var startOffset base.Offset
-	if arg.StartOffset >= 0 {
-		startOffset = arg.StartOffset
-	} else {
-		if arg.StartTimestamp <= 0 {
-			seg.logger.Fatalf("Expected timestamp to be > 0")
-		}
-		var err error
-		startOffset, err = seg.findFirstOffsetWithTimestampGE(arg.StartTimestamp)
-		if err != nil {
-			seg.logger.Errorf("Failed to find start offset due to err: %s", err.Error())
-			ret.Error = ErrSegmentBackend
-			return &ret
-		}
-	}
-	if startOffset == -1 {
-		seg.logger.Errorf("Unable to determine any good start offset for start offset: %d, start timestamp: %d",
-			arg.StartOffset, arg.StartTimestamp)
-		ret.Error = ErrSegmentInvalid
+	startOffset, err := seg.computeStartOffsetForScan(arg, &ret)
+	if err != nil {
 		return &ret
 	}
-	var tmpNumMsgs base.Offset
-	var endOffset base.Offset
-	var sk []byte
-	tmpNumMsgs = base.Offset(arg.NumMessages)
-	if startOffset+tmpNumMsgs >= seg.nextOffset {
-		tmpNumMsgs = seg.nextOffset - startOffset
-	}
-	endOffset = startOffset + tmpNumMsgs - 1
-	sk = seg.offsetToKey(startOffset)
-	scanner := seg.dataDB.CreateScanner(KOffSetPrefixBytes, sk, false)
-	defer scanner.Close()
-	bytesScannedSoFar := int64(0)
-	// now := time.Now().UnixNano()
-	for ; scanner.Valid(); scanner.Next() {
-		key, val, err := scanner.GetItem()
-		if err != nil {
-			seg.logger.Errorf("Failed to scan offset due to scan backend err: %s", err.Error())
-			ret.Error = ErrSegmentBackend
-			ret.Values = nil
-			ret.NextOffset = -1
-			break
-		}
-		offset := seg.keyToOffset(key)
-		var msg Message
-		msg.InitializeFromRaw(val)
-		//if seg.hasValueExpired(msg.GetTimestamp(), now) {
-		//	// Skip this value as it has already expired.
-		//	continue
-		//}
-		if arg.ScanSizeBytes > 0 {
-			bytesScannedSoFar += int64(msg.GetBodySize())
-			if bytesScannedSoFar > arg.ScanSizeBytes {
-				break
-			}
-		}
-		if arg.EndTimestamp > 0 {
-			if msg.GetTimestamp() >= arg.EndTimestamp {
-				// Return all records smaller than EndTimestamp.
-				break
-			}
-		}
-		ret.Values = append(ret.Values, &sbase.ScanValue{
-			Offset:    offset,
-			Value:     msg.GetBody(),
-			Timestamp: msg.GetTimestamp(),
-		})
-		ret.NextOffset = offset + 1
-		if offset == endOffset {
-			break
-		}
 
-	}
+	// Scan the segment for all messages between start and end offset.
+	seg.scanMessages(arg, &ret, startOffset)
 	return &ret
 }
 
@@ -429,7 +343,167 @@ func (seg *BadgerSegment) Stats() {
 
 }
 
-// findFirstOffsetWithTimestampGE finds the first offset in the segment whose timestamp >= given ts.
+// sanitizeScanArg is a helper method to Scan that checks if the arguments provided are fine. If not, it populates
+// ret and returns an error.
+func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesRet) error {
+	ret.Error = nil
+	if arg.StartOffset == -1 && arg.StartTimestamp == -1 {
+		seg.logger.Fatalf("Both StartOffset and StartTimestamp cannot be undefined")
+	}
+	if seg.closed || seg.metadata.Expired || !seg.openedOnce {
+		seg.logger.Errorf("Segment is already closed")
+		ret.Error = ErrSegmentClosed
+	}
+	// Sanity checks to see if the segment contains our start offset.
+	if (arg.StartOffset >= 0) && (arg.StartOffset < seg.metadata.StartOffset) {
+		// The start offset does not belong to this segment.
+		seg.logger.Errorf("Start offset does not belong to this segment. Given start offset: %d, "+
+			"Seg start offset: %d, Segment next offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
+		ret.Error = ErrSegmentInvalid
+	}
+	if seg.IsEmpty() || (arg.StartOffset >= seg.nextOffset) {
+		// Either the segment is empty or it does not contain our desired offset yet.
+		seg.logger.VInfof(1, "Requested offset: %d is not present in this segment. "+
+			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
+		ret.Error = nil
+		ret.Values = nil
+		ret.NextOffset = -1
+		return errors.New("empty segment")
+	}
+	return ret.Error
+}
+
+// computeStartOffsetForScan computes the first offset from where the scan should start. If no such offset if found,
+// or if an offset is found and that was the only offset requested(in which case we populate ret and we can return
+// early and avoid reeading this message again), this method  will return an error. Otherwise, it will return the
+// start offset from where the can should start.
+func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *ScanEntriesRet) (base.Offset, error) {
+	now := time.Now().UnixNano()
+	var startOffset base.Offset
+	if arg.StartOffset >= 0 {
+		// A start offset has been provided. Check if we can scan from here and if not, move to the correct
+		// start offset.
+		msg, err := seg.getOffset(arg.StartOffset)
+		if err != nil {
+			ret.Error = err
+			return -1, ret.Error
+		}
+		startOffset = arg.StartOffset
+		// Check if message has expired.
+		if seg.hasValueExpired(msg.GetTimestamp(), now) {
+			// The message has expired. Scan the index to find the first offset that hasn't expired.
+			startOffset, err = seg.findFirstOffsetWithTimestampGE(now)
+			if err != nil {
+				ret.Error = err
+				return -1, ret.Error
+			}
+			if startOffset == -1 {
+				seg.logger.Errorf("Unable to find any live records in the segment")
+				ret.Error = nil
+				ret.NextOffset = -1
+				return -1, errors.New("no live records found in segment")
+			}
+		} else {
+			// The value hasn't expired. Check if only one value was requested and if so, we can return early here
+			// since we already have the message with us.
+			if arg.NumMessages == 1 {
+				ret.Values = append(ret.Values, &sbase.ScanValue{
+					Offset:    arg.StartOffset,
+					Value:     msg.GetBody(),
+					Timestamp: msg.GetTimestamp(),
+				})
+				ret.Error = nil
+				ret.NextOffset = arg.StartOffset + 1
+				return -1, errors.New("scan finished, we can return early")
+			}
+		}
+	} else {
+		var err error
+		startOffset, err = seg.findFirstOffsetWithTimestampGE(arg.StartTimestamp)
+		if err != nil {
+			seg.logger.Errorf("Failed to find start offset due to err: %s", err.Error())
+			ret.Error = ErrSegmentBackend
+			return -1, ret.Error
+		}
+		if startOffset == -1 {
+			seg.logger.Errorf("Unable to find any messages with timestamp >= %d", arg.StartTimestamp)
+			ret.Error = nil
+			ret.NextOffset = -1
+			return -1, errors.New("no live records found in segment")
+		}
+	}
+	// Sanity check to make sure that we have a start offset.
+	if startOffset == -1 {
+		seg.logger.Fatalf("Unable to determine any good start offset for start offset: %d, start timestamp: %d",
+			arg.StartOffset, arg.StartTimestamp)
+	}
+	return startOffset, nil
+}
+
+// scanMessages scans messages from the segment from the given startOffset.
+func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet, startOffset base.Offset) {
+	var tmpNumMsgs base.Offset
+	var endOffset base.Offset
+	var sk []byte
+	tmpNumMsgs = base.Offset(arg.NumMessages)
+	if startOffset+tmpNumMsgs >= seg.nextOffset {
+		tmpNumMsgs = seg.nextOffset - startOffset
+	}
+	endOffset = startOffset + tmpNumMsgs - 1
+	sk = seg.offsetToKey(startOffset)
+	scanner := seg.dataDB.CreateScanner(KOffSetPrefixBytes, sk, false)
+	defer scanner.Close()
+	bytesScannedSoFar := int64(0)
+	// now := time.Now().UnixNano()
+	for ; scanner.Valid(); scanner.Next() {
+		key, val, err := scanner.GetItem()
+		if err != nil {
+			seg.logger.Errorf("Failed to scan offset due to scan backend err: %s", err.Error())
+			ret.Error = ErrSegmentBackend
+			ret.Values = nil
+			ret.NextOffset = -1
+			break
+		}
+		offset := seg.keyToOffset(key)
+		var msg Message
+		msg.InitializeFromRaw(val)
+		if arg.ScanSizeBytes > 0 {
+			bytesScannedSoFar += int64(msg.GetBodySize())
+			if bytesScannedSoFar > arg.ScanSizeBytes {
+				break
+			}
+		}
+		if arg.EndTimestamp > 0 {
+			if msg.GetTimestamp() >= arg.EndTimestamp {
+				break
+			}
+		}
+		ret.Values = append(ret.Values, &sbase.ScanValue{
+			Offset:    offset,
+			Value:     msg.GetBody(),
+			Timestamp: msg.GetTimestamp(),
+		})
+		ret.NextOffset = offset + 1
+		if offset == endOffset {
+			break
+		}
+	}
+}
+
+// getOffset fetches a single offset from the backend.
+func (seg *BadgerSegment) getOffset(offset base.Offset) (*Message, error) {
+	val, err := seg.dataDB.Get(seg.offsetToKey(offset))
+	if err != nil {
+		seg.logger.Errorf("Unable to get offset: %d due to err: %s", offset, err.Error())
+		return nil, ErrSegmentBackend
+	}
+	var msg Message
+	msg.InitializeFromRaw(val)
+	return &msg, nil
+}
+
+// findFirstOffsetWithTimestampGE finds the first offset in the segment whose timestamp >= given ts. This method
+// assumes that segLock has been acquired.
 func (seg *BadgerSegment) findFirstOffsetWithTimestampGE(ts int64) (base.Offset, error) {
 	startOffsetHint := seg.getNearestSmallerOffsetFromIndex(ts)
 	if startOffsetHint == -1 {
@@ -450,6 +524,7 @@ func (seg *BadgerSegment) findFirstOffsetWithTimestampGE(ts int64) (base.Offset,
 		}
 		return offset, nil
 	}
+	// We didn't find any message with timestamp >= to the given ts.
 	return -1, nil
 }
 
@@ -491,7 +566,10 @@ func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
 
 // hasValueExpired returns true if the value has expired. False otherwise.
 func (seg *BadgerSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
-	if (nowNano-tsNano)/(10e9) >= seg.ttlSeconds {
+	seg.logger.Infof("Now Nano: %d, TS: %d, TTL: %d secs, Diff: %d", nowNano, tsNano, seg.ttlSeconds,
+		(nowNano-tsNano)/(10e9))
+	if (nowNano-tsNano)/(10e9) >= int64(seg.ttlSeconds) {
+		seg.logger.Infof("The value has expired!")
 		return true
 	}
 	return false
@@ -505,7 +583,7 @@ func (seg *BadgerSegment) indexer() {
 	for {
 		select {
 		case <-seg.segmentClosedChan:
-			seg.logger.VInfof(0, "Indexer exiting")
+			seg.logger.VInfof(1, "Indexer exiting")
 			return
 		case tse := <-seg.timestampIndexChan:
 			seg.updateTimestampIndex(tse)
