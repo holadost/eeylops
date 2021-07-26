@@ -360,13 +360,14 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	bds.Open()
 	batchSize := 5
 	numIters := 5
+	payloadSize := 1024 * 1024
 	var timestamps []int64
 	lastRLogIdx := int64(0)
 	tw := newTestWorkload()
 	testStart := time.Now().UnixNano()
 	for ii := 0; ii < numIters; ii++ {
 		now := time.Now().UnixNano()
-		tw.appendMessages(base.Offset(ii*batchSize), bds, batchSize, 1024*1024, now, lastRLogIdx)
+		tw.appendMessages(base.Offset(ii*batchSize), bds, batchSize, payloadSize, now, lastRLogIdx)
 		lastRLogIdx++
 		timestamps = append(timestamps, now)
 		time.Sleep(time.Millisecond * 100)
@@ -375,6 +376,12 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	glog.Infof("Testing Timestamp scans!")
 	for ii := 0; ii < numIters-1; ii++ {
 		tw.scanMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1], base.Offset(ii*batchSize), batchSize)
+	}
+	totalSize := int64((numIters * batchSize) * payloadSize)
+	totalIndexes := int64(len(bds.timestampIndex))
+	expectedIndexes := totalSize / kIndexEveryNBytes
+	if !((totalIndexes == expectedIndexes) || (totalIndexes == expectedIndexes+1) || (totalIndexes == expectedIndexes-1)) {
+		glog.Fatalf("Expected around %d indexes. Got: %d", expectedIndexes, totalIndexes)
 	}
 	if err := bds.Close(); err != nil {
 		glog.Fatalf("Error while closing segment: %s", err.Error())
@@ -386,6 +393,10 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	}
 	bds.Open()
 	time.Sleep(time.Millisecond*100*time.Duration(numIters) + time.Second*time.Duration(int64(opts.TTLSeconds)))
+	totalIndexes = int64(len(bds.timestampIndex))
+	if !((totalIndexes == expectedIndexes) || (totalIndexes == expectedIndexes+1) || (totalIndexes == expectedIndexes-1)) {
+		glog.Fatalf("Expected around %d indexes. Got: %d", expectedIndexes, totalIndexes)
+	}
 	// All values should now have expired. Scan the segment and ensure that we don't get any values back.
 	for ii := 0; ii < numIters-1; ii++ {
 		tw.scanExpiredMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1])
@@ -411,6 +422,12 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	tw.scanMessagesByOffset(bds, batchSize, base.Offset((numIters+1)*batchSize), -1, base.Offset((numIters+1)*batchSize), batchSize)
 	tw.scanMessagesByOffset(bds, batchSize*5, base.Offset((numIters-1)*batchSize), timestamps[len(timestamps)-1], base.Offset(numIters*batchSize), (numIters-1)*batchSize)
 	tw.scanMessagesByOffset(bds, 1, base.Offset(((numIters+1)*batchSize)+1), -1, base.Offset(((numIters+1)*batchSize)+1), 1)
+
+	totalIndexes = int64(len(bds.timestampIndex))
+	expectedIndexes *= 2
+	if !((totalIndexes == expectedIndexes) || (totalIndexes == expectedIndexes+1) || (totalIndexes == expectedIndexes-1)) {
+		glog.Fatalf("Expected around %d indexes. Got: %d", expectedIndexes, totalIndexes)
+	}
 }
 
 func TestBadgerSegment_Append(t *testing.T) {
