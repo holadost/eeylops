@@ -72,7 +72,7 @@ func (tw *testWorkload) appendMessages(startOffset base.Offset, seg *BadgerSegme
 	tw.lastOffsetAppended = startOffset + base.Offset(len(values)) - 1
 }
 
-func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages int, startTs int64, endTs int64) {
+func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages int, startTs int64, endTs int64, expectedStartOffset base.Offset) {
 	var arg ScanEntriesArg
 	arg.StartTimestamp = startTs
 	arg.StartOffset = -1
@@ -85,10 +85,14 @@ func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages 
 	if len(ret.Values) > numMessages {
 		glog.Fatalf("Expected <= %d messages, got: %d", numMessages, len(ret.Values))
 	}
-	for _, value := range ret.Values {
-		glog.Infof("Received value with offset: %d", value.Offset)
+	for ii, value := range ret.Values {
 		if !((value.Timestamp >= startTs) && (value.Timestamp < endTs)) {
 			glog.Fatalf("Expected value timestamp: %d to fall between [%d, %d]", value.Timestamp, startTs, endTs)
+		}
+		if ii == 0 && expectedStartOffset >= 0 {
+			if value.Offset != expectedStartOffset {
+				glog.Fatalf("Start offset mismatch. Expected: %d, got: %d", expectedStartOffset, value.Offset)
+			}
 		}
 		if value.Offset > tw.lastOffsetAppended {
 			glog.Fatalf("Incorrect offset. Expected offset <= %d, got: %d", tw.lastOffsetAppended, value.Offset)
@@ -324,6 +328,7 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	var timestamps []int64
 	lastRLogIdx := int64(0)
 	tw := newTestWorkload()
+	testStart := time.Now().UnixNano()
 	for ii := 0; ii < numIters; ii++ {
 		now := time.Now().UnixNano()
 		tw.appendMessages(base.Offset(ii*batchSize), bds, batchSize, 4096, now, lastRLogIdx)
@@ -334,7 +339,7 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	glog.Infof("Timestamps: %v", timestamps)
 	for ii := 0; ii < numIters-1; ii++ {
 		glog.Infof("Scan iteration: %d", ii)
-		tw.scanMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1])
+		tw.scanMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1], base.Offset(ii*batchSize))
 	}
 	if err := bds.Close(); err != nil {
 		glog.Fatalf("Error while closing segment: %s", err.Error())
@@ -351,6 +356,19 @@ func TestBadgerSegment_Scan(t *testing.T) {
 		glog.Infof("Scan all expired iteration: %d", ii)
 		tw.scanExpiredMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1])
 	}
+	timestamps = nil
+	lastRLogIdx++
+	// Write some more messages now and see if these are now scanable. Set the start timestamp to a ts even before
+	// we appended the first message. We should still not see the expired messages and segment must start from the
+	// first unexpired message.
+	for ii := 0; ii < numIters; ii++ {
+		now := time.Now().UnixNano()
+		tw.appendMessages(tw.lastOffsetAppended+1, bds, batchSize, 4096, now, lastRLogIdx)
+		lastRLogIdx++
+		timestamps = append(timestamps, now)
+	}
+	testEnd := time.Now().UnixNano()
+	tw.scanMessagesByTimestamp(bds, batchSize*numIters, testStart, testEnd, base.Offset(numIters*batchSize))
 }
 
 func TestBadgerSegment_Append(t *testing.T) {

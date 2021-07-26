@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
-	"github.com/golang/glog"
 	"os"
 	"path"
 	"sync"
@@ -421,8 +420,6 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 		if firstUnexpiredMsgTs >= startTs {
 			startTs = firstUnexpiredMsgTs
 		}
-		glog.Infof("First Unexpired: %d, Arg Start Ts: %d, Chosen Start Ts: %d",
-			firstUnexpiredMsgTs, arg.StartTimestamp, startTs)
 		var err error
 		startOffset, err = seg.findFirstOffsetWithTimestampGE(startTs)
 		if err != nil {
@@ -430,7 +427,6 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 			ret.Error = ErrSegmentBackend
 			return -1, ret.Error
 		}
-		glog.Infof("First offset with ts >= %d is %d", startTs, startOffset)
 		if startOffset == -1 {
 			seg.logger.Errorf("Unable to find any messages with timestamp >= %d", arg.StartTimestamp)
 			ret.Error = nil
