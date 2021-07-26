@@ -207,20 +207,16 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	}
 
 	// Update segment internal states.
-	firstMsgTs := int64(-1)
-	if oldNextOffset == seg.metadata.StartOffset {
-		// These were the first messages appended to the segment. Save the first message timestamp.
-		firstMsgTs = arg.Timestamp
-	}
 	if tse.GetTimestamp() != -1 {
 		// Notify indexer with the new index entry that was created.
 		seg.notifyIndexer(tse)
 	}
-	// Save the replicated log index, last message timestamp and nextOffset for future appends and scans.
+	// Save the replicated log index, first and last message timestamps and nextOffset for future appends and scans.
 	seg.liveStateLock.Lock()
 	defer seg.liveStateLock.Unlock()
-	if firstMsgTs != -1 {
-		seg.firstMsgTs = firstMsgTs
+	if oldNextOffset == seg.metadata.StartOffset {
+		// These were the first messages appended to the segment. Save the first message timestamp.
+		seg.firstMsgTs = arg.Timestamp
 	}
 	seg.lastRLogIdx = arg.RLogIdx
 	seg.lastMsgTs = arg.Timestamp
