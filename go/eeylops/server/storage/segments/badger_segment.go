@@ -376,6 +376,7 @@ func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesR
 // has been acquired.
 func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *ScanEntriesRet) (base.Offset, error) {
 	now := time.Now()
+	firstUnexpiredMsgTs := now.UnixNano() - int64(seg.ttlSeconds)*(1e9)
 	var startOffset base.Offset
 	if arg.StartOffset >= 0 {
 		// A start offset has been provided. Check if we can scan from here and if not, move to the correct
@@ -389,7 +390,7 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 		// Check if message has expired.
 		if seg.hasValueExpired(msg.GetTimestamp(), now.UnixNano()) {
 			// The message has expired. Scan the index to find the first offset that hasn't expired.
-			startOffset, err = seg.findFirstOffsetWithTimestampGE(now.UnixNano())
+			startOffset, err = seg.findFirstOffsetWithTimestampGE(firstUnexpiredMsgTs)
 			if err != nil {
 				ret.Error = err
 				return -1, ret.Error
@@ -415,7 +416,6 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 			}
 		}
 	} else {
-		firstUnexpiredMsgTs := now.UnixNano() - int64(seg.ttlSeconds)*(1e9)
 		startTs := arg.StartTimestamp
 		if firstUnexpiredMsgTs >= startTs {
 			startTs = firstUnexpiredMsgTs
@@ -656,6 +656,9 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 		}
 	}
 	if nearestIdx == -1 {
+		if ts >= seg.firstMsgTs {
+			return seg.metadata.StartOffset
+		}
 		return base.Offset(-1)
 	}
 	return seg.timestampIndex[nearestIdx].GetOffset()
