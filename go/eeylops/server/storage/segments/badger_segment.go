@@ -428,7 +428,7 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 			return -1, ret.Error
 		}
 		if startOffset == -1 {
-			seg.logger.Errorf("Unable to find any messages with timestamp >= %d", arg.StartTimestamp)
+			seg.logger.VInfof(1, "Unable to find any messages with timestamp >= %d", arg.StartTimestamp)
 			ret.Error = nil
 			ret.NextOffset = -1
 			return -1, errors.New("no live records found in segment")

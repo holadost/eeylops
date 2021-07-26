@@ -72,7 +72,7 @@ func (tw *testWorkload) appendMessages(startOffset base.Offset, seg *BadgerSegme
 	tw.lastOffsetAppended = startOffset + base.Offset(len(values)) - 1
 }
 
-func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages int, startTs int64, endTs int64, expectedStartOffset base.Offset) {
+func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages int, startTs int64, endTs int64, expectedStartOffset base.Offset, expectedNumMessages int) {
 	var arg ScanEntriesArg
 	arg.StartTimestamp = startTs
 	arg.StartOffset = -1
@@ -358,7 +358,7 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	}
 	bds.SetMetadata(initialMeta)
 	bds.Open()
-	batchSize := 4
+	batchSize := 5
 	numIters := 5
 	var timestamps []int64
 	lastRLogIdx := int64(0)
@@ -372,9 +372,9 @@ func TestBadgerSegment_Scan(t *testing.T) {
 		time.Sleep(time.Millisecond * 100)
 	}
 	glog.Infof("Timestamps: %v", timestamps)
+	glog.Infof("Testing Timestamp scans!")
 	for ii := 0; ii < numIters-1; ii++ {
-		glog.Infof("Scan iteration: %d", ii)
-		tw.scanMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1], base.Offset(ii*batchSize))
+		tw.scanMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1], base.Offset(ii*batchSize), batchSize)
 	}
 	if err := bds.Close(); err != nil {
 		glog.Fatalf("Error while closing segment: %s", err.Error())
@@ -388,7 +388,6 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	time.Sleep(time.Millisecond*100*time.Duration(numIters) + time.Second*time.Duration(int64(opts.TTLSeconds)))
 	// All values should now have expired. Scan the segment and ensure that we don't get any values back.
 	for ii := 0; ii < numIters-1; ii++ {
-		glog.Infof("Scan all expired iteration: %d", ii)
 		tw.scanExpiredMessagesByTimestamp(bds, batchSize, timestamps[ii], timestamps[ii+1])
 	}
 	timestamps = nil
@@ -403,10 +402,10 @@ func TestBadgerSegment_Scan(t *testing.T) {
 		timestamps = append(timestamps, now)
 	}
 	testEnd := time.Now().UnixNano()
-	tw.scanMessagesByTimestamp(bds, batchSize*numIters, testStart, testEnd, base.Offset(numIters*batchSize))
-	tw.scanMessagesByTimestamp(bds, 1, testStart, testEnd, base.Offset(numIters*batchSize))
+	tw.scanMessagesByTimestamp(bds, batchSize*numIters, testStart, testEnd, base.Offset(numIters*batchSize), batchSize*numIters)
+	tw.scanMessagesByTimestamp(bds, 1, testStart, testEnd, base.Offset(numIters*batchSize), 1)
 
-	glog.Infof("Offset Scans!")
+	glog.Infof("Testing Offset Scans!")
 	tw.scanMessagesByOffset(bds, batchSize, base.Offset(numIters*batchSize), -1, base.Offset(numIters*batchSize), batchSize)
 	tw.scanMessagesByOffset(bds, batchSize, base.Offset((numIters-2)*batchSize), -1, base.Offset(numIters*batchSize), batchSize)
 	tw.scanMessagesByOffset(bds, batchSize, base.Offset((numIters+1)*batchSize), -1, base.Offset((numIters+1)*batchSize), batchSize)
