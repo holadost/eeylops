@@ -547,30 +547,3 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	elapsed = time.Since(start)
 	glog.Infof("Total scan time: %v, Avg scan time: %v", elapsed, elapsed/time.Duration(numIters))
 }
-
-func TestBadgerSegment_Stress(t *testing.T) {
-	testName := "TestBadgerSegment_Stress"
-	util.LogTestMarker(testName)
-	dataDir := util.CreateTestDir(t, testName)
-	initialMeta := SegmentMetadata{
-		ID:               100,
-		Immutable:        false,
-		StartOffset:      10000,
-		EndOffset:        -1,
-		CreatedTimestamp: time.Now(),
-		ImmutableReason:  0,
-	}
-	opts := BadgerSegmentOpts{
-		RootDir:     dataDir,
-		Logger:      nil,
-		Topic:       "topic1",
-		PartitionID: 1,
-		TTLSeconds:  86400,
-	}
-	bds, err := NewBadgerSegment(&opts)
-	if err != nil {
-		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
-	}
-	bds.SetMetadata(initialMeta)
-	bds.Open()
-}
