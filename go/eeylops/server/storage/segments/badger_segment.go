@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
+	"github.com/golang/glog"
 	"os"
 	"path"
 	"sync"
@@ -375,7 +376,7 @@ func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesR
 // Otherwise, it will return the start offset from where the scan should start. This method assumes that the segLock
 // has been acquired.
 func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *ScanEntriesRet) (base.Offset, error) {
-	now := time.Now().UnixNano()
+	now := time.Now()
 	var startOffset base.Offset
 	if arg.StartOffset >= 0 {
 		// A start offset has been provided. Check if we can scan from here and if not, move to the correct
@@ -387,9 +388,9 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 		}
 		startOffset = arg.StartOffset
 		// Check if message has expired.
-		if seg.hasValueExpired(msg.GetTimestamp(), now) {
+		if seg.hasValueExpired(msg.GetTimestamp(), now.UnixNano()) {
 			// The message has expired. Scan the index to find the first offset that hasn't expired.
-			startOffset, err = seg.findFirstOffsetWithTimestampGE(now)
+			startOffset, err = seg.findFirstOffsetWithTimestampGE(now.UnixNano())
 			if err != nil {
 				ret.Error = err
 				return -1, ret.Error
@@ -415,13 +416,21 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 			}
 		}
 	} else {
+		firstUnexpiredMsgTs := now.UnixNano() - int64(seg.ttlSeconds)*(1e9)
+		startTs := arg.StartTimestamp
+		if firstUnexpiredMsgTs >= startTs {
+			startTs = firstUnexpiredMsgTs
+		}
+		glog.Infof("First Unexpired: %d, Arg Start Ts: %d, Chosen Start Ts: %d",
+			firstUnexpiredMsgTs, arg.StartTimestamp, startTs)
 		var err error
-		startOffset, err = seg.findFirstOffsetWithTimestampGE(arg.StartTimestamp)
+		startOffset, err = seg.findFirstOffsetWithTimestampGE(startTs)
 		if err != nil {
 			seg.logger.Errorf("Failed to find start offset due to err: %s", err.Error())
 			ret.Error = ErrSegmentBackend
 			return -1, ret.Error
 		}
+		glog.Infof("First offset with ts >= %d is %d", startTs, startOffset)
 		if startOffset == -1 {
 			seg.logger.Errorf("Unable to find any messages with timestamp >= %d", arg.StartTimestamp)
 			ret.Error = nil
@@ -437,7 +446,9 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 	return startOffset, nil
 }
 
-// scanMessages is a helper method for Scan which scans messages from the segment from the given startOffset.
+// scanMessages is a helper method for Scan which scans messages from the segment from the given startOffset. It ends
+// the scan when arg.NumMessages is reached or arg.ScanSizeBytes is exceeded or if the requested timestamp is lesser
+// than arg.EndTimestamp.
 func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet, startOffset base.Offset) {
 	var tmpNumMsgs base.Offset
 	var endOffset base.Offset
@@ -574,7 +585,7 @@ func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool
 
 // hasValueExpired returns true if the value has expired. False otherwise.
 func (seg *BadgerSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
-	if (nowNano-tsNano)/(10e9) >= int64(seg.ttlSeconds) {
+	if (nowNano-tsNano)/(1e9) >= int64(seg.ttlSeconds) {
 		return true
 	}
 	return false

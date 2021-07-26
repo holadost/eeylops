@@ -22,7 +22,7 @@ import (
 
 const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
 const KSegmentsDirectoryName = "segments"
-const KMaxScanSizeBytes = 15 * 1000000 // 15MB
+const KMaxScanSizeBytes = 15 * 1024 * 1024 // 15MB
 const KExpiredSegmentDirSuffix = "-expired"
 
 var (
