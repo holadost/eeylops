@@ -128,7 +128,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 	}
 	p := NewPartition(opts)
 	loadDataBasicWithNewSegments(p, 10, 100)
-	segs := p.getSegments(10, 50)
+	segs := p.getSegmentsByOffset(10, 50)
 	if segs == nil || len(segs) != 1 {
 		glog.Fatalf("Expected 1 segment, Got: %d", len(segs))
 		return
@@ -148,7 +148,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Test two segments.
 	glog.Infof("Testing two getSegment")
-	segs = p.getSegments(121, 221)
+	segs = p.getSegmentsByOffset(121, 221)
 	if segs == nil || len(segs) != 2 {
 		glog.Fatalf("Expected 2 segment, Got: %d", len(segs))
 		return
@@ -164,7 +164,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Test multiple segments.
 	glog.Infof("Testing multiple getSegment")
-	segs = p.getSegments(121, 800)
+	segs = p.getSegmentsByOffset(121, 800)
 	if segs == nil || len(segs) != 8 {
 		glog.Fatalf("Expected 8 segment, Got: %d", len(segs))
 		return
@@ -180,7 +180,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Test multiple segments with end offset greater than max offset in partition so far(999).
 	glog.Infof("Testing multiple getSegment with higher endOffset")
-	segs = p.getSegments(121, 1200)
+	segs = p.getSegmentsByOffset(121, 1200)
 	if segs == nil || len(segs) != 10 {
 		glog.Fatalf("Expected 10 segments, Got: %d", len(segs))
 		return
@@ -196,7 +196,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Test start offset greater than any so far.
 	glog.Infof("Testing non existent start offset")
-	segs = p.getSegments(1100, 1200)
+	segs = p.getSegmentsByOffset(1100, 1200)
 	if !(segs == nil || len(segs) == 0) {
 		glog.Fatalf("Got %d segment(s) even though it does not contain our record", len(segs))
 	}
