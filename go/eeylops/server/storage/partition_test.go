@@ -441,6 +441,69 @@ func TestPartitionManager(t *testing.T) {
 	p.Close()
 }
 
+func TestPartitionScan2(t *testing.T) {
+	util.LogTestMarker("TestPartitionScan2")
+	testDir := util.CreateTestDir(t, "TestPartitionScan2")
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 10,
+		LiveSegmentPollIntervalSecs:    2,
+		NumRecordsPerSegmentThreshold:  1000,
+		MaxScanSizeBytes:               15 * 1024 * 1024,
+		TTLSeconds:                     5,
+	}
+	p := NewPartition(opts)
+	numIters := 50
+	batchSize := 10
+	var timestamps []int64
+	token := make([]byte, 1024)
+	rand.Read(token)
+	producer := func() {
+		for ii := 0; ii < numIters; ii++ {
+			now := time.Now().UnixNano()
+			var arg sbase.AppendEntriesArg
+			for jj := 0; jj < batchSize; jj++ {
+				val := fmt.Sprintf("value-%07d", (ii*batchSize)+jj)
+				arg.Entries = append(arg.Entries, append([]byte(val), token...))
+			}
+			arg.RLogIdx = now
+			arg.Timestamp = now
+			timestamps = append(timestamps, now)
+			ret := p.Append(context.Background(), &arg)
+			if ret.Error != nil {
+				glog.Fatalf("Append error: %s", ret.Error.Error())
+			}
+		}
+	}
+	start := time.Now()
+	producer()
+	glog.Infof("Producer done. Total time: %v", time.Since(start))
+
+	var sarg sbase.ScanEntriesArg
+	sarg.NumMessages = uint64(batchSize)
+	sarg.StartOffset = -1
+	defCtx := context.Background()
+	for ii := 1; ii < len(timestamps); ii++ {
+		sarg.StartTimestamp = timestamps[ii-1]
+		sarg.EndTimestamp = timestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != batchSize {
+			glog.Fatalf("Mismatch. Expected %d values, got: %d", batchSize, len(sret.Values))
+		}
+		for jj := 0; jj < batchSize; jj++ {
+			expected := base.Offset(((ii - 1) * batchSize) + jj)
+			if sret.Values[jj].Offset != expected {
+				glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expected, sret.Values[jj].Offset)
+			}
+		}
+	}
+}
+
 func TestPartitionStress(t *testing.T) {
 	util.LogTestMarker("TestPartitionStress")
 	testDir := util.CreateTestDir(t, "TestPartitionStress")

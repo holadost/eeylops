@@ -301,122 +301,15 @@ func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.
 	}
 
 	// Find the correct segments and start offset from where we must start scanning.
-	var startOffset base.Offset
-	numMsgsOffset := base.Offset(arg.NumMessages)
-	var segs []segments.Segment
 	if arg.StartOffset >= 0 {
-		var endOffset base.Offset
-		// Offset scans.
-		endOffset = arg.StartOffset + numMsgsOffset - 1
-		startOffset = arg.StartOffset
-		fOffset, _ := p.segments[0].GetRange()
-		if arg.StartOffset < fOffset {
-			ret.NextOffset = fOffset
-			ret.Error = nil
-			return &ret
-		}
-		segs = p.getSegments(startOffset, endOffset)
-		if segs == nil || len(segs) == 0 {
-			// The start offset has still not been created in the partition.
-			// Set next offset to -1 indicating that the scan is complete.
-			ret.NextOffset = -1
-			ret.Error = nil
-			return &ret
-		}
+		// Do offset based scans.
+		p.offsetScan(ctx, arg, &ret)
+		return &ret
 	} else {
-		// Timestamp scans.
-		if arg.StartTimestamp <= 0 {
-			p.logger.Errorf("Invalid inputs. Either timestamp/offset must be provided")
-			ret.Error = ErrPartitionScan
-			ret.NextOffset = -1
-			return &ret
-		}
-		idx := p.findSegmentIdxWithTimestamp(0, len(p.segments)-1, arg.StartTimestamp)
-		if idx == -1 {
-			p.logger.Warningf("Did not find any messages with ts >= %d in partition", arg.StartTimestamp)
-			ret.Error = nil
-			ret.NextOffset = -1
-			return &ret
-		}
-		startOffset, _ = p.segments[idx].GetRange()
-		segs = append(segs, p.segments[idx])
-	}
-
-	// Scan messages.
-	var sarg segments.ScanEntriesArg
-	sarg.StartOffset = startOffset
-	sarg.NumMessages = arg.NumMessages
-	sarg.StartTimestamp = arg.StartTimestamp
-	sarg.EndTimestamp = arg.EndTimestamp
-	sarg.ScanSizeBytes = int64(p.maxScanSizeBytes)
-
-	// All offsets are present in the same segment.
-	if len(segs) == 1 {
-		seg := segs[0]
-		sret := seg.Scan(ctx, &sarg)
-		if sret.Error != nil {
-			ret.Error = sret.Error
-			ret.NextOffset = -1
-			return &ret
-		}
-		ret.Error = nil
-		ret.Values = sret.Values
-		if sret.NextOffset != -1 {
-			ret.NextOffset = sret.NextOffset
-		} else {
-			// NextOffset is -1. Check if there are any more segments after the current segment and if so,
-			// use the StartOffset of that segment as the NextOffset.
-			idx := p.findSegmentIdxByID(seg.ID())
-			if idx == len(p.segments)-1 {
-				ret.NextOffset = -1
-			} else {
-				so, _ := p.segments[idx+1].GetRange()
-				ret.NextOffset = so
-			}
-		}
+		// Do timestamp based scans.
+		p.timestampScan(ctx, arg, &ret)
 		return &ret
 	}
-
-	// The values are present across multiple segments. Merge them before returning.
-	var scanSizeBytes int
-	scanSizeBytes = 0
-	numPendingMsgs := arg.NumMessages
-	for ii, seg := range segs {
-		if numPendingMsgs == 0 {
-			break
-		}
-		var sarg segments.ScanEntriesArg
-		if ii == 0 {
-			sarg.StartOffset = arg.StartOffset
-			sarg.StartTimestamp = arg.StartTimestamp
-		} else {
-			sarg.StartOffset = seg.GetMetadata().StartOffset
-		}
-		sarg.EndTimestamp = arg.EndTimestamp
-		sarg.NumMessages = numPendingMsgs
-		sarg.ScanSizeBytes = int64(p.maxScanSizeBytes - scanSizeBytes)
-		sret := seg.Scan(ctx, &sarg)
-		if sret.Error != nil {
-			ret.Error = ErrPartitionScan
-			ret.NextOffset = -1
-			return &ret
-		}
-		numPendingMsgs -= uint64(len(sret.Values))
-		for _, val := range sret.Values {
-			// Ensure that the batch size remains smaller than the max scan size.
-			if (len(val.Value) + scanSizeBytes) > p.maxScanSizeBytes {
-				ret.Error = nil
-				ret.NextOffset = val.Offset // As this message is not being included.
-				return &ret
-			}
-			scanSizeBytes += len(val.Value)
-			// Merge all partial values into a single list.
-			ret.Values = append(ret.Values, val)
-		}
-	}
-	ret.Error = nil
-	ret.NextOffset = ret.Values[len(ret.Values)-1].Offset + 1
-	return &ret
 }
 
 // Snapshot the partition.
@@ -443,6 +336,144 @@ func (p *Partition) Close() {
 			p.logger.Fatalf("Failed to close segment: %d due to err: %s", meta.ID, err.Error())
 		}
 	}
+}
+
+func (p *Partition) offsetScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
+	var segs []segments.Segment
+	var startOffset base.Offset
+	var endOffset base.Offset
+	numMsgsOffset := base.Offset(arg.NumMessages)
+	// Offset scans.
+	endOffset = arg.StartOffset + numMsgsOffset - 1
+	startOffset = arg.StartOffset
+	fOffset, _ := p.segments[0].GetRange()
+	if arg.StartOffset < fOffset {
+		ret.NextOffset = fOffset
+		ret.Error = nil
+		return
+	}
+	segs = p.getSegments(startOffset, endOffset)
+	if segs == nil || len(segs) == 0 {
+		// The start offset has still not been created in the partition.
+		// Set next offset to -1 indicating that the scan is complete.
+		ret.NextOffset = -1
+		ret.Error = nil
+		return
+	}
+	var scanSizeBytes int
+	scanSizeBytes = 0
+	numPendingMsgs := arg.NumMessages
+	for ii, seg := range segs {
+		if numPendingMsgs == 0 {
+			break
+		}
+		var sarg segments.ScanEntriesArg
+		sarg.StartTimestamp = -1
+		if ii == 0 {
+			sarg.StartOffset = arg.StartOffset
+		} else {
+			sarg.StartOffset = seg.GetMetadata().StartOffset
+		}
+		sarg.EndTimestamp = arg.EndTimestamp
+		sarg.NumMessages = numPendingMsgs
+		sarg.ScanSizeBytes = int64(p.maxScanSizeBytes - scanSizeBytes)
+		sret := seg.Scan(ctx, &sarg)
+		if sret.Error != nil {
+			ret.Error = ErrPartitionScan
+			ret.NextOffset = -1
+			return
+		}
+		numPendingMsgs -= uint64(len(sret.Values))
+		for _, val := range sret.Values {
+			// Ensure that the batch size remains smaller than the max scan size.
+			if (len(val.Value) + scanSizeBytes) > p.maxScanSizeBytes {
+				ret.Error = nil
+				ret.NextOffset = val.Offset // As this message is not being included.
+				return
+			}
+			scanSizeBytes += len(val.Value)
+			// Merge all partial values into a single list.
+			ret.Values = append(ret.Values, val)
+		}
+	}
+	ret.Error = nil
+	ret.NextOffset = ret.Values[len(ret.Values)-1].Offset + 1
+	return
+}
+
+func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
+	var segs []segments.Segment
+	if arg.StartTimestamp <= 0 {
+		p.logger.Errorf("Invalid inputs. Either timestamp/offset must be provided")
+		ret.Error = ErrPartitionScan
+		ret.NextOffset = -1
+		return
+	}
+	now := time.Now().UnixNano()
+	startTs := arg.StartTimestamp
+	firstUnexpiredTs := now - (int64(p.ttlSeconds) * (1e9))
+	if startTs < firstUnexpiredTs {
+		startTs = firstUnexpiredTs
+	}
+	endTs := now
+	if arg.EndTimestamp <= 0 {
+		endTs = arg.EndTimestamp
+	}
+	if startTs >= endTs {
+		p.logger.Errorf("Invalid timestamps. Chosen Start TS: %d, Chosen End TS: %d", startTs, endTs)
+		ret.Error = nil
+		ret.NextOffset = -1
+		return
+	}
+
+	segs = p.getSegmentsByTimestamp(startTs, endTs)
+	if segs == nil || len(segs) == 0 {
+		// The start offset has still not been created in the partition.
+		// Set next offset to -1 indicating that the scan is complete.
+		ret.NextOffset = -1
+		ret.Error = nil
+		return
+	}
+
+	var scanSizeBytes int
+	scanSizeBytes = 0
+	numPendingMsgs := arg.NumMessages
+	for ii, seg := range segs {
+		if numPendingMsgs == 0 {
+			break
+		}
+		var sarg segments.ScanEntriesArg
+		sarg.StartOffset = -1 // Set this to -1 so that we don't do offset scans.
+		if ii == 0 {
+			sarg.StartTimestamp = arg.StartTimestamp
+		} else {
+			sarg.StartTimestamp = seg.GetMetadata().FirstMsgTimestamp.UnixNano()
+		}
+		sarg.EndTimestamp = endTs
+		sarg.NumMessages = numPendingMsgs
+		sarg.ScanSizeBytes = int64(p.maxScanSizeBytes - scanSizeBytes)
+		sret := seg.Scan(ctx, &sarg)
+		if sret.Error != nil {
+			ret.Error = ErrPartitionScan
+			ret.NextOffset = -1
+			return
+		}
+		numPendingMsgs -= uint64(len(sret.Values))
+		for _, val := range sret.Values {
+			// Ensure that the batch size remains smaller than the max scan size.
+			if (len(val.Value) + scanSizeBytes) > p.maxScanSizeBytes {
+				ret.Error = nil
+				ret.NextOffset = val.Offset // As this message is not being included.
+				return
+			}
+			scanSizeBytes += len(val.Value)
+			// Merge all partial values into a single list.
+			ret.Values = append(ret.Values, val)
+		}
+	}
+	ret.Error = nil
+	ret.NextOffset = ret.Values[len(ret.Values)-1].Offset + 1
+	return
 }
 
 // getSegments returns a list of segments that contains all the elements between the given start and end offsets.
@@ -475,6 +506,51 @@ func (p *Partition) getSegments(startOffset base.Offset, endOffset base.Offset) 
 	// Slow path.
 	if endSegIdx == -1 {
 		endSegIdx = p.findSegmentIdxWithOffset(startSegIdx, len(p.segments)-1, endOffset)
+	}
+	// Populate segments.
+	segs = append(segs, p.segments[startSegIdx])
+	if startSegIdx == endSegIdx {
+		return segs
+	}
+	if endSegIdx == -1 {
+		endSegIdx = len(p.segments) - 1
+	}
+	for ii := startSegIdx + 1; ii <= endSegIdx; ii++ {
+		segs = append(segs, p.segments[ii])
+	}
+	return segs
+}
+
+// getSegments returns a list of segments that contains all the elements between the given start and end offsets.
+// This function assumes that a partitionCfgLock has been acquired.
+func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) []segments.Segment {
+	var segs []segments.Segment
+
+	// Find start offset segment.
+	startSegIdx := p.findSegmentIdxWithTimestamp(0, len(p.segments)-1, startTs)
+	if startSegIdx == -1 {
+		p.logger.Infof("Did not find any segment with ts: %d", startTs)
+		// We did not find any segments that contains our offsets.
+		return segs
+	}
+
+	// Find the end offset segment. Finding the end offset is split into two paths: fast and slow.
+	// Fast Path: For the most part, the endIdx is going to be in the start or the next couple of
+	// segments right after start. Check these segments first and if not present, fall back to
+	// scanning all the segments.
+	endSegIdx := -1
+	for ii := startSegIdx; ii < startSegIdx+3; ii++ {
+		if ii >= len(p.segments) {
+			break
+		}
+		if p.timestampInSegment(endTs, p.segments[ii]) {
+			endSegIdx = ii
+			break
+		}
+	}
+	// Slow path.
+	if endSegIdx == -1 {
+		endSegIdx = p.findSegmentIdxWithTimestamp(startSegIdx, len(p.segments)-1, endTs)
 	}
 	// Populate segments.
 	segs = append(segs, p.segments[startSegIdx])
