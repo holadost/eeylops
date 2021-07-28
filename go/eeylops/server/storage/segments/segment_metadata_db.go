@@ -1,4 +1,4 @@
-package storage
+package segments
 
 import (
 	"github.com/golang/glog"
@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// segmentMetadataDB persists the segment metadata.
-type segmentMetadataDB struct {
+// SegmentMetadataDB persists the segment metadata.
+type SegmentMetadataDB struct {
 	Db       *gorm.DB
 	Path     string
 	RootPath string
@@ -21,7 +21,7 @@ type metadataModel struct {
 	Value []byte `gorm:"type:BLOB;NOT NULL" json:"value"`
 }
 
-func newSegmentMetadataDB(dbRootPath string) *segmentMetadataDB {
+func NewSegmentMetadataDB(dbRootPath string) *SegmentMetadataDB {
 	mdirPath := path.Join(dbRootPath, metadataDirName)
 	dbPath := path.Join(mdirPath, metadataDbName)
 	err := os.MkdirAll(mdirPath, 0774)
@@ -33,7 +33,7 @@ func newSegmentMetadataDB(dbRootPath string) *segmentMetadataDB {
 		glog.Fatalf("Unable to open metadata ddb located at: %s", dbPath)
 		return nil
 	}
-	mdb := new(segmentMetadataDB)
+	mdb := new(SegmentMetadataDB)
 	mdb.Db = db
 	mdb.Path = dbPath
 	mdb.RootPath = dbRootPath
@@ -47,7 +47,7 @@ func newSegmentMetadataDB(dbRootPath string) *segmentMetadataDB {
 	return mdb
 }
 
-func (mdb *segmentMetadataDB) Close() {
+func (mdb *SegmentMetadataDB) Close() {
 	if mdb.closed {
 		return
 	}
@@ -56,12 +56,13 @@ func (mdb *segmentMetadataDB) Close() {
 
 }
 
-func (mdb *segmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
+func (mdb *SegmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 	var val metadataModel
 	mm := &metadataModel{
 		Key:   metadataKeyName,
 		Value: metadata.Serialize(),
 	}
+	glog.V(1).Infof("Putting metadata in segment metadata DB: %s", metadata.ToString())
 	tx := mdb.Db.Begin()
 	// defer tx.Close()
 	dbc := tx.Where("key = ?", metadataKeyName).First(&val)
@@ -70,7 +71,6 @@ func (mdb *segmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 			tx.Rollback()
 			glog.Fatalf("Unable to get metadata due to err: %s", dbc.Error.Error())
 		} else {
-			glog.Infof("Inserting metadata for segment located at: %s", mdb.RootPath)
 			dbc = tx.Create(mm)
 			if dbc.Error != nil {
 				tx.Rollback()
@@ -80,7 +80,6 @@ func (mdb *segmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 			return
 		}
 	}
-	glog.Infof("Updating metadata for segment located at: %s", mdb.RootPath)
 	dbc = tx.Model(mm).Where("key = ?", metadataKeyName).Updates(mm)
 	if dbc.Error != nil {
 		tx.Rollback()
@@ -89,7 +88,7 @@ func (mdb *segmentMetadataDB) PutMetadata(metadata *SegmentMetadata) {
 	tx.Commit()
 }
 
-func (mdb *segmentMetadataDB) GetMetadata() *SegmentMetadata {
+func (mdb *SegmentMetadataDB) GetMetadata() *SegmentMetadata {
 	var mm metadataModel
 	dbc := mdb.Db.Where("key = ?", metadataKeyName).First(&mm)
 	if dbc.Error != nil {
@@ -99,6 +98,6 @@ func (mdb *segmentMetadataDB) GetMetadata() *SegmentMetadata {
 			return &SegmentMetadata{}
 		}
 	}
-	sm := newSegmentMetadata(mm.Value)
+	sm := NewSegmentMetadata(mm.Value)
 	return sm
 }

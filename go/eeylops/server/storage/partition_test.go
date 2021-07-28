@@ -1,7 +1,10 @@
 package storage
 
 import (
+	"context"
 	"eeylops/server/base"
+	sbase "eeylops/server/storage/base"
+	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
 	"math/rand"
@@ -10,45 +13,47 @@ import (
 	"time"
 )
 
-func createTestPartitionDir(t *testing.T, testName string) string {
-	return ""
-}
-
-func checkPartitionMetadata(t *testing.T) {
-
-}
-
-func testMarker(testName string) {
-	glog.Infof("\n\n============================= %s =============================\n\n", testName)
-}
-
 func singleProduce(startIdx int, p *Partition, numValues int) {
 	var values [][]byte
 	for ii := 0; ii < numValues; ii++ {
 		values = append(values, []byte(fmt.Sprintf("value-%d", startIdx)))
 		startIdx += 1
 	}
-	err := p.Append(values)
-	if err != nil {
-		glog.Fatalf("Append failed due to err: %s", err.Error())
+	ts := time.Now().UnixNano()
+	parg := sbase.AppendEntriesArg{
+		Entries:   values,
+		Timestamp: ts,
+		RLogIdx:   ts / (1000),
+	}
+	glog.Infof("Appending %d values to partition", numValues)
+	pret := p.Append(context.Background(), &parg)
+	if pret.Error != nil {
+		glog.Fatalf("Append failed due to err: %s", pret.Error.Error())
 	}
 }
 
-func loadDataBasic(p *Partition, numSegments int, numValuesPerSegment int) {
+func loadDataBasic(p *Partition, numValues int, startIdx int, numIterations int) {
+	for ii := 0; ii < numIterations; ii++ {
+		iterStartIdx := (ii * numValues) + startIdx
+		glog.Infof("Loading %d records. Iteration: %d. Start ID: %d", numValues, ii, iterStartIdx)
+		singleProduce(iterStartIdx, p, numValues)
+	}
+}
+
+func loadDataBasicWithNewSegments(p *Partition, numSegments int, numValuesPerSegment int) {
 	for jj := 0; jj < numSegments; jj++ {
 		// Produce values.
 		startIdx := jj * numValuesPerSegment
 		singleProduce(startIdx, p, numValuesPerSegment)
-
 		if numSegments != 1 {
 			// Create new segment.
-			p.createNewSegment()
+			p.createNewSegmentSafe()
 		}
 	}
 }
 
 func TestPartitionInitialize(t *testing.T) {
-	testMarker("TestPartitionInitialize")
+	util.LogTestMarker("TestPartitionInitialize")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -67,7 +72,7 @@ func TestPartitionInitialize(t *testing.T) {
 }
 
 func TestPartitionReInitialize(t *testing.T) {
-	testMarker("TestPartitionReInitialize")
+	util.LogTestMarker("TestPartitionReInitialize")
 	for ii := 0; ii < 5; ii++ {
 		glog.Infof("\n\n\nIteration: %d", ii)
 		opts := PartitionOpts{
@@ -89,7 +94,7 @@ func TestPartitionReInitialize(t *testing.T) {
 }
 
 func TestPartitionAppend(t *testing.T) {
-	testMarker("TestPartitionAppend")
+	util.LogTestMarker("TestPartitionAppend")
 	testDir := "/tmp/eeylops/TestPartitionAppend"
 	defer func() { _ = os.RemoveAll(testDir) }()
 	opts := PartitionOpts{
@@ -103,12 +108,12 @@ func TestPartitionAppend(t *testing.T) {
 		TTLSeconds:                     86400 * 7,
 	}
 	p := NewPartition(opts)
-	loadDataBasic(p, 1, 100)
+	loadDataBasic(p, 25, 0, 5)
 	glog.Infof("TestPartitionAppend finished successfully")
 }
 
 func TestPartitionNewSegmentCreation(t *testing.T) {
-	testMarker("TestPartitionNewSegmentCreation")
+	util.LogTestMarker("TestPartitionNewSegmentCreation")
 	testDir := "/tmp/eeylops/TestPartitionNewSegmentCreation"
 	_ = os.RemoveAll(testDir)
 	opts := PartitionOpts{
@@ -122,8 +127,8 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 		TTLSeconds:                     86400 * 7,
 	}
 	p := NewPartition(opts)
-	loadDataBasic(p, 10, 100)
-	segs := p.getSegments(10, 50)
+	loadDataBasicWithNewSegments(p, 10, 100)
+	segs := p.fetchSegments(p.getSegmentsByOffset(10, 50))
 	if segs == nil || len(segs) != 1 {
 		glog.Fatalf("Expected 1 segment, Got: %d", len(segs))
 		return
@@ -131,14 +136,19 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Check if we get a single segment correctly.
 	glog.Infof("Testing single getSegment")
-	id := segs[0].GetMetadata().ID
+	for _, seg := range p.segments {
+		meta := seg.GetMetadata()
+		glog.Infof("Metadata: %s", meta.ToString())
+	}
+	tmpMeta := segs[0].GetMetadata()
+	id := tmpMeta.ID
 	if id != 1 {
-		glog.Fatalf("Expected segment ID: 1, got: %d", id)
+		glog.Fatalf("Expected segment ID: 1, got: %d. Metadata: %s", id, tmpMeta.ToString())
 	}
 
 	// Test two segments.
 	glog.Infof("Testing two getSegment")
-	segs = p.getSegments(121, 221)
+	segs = p.fetchSegments(p.getSegmentsByOffset(121, 221))
 	if segs == nil || len(segs) != 2 {
 		glog.Fatalf("Expected 2 segment, Got: %d", len(segs))
 		return
@@ -154,7 +164,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Test multiple segments.
 	glog.Infof("Testing multiple getSegment")
-	segs = p.getSegments(121, 800)
+	segs = p.fetchSegments(p.getSegmentsByOffset(121, 800))
 	if segs == nil || len(segs) != 8 {
 		glog.Fatalf("Expected 8 segment, Got: %d", len(segs))
 		return
@@ -170,7 +180,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Test multiple segments with end offset greater than max offset in partition so far(999).
 	glog.Infof("Testing multiple getSegment with higher endOffset")
-	segs = p.getSegments(121, 1200)
+	segs = p.fetchSegments(p.getSegmentsByOffset(121, 1200))
 	if segs == nil || len(segs) != 10 {
 		glog.Fatalf("Expected 10 segments, Got: %d", len(segs))
 		return
@@ -186,7 +196,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 
 	// Test start offset greater than any so far.
 	glog.Infof("Testing non existent start offset")
-	segs = p.getSegments(1100, 1200)
+	segs = p.fetchSegments(p.getSegmentsByOffset(1100, 1200))
 	if !(segs == nil || len(segs) == 0) {
 		glog.Fatalf("Got %d segment(s) even though it does not contain our record", len(segs))
 	}
@@ -194,9 +204,8 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 }
 
 func TestPartitionScan(t *testing.T) {
-	testMarker("TestPartitionScan")
-	testDir := "/tmp/eeylops/TestPartitionScan"
-	_ = os.RemoveAll(testDir)
+	util.LogTestMarker("TestPartitionScan")
+	testDir := util.CreateTestDir(t, "TestPartitionScan")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -210,87 +219,117 @@ func TestPartitionScan(t *testing.T) {
 	p := NewPartition(opts)
 	numSegs := 10
 	numValsPerSeg := 100
-	loadDataBasic(p, numSegs, numValsPerSeg)
-	values, errs := p.Scan(0, 1)
-	if errs == nil || len(errs) == 0 {
-		glog.Fatalf("Did not receive any error codes for scan")
-		return
+	loadDataBasicWithNewSegments(p, numSegs, numValsPerSeg)
+	var sarg sbase.ScanEntriesArg
+	defCtx := context.Background()
+	sarg.StartOffset = 0
+	sarg.NumMessages = 1
+	sret := p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
 	}
-	if len(errs) != 1 {
-		glog.Fatalf("Expected 1 value, got: %d", len(errs))
-		return
+	if len(sret.Values) != 1 {
+		glog.Fatalf("Mismatch. Expected 1 value, got: %d", len(sret.Values))
 	}
-	if errs[0] != nil {
-		glog.Fatalf("Unable to scan first offset due to err: %s", errs[0].Error())
-		return
+	gotVal := string(sret.Values[0].Value)
+	gotOffset := sret.Values[0].Offset
+	if gotVal != "value-0" {
+		glog.Fatalf("Value mismatch. Expected: value-0, got: %s", gotVal)
 	}
-	if string(values[0]) != "value-0" {
-		glog.Fatalf("Value mismatch. Expected: value-0-0, got: %s", string(values[0]))
+	if gotOffset != 0 {
+		glog.Fatalf("Offset mismatch. Expected: 0, got: %d", gotOffset)
+	}
+	if sret.NextOffset != 1 {
+		glog.Fatalf("Offset mismatch. Expected Next Offset: 1, got: %d", gotOffset)
 	}
 
-	startOffset := 121
-	numMsgs := 100
-	values, errs = p.Scan(base.Offset(startOffset), uint64(numMsgs))
-	if errs == nil || len(errs) != numMsgs {
-		if errs != nil {
-			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
-		}
-		glog.Fatalf("Got nil errs")
-		return
+	sarg.StartOffset = 121
+	sarg.NumMessages = 100
+	sarg.StartTimestamp = -1
+	sarg.EndTimestamp = -1
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected scan error: %s", sret.Error.Error())
 	}
-	for ii, err := range errs {
-		if err != nil {
-			glog.Fatalf("Unexpected error while scanning offset: %d. Error: %s", ii+startOffset, err.Error())
-			return
-		}
-
-		expectedVal := fmt.Sprintf("value-%d", ii+startOffset)
-		gotVal := string(values[ii])
-
+	if len(sret.Values) != int(sarg.NumMessages) {
+		glog.Fatalf("Expected: %d values, got: %d", int(sarg.NumMessages), len(sret.Values))
+	}
+	for ii, val := range sret.Values {
+		expectedOffset := base.Offset(ii) + sarg.StartOffset
+		expectedVal := fmt.Sprintf("value-%d", expectedOffset)
+		gotVal = string(val.Value)
 		if expectedVal != gotVal {
 			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
-			return
+		}
+		if expectedOffset != val.Offset {
+			glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expectedOffset, val.Offset)
 		}
 	}
-
-	startOffset = 221
-	numMsgs = (numSegs * numValsPerSeg) + startOffset
-	expectedNumMsgs := (numSegs * numValsPerSeg) - startOffset
-	values, errs = p.Scan(base.Offset(startOffset), uint64(numMsgs))
-	if errs == nil || len(errs) != expectedNumMsgs {
-		if errs != nil {
-			glog.Fatalf("Got %d errs. Expected: %d", len(errs), numMsgs)
-		}
-		glog.Fatalf("Got nil errs")
-		return
+	expectedNextOffset := sarg.StartOffset + base.Offset(sarg.NumMessages)
+	if sret.NextOffset != expectedNextOffset {
+		glog.Fatalf("Offset mismatch. Expected next offset: %d, got: %d", expectedNextOffset, sret.NextOffset)
 	}
-	for ii, err := range errs {
-		if err != nil {
-			glog.Fatalf("Unexpected error while scanning offset: %d. Error: %s", ii+startOffset, err.Error())
-			return
-		}
+	glog.Infof("Finished scanning 121 to 221. Starting again from 221")
 
-		expectedVal := fmt.Sprintf("value-%d", ii+startOffset)
-		gotVal := string(values[ii])
-
+	sarg.StartOffset = 221
+	sarg.NumMessages = uint64(numSegs * numValsPerSeg)
+	expectedNumMsgs := (numSegs * numValsPerSeg) - int(sarg.StartOffset)
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning. Error: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != expectedNumMsgs {
+		glog.Fatalf("Num messages mismatch. Expected: %d, got: %d", expectedNumMsgs, len(sret.Values))
+	}
+	for ii, val := range sret.Values {
+		expectedOffset := base.Offset(ii) + sarg.StartOffset
+		expectedVal := fmt.Sprintf("value-%d", expectedOffset)
+		gotVal = string(val.Value)
 		if expectedVal != gotVal {
 			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", expectedVal, gotVal)
-			return
+		}
+		if expectedOffset != val.Offset {
+			glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expectedOffset, val.Offset)
 		}
 	}
+	if sret.NextOffset != base.Offset(numSegs*numValsPerSeg) {
+		glog.Fatalf("Expected next offset: %d, got: %d", base.Offset(numSegs*numValsPerSeg), sret.NextOffset)
+	}
+	glog.Infof("Finished scanning 221 as well. Up next, scanning non existent offsets")
 
-	values, errs = p.Scan(base.Offset(numSegs*numValsPerSeg), uint64(10))
-	if len(errs) != 0 {
-		glog.Fatalf("We got values back even though we never wrote to these offsets")
+	// Scan non existent offsets.
+	sarg.StartOffset = base.Offset(numSegs * numValsPerSeg)
+	sarg.NumMessages = 10
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning. Error: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != 0 {
+		glog.Fatalf("Num messages mismatch. Expected: 0, got: %d", len(sret.Values))
+	}
+	if sret.NextOffset != -1 {
+		glog.Fatalf("Expected next offset: -1, got: %d", sret.NextOffset)
+	}
+
+	// Scan the last offset.
+	sarg.StartOffset = base.Offset(numSegs*numValsPerSeg) - 1
+	sarg.NumMessages = 10
+	sret = p.Scan(defCtx, &sarg)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning. Error: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != 1 {
+		glog.Fatalf("Num messages mismatch. Expected: 1, got: %d", len(sret.Values))
+	}
+	if sret.NextOffset != base.Offset(numSegs*numValsPerSeg) {
+		glog.Fatalf("Expected next offset: %d, got: %d", base.Offset(numSegs*numValsPerSeg), sret.NextOffset)
 	}
 	glog.Infof("TestPartitionScan finished successfully")
 }
 
 func TestPartitionManager(t *testing.T) {
-	testMarker("TestPartitionManager")
-	testDir := "/tmp/eeylops/TestPartitionManager"
-	_ = os.RemoveAll(testDir)
-
+	util.LogTestMarker("TestPartitionManager")
+	testDir := util.CreateTestDir(t, "TestPartitionManager")
 	totalValues := 500
 	numValuesPerBatch := 50
 	valueSizeBytes := 100
@@ -305,6 +344,7 @@ func TestPartitionManager(t *testing.T) {
 		MaxScanSizeBytes:               1500,
 		TTLSeconds:                     86400 * 7,
 	}
+	defCtx := context.Background()
 	sleepTime := 500*time.Millisecond + time.Duration(opts.ExpiredSegmentPollIntervalSecs)*time.Millisecond*1000
 	opts.TTLSeconds = int((time.Duration(totalIters) * sleepTime) / time.Second)
 	p := NewPartition(opts)
@@ -319,9 +359,14 @@ func TestPartitionManager(t *testing.T) {
 			rand.Read(token)
 			values = append(values, token)
 		}
-		err := p.Append(values)
-		if err != nil {
-			glog.Fatalf("Append failed due to err: %s", err.Error())
+		aarg := sbase.AppendEntriesArg{
+			Entries:   values,
+			Timestamp: time.Now().UnixNano(),
+			RLogIdx:   int64(iter + 1),
+		}
+		aret := p.Append(defCtx, &aarg)
+		if aret.Error != nil {
+			glog.Fatalf("Append failed due to err: %s", aret.Error.Error())
 		}
 	}
 	time.Sleep(sleepTime)
@@ -331,20 +376,23 @@ func TestPartitionManager(t *testing.T) {
 	}
 
 	// Test scans with max scan size bytes.
-	values, errs := p.Scan(0, 20)
-	if len(errs) != opts.MaxScanSizeBytes/valueSizeBytes {
-		glog.Fatalf("Expected upto 10 messages. Got: %d", len(errs))
+	var sarg sbase.ScanEntriesArg
+	sarg.StartOffset = 0
+	sarg.NumMessages = 20
+	sarg.StartTimestamp = -1
+	sarg.EndTimestamp = -1
+	sret := p.Scan(defCtx, &sarg)
+	expectedNumValues := opts.MaxScanSizeBytes / valueSizeBytes
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning: %s", sret.Error.Error())
 	}
-	for ii, err := range errs {
-		if err != nil {
-			glog.Fatalf("Unable to get offset: %d due to err: %s", ii, err.Error())
-		}
+	if len(sret.Values) > expectedNumValues {
+		glog.Fatalf("Expected <= %d messages but we got: %d", expectedNumValues, len(sret.Values))
 	}
-	if len(values) != opts.MaxScanSizeBytes/valueSizeBytes {
-		glog.Fatalf("Expected only 10 messages but we got: %d", len(values))
-	}
+
+	// Test segment expiry.
 	currNumSegs := len(p.segments)
-	time.Sleep(sleepTime * 4)
+	time.Sleep(sleepTime * 5)
 	for iter := 0; iter < totalValues/opts.NumRecordsPerSegmentThreshold; iter++ {
 		p.Close()
 		p = NewPartition(opts)
@@ -356,5 +404,216 @@ func TestPartitionManager(t *testing.T) {
 		}
 		currNumSegs = len(p.segments)
 		time.Sleep(sleepTime * 2)
+	}
+	var values [][]byte
+	for ii := 0; ii < numValuesPerBatch; ii++ {
+		token := make([]byte, valueSizeBytes)
+		rand.Read(token)
+		values = append(values, token)
+	}
+
+	// Append more values to the partition. The offset should start from totalValues.
+	glog.Infof("Appending messages after all segments have expired!")
+	aarg := sbase.AppendEntriesArg{
+		Entries:   values,
+		Timestamp: time.Now().UnixNano(),
+		RLogIdx:   int64(101),
+	}
+	aret := p.Append(defCtx, &aarg)
+	if aret.Error != nil {
+		glog.Fatalf("Append failed due to err: %s", aret.Error.Error())
+	}
+
+	glog.Infof("Scanning messages after all segments have expired and new messages were appended")
+	sarg.StartOffset = base.Offset(totalValues)
+	sarg.NumMessages = 20
+	sret = p.Scan(defCtx, &sarg)
+	expectedNumValues = opts.MaxScanSizeBytes / valueSizeBytes
+	expectedNextOffset := sarg.StartOffset + base.Offset(expectedNumValues)
+	if sret.Error != nil {
+		glog.Fatalf("Unexpected error while scanning: %s", sret.Error.Error())
+	}
+	if len(sret.Values) != expectedNumValues && len(sret.Values) != expectedNumValues-1 {
+		glog.Fatalf("Expected only (%d or %d) messages but we got: %d", expectedNumValues-1,
+			expectedNumValues, len(sret.Values))
+	}
+	if sret.NextOffset != expectedNextOffset {
+		glog.Fatalf("Expected next offset: %d, got: %d", expectedNextOffset, sret.NextOffset)
+	}
+	p.Close()
+}
+
+func TestPartitionScan2(t *testing.T) {
+	util.LogTestMarker("TestPartitionScan2")
+	testDir := util.CreateTestDir(t, "TestPartitionScan2")
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: 10,
+		LiveSegmentPollIntervalSecs:    2,
+		NumRecordsPerSegmentThreshold:  1000,
+		MaxScanSizeBytes:               15 * 1024 * 1024,
+		TTLSeconds:                     5,
+	}
+	p := NewPartition(opts)
+	numIters := 50
+	batchSize := 10
+	var timestamps []int64
+	token := make([]byte, 1024)
+	rand.Read(token)
+	producer := func() {
+		for ii := 0; ii < numIters; ii++ {
+			now := time.Now().UnixNano()
+			var arg sbase.AppendEntriesArg
+			for jj := 0; jj < batchSize; jj++ {
+				val := fmt.Sprintf("value-%07d", (ii*batchSize)+jj)
+				arg.Entries = append(arg.Entries, append([]byte(val), token...))
+			}
+			arg.RLogIdx = now
+			arg.Timestamp = now
+			timestamps = append(timestamps, now)
+			ret := p.Append(context.Background(), &arg)
+			if ret.Error != nil {
+				glog.Fatalf("Append error: %s", ret.Error.Error())
+			}
+		}
+	}
+	start := time.Now()
+	producer()
+	glog.Infof("Producer done. Total time: %v", time.Since(start))
+
+	var sarg sbase.ScanEntriesArg
+	sarg.NumMessages = uint64(batchSize)
+	sarg.StartOffset = -1
+	defCtx := context.Background()
+	for ii := 1; ii < len(timestamps); ii++ {
+		sarg.StartTimestamp = timestamps[ii-1]
+		sarg.EndTimestamp = timestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != batchSize {
+			glog.Fatalf("Mismatch. Expected %d values, got: %d", batchSize, len(sret.Values))
+		}
+		for jj := 0; jj < batchSize; jj++ {
+			expected := base.Offset(((ii - 1) * batchSize) + jj)
+			if sret.Values[jj].Offset != expected {
+				glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expected, sret.Values[jj].Offset)
+			}
+		}
+	}
+}
+
+func TestPartitionStress(t *testing.T) {
+	util.LogTestMarker("TestPartitionStress")
+	testDir := util.CreateTestDir(t, "TestPartitionStress")
+	pMap := make(map[int]*Partition)
+	for ii := 0; ii < 5; ii++ {
+		opts := PartitionOpts{
+			TopicName:                      "topic1",
+			PartitionID:                    ii + 1,
+			RootDirectory:                  testDir,
+			ExpiredSegmentPollIntervalSecs: 1,
+			LiveSegmentPollIntervalSecs:    1,
+			NumRecordsPerSegmentThreshold:  10000,
+			MaxScanSizeBytes:               15 * 1024 * 1024,
+			TTLSeconds:                     86400 * 7,
+		}
+		p := NewPartition(opts)
+		pMap[ii] = p
+	}
+	psw := newPartitionStressWorkload(pMap, 1, 4096, 10, 2000)
+	psw.start()
+	time.Sleep(time.Second * 20)
+	psw.stop()
+}
+
+type partitionStressWorkload struct {
+	partitionMap             map[int]*Partition
+	topicName                string
+	numConsumersPerPartition int
+	doneChan                 chan struct{}
+	dataSizeBytes            int
+	batchSize                int
+	consumerDelayMs          time.Duration // Consumer delay in ms.
+}
+
+func newPartitionStressWorkload(partitionMap map[int]*Partition, numConsumerPerPartition int, payloadSizeBytes int, batchSize int, consumerDelayMs int) *partitionStressWorkload {
+	psw := new(partitionStressWorkload)
+	psw.numConsumersPerPartition = 2
+	psw.doneChan = make(chan struct{})
+	psw.dataSizeBytes = payloadSizeBytes
+	psw.partitionMap = partitionMap
+	psw.numConsumersPerPartition = numConsumerPerPartition
+	psw.batchSize = batchSize
+	psw.consumerDelayMs = time.Duration(consumerDelayMs) * time.Millisecond
+	return psw
+}
+
+func (psw *partitionStressWorkload) start() {
+	glog.Infof("Starting workloads")
+	for key, _ := range psw.partitionMap {
+		go psw.producer(key)
+		for ii := 0; ii < psw.numConsumersPerPartition; ii++ {
+			go psw.consumer(key, ii)
+		}
+	}
+}
+
+func (psw *partitionStressWorkload) stop() {
+	glog.Infof("Stopping workloads")
+	close(psw.doneChan)
+}
+
+func (psw *partitionStressWorkload) producer(partitionID int) {
+	token := make([]byte, psw.dataSizeBytes)
+	rand.Read(token)
+	var entries [][]byte
+	for ii := 0; ii < psw.batchSize; ii++ {
+		entries = append(entries, token)
+	}
+	ticker := time.NewTicker(time.Millisecond * 5)
+	for {
+		select {
+		case <-psw.doneChan:
+			glog.Infof("Producer for partition: %d exiting", partitionID)
+			return
+		case <-ticker.C:
+			now := time.Now().UnixNano()
+			arg := sbase.AppendEntriesArg{
+				Entries:   entries,
+				Timestamp: now,
+				RLogIdx:   now,
+			}
+			p := psw.partitionMap[partitionID]
+			ret := p.Append(context.Background(), &arg)
+			if ret.Error != nil {
+				glog.Fatalf("Unexpected error while appending to partition: %d", partitionID)
+			}
+		}
+	}
+}
+
+func (psw *partitionStressWorkload) consumer(partitionID int, consumerID int) {
+	for {
+		time.Sleep(psw.consumerDelayMs)
+		scanner := NewPartitionScanner(psw.partitionMap[partitionID], 0)
+		count := 0
+		for scanner.Rewind(); scanner.Valid(); scanner.Next() {
+			item, err := scanner.Get()
+			if err != nil {
+				glog.Fatalf("Unexpected error from consumer: %d while scanning partition: %d", consumerID, partitionID)
+			}
+			if item.Offset != base.Offset(count) {
+				glog.Fatalf("Wrong message got from partition. Expected: %d, got: %d", count, item.Offset)
+			}
+			count++
+		}
+		_, ok := <-psw.doneChan
+		if !ok {
+			glog.Infof("Consumer: %d, partition: %d exiting", consumerID, partitionID)
+		}
 	}
 }

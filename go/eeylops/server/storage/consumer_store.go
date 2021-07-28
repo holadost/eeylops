@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/storage/kv_store"
 	"encoding/binary"
 	badger "github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
@@ -14,7 +15,7 @@ const consumerStoreDirectory = "consumer_store"
 const keyDelimiter = "::::"
 
 type ConsumerStore struct {
-	kvStore *BadgerKVStore
+	kvStore *kv_store.BadgerKVStore
 	rootDir string
 	csDir   string
 }
@@ -41,7 +42,7 @@ func (cs *ConsumerStore) initialize() {
 	opts.Compression = options.None
 	opts.MaxLevels = 2
 	opts.VerifyValueChecksum = true
-	cs.kvStore = NewBadgerKVStore(cs.csDir, opts)
+	cs.kvStore = kv_store.NewBadgerKVStore(cs.csDir, opts)
 }
 
 func (cs *ConsumerStore) Close() error {
@@ -54,7 +55,7 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, p
 	key := generateConsumerKey(consumerID, topicName, partitionID)
 	_, err := cs.kvStore.Get(key)
 	if err != nil {
-		if err != ErrKVStoreKeyNotFound {
+		if err != kv_store.ErrKVStoreKeyNotFound {
 			glog.Errorf("Unable to register consumer due to err: %s", err.Error())
 			return ErrConsumerStoreCommit
 		}
