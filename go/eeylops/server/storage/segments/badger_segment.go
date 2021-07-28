@@ -51,8 +51,8 @@ type BadgerSegment struct {
 
 	// States used for timestamp based indexes on messages written to the segment.
 	currentIndexBatchSizeBytes int64                      // Current index size in bytes.
-	timestampIndex             []TimestampIndexEntry      // Timestamp index.
-	timestampIndexLock         sync.RWMutex               // This protects timestampIndex
+	timestampBRI               []TimestampIndexEntry      // Timestamp block range index.
+	timestampIndexLock         sync.RWMutex               // This protects timestampBRI
 	timestampIndexChan         chan []TimestampIndexEntry // The channel where the timestamp indexes are forwarded.
 	rebuildIndexOnce           sync.Once                  // Mutex to protect us from building indexes only once.
 
@@ -182,7 +182,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp, seg.currentIndexBatchSizeBytes, seg.nextOffset)
 
 	// Add an index entry if required.
-	currIndexSize := len(seg.timestampIndex)
+	currIndexSize := len(seg.timestampBRI)
 	for ii, tse := range tsEntries {
 		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(currIndexSize+ii))...))
 		tse.SetTimestamp(arg.Timestamp)
@@ -615,7 +615,7 @@ func (seg *BadgerSegment) updateTimestampIndex(entries []TimestampIndexEntry) {
 		seg.logger.Warningf("Either segment is closed or never opened. Skipping timestamp index updates")
 		return
 	}
-	seg.timestampIndex = append(seg.timestampIndex, entries...)
+	seg.timestampBRI = append(seg.timestampBRI, entries...)
 }
 
 // getNearestSmallerOffsetFromIndex returns the first offset that is smaller than the given timestamp. This method
@@ -623,24 +623,24 @@ func (seg *BadgerSegment) updateTimestampIndex(entries []TimestampIndexEntry) {
 func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset {
 	seg.timestampIndexLock.RLock()
 	defer seg.timestampIndexLock.RUnlock()
-	if len(seg.timestampIndex) == 0 {
+	if len(seg.timestampBRI) == 0 {
 		// There are no indexes. Return the smallest offset.
 		return seg.metadata.StartOffset
 	}
-	if ts > seg.timestampIndex[len(seg.timestampIndex)-1].GetTimestamp() {
-		return seg.timestampIndex[len(seg.timestampIndex)-1].GetOffset()
+	if ts > seg.timestampBRI[len(seg.timestampBRI)-1].GetTimestamp() {
+		return seg.timestampBRI[len(seg.timestampBRI)-1].GetOffset()
 	}
 
 	// Binary search index to find nearest offset lesser than the given timestamp.
 	left := 0
-	right := len(seg.timestampIndex) - 1
+	right := len(seg.timestampBRI) - 1
 	nearestIdx := -1
 	for {
 		if left > right {
 			break
 		}
 		mid := left + (right-left)/2
-		if seg.timestampIndex[mid].GetTimestamp() >= ts {
+		if seg.timestampBRI[mid].GetTimestamp() >= ts {
 			// Move to the left half in the next iteration as the right half >= ts.
 			right = mid - 1
 		} else {
@@ -658,7 +658,7 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 		}
 		return base.Offset(-1)
 	}
-	return seg.timestampIndex[nearestIdx].GetOffset()
+	return seg.timestampBRI[nearestIdx].GetOffset()
 }
 
 // rebuildIndexes is called by the indexer when the segment is opened for the first time.
@@ -677,9 +677,9 @@ func (seg *BadgerSegment) rebuildIndexes() {
 		seg.timestampIndexLock.Lock()
 		defer seg.timestampIndexLock.Unlock()
 		// Clear the index.
-		seg.timestampIndex = nil
+		seg.timestampBRI = nil
 
-		// Scan the DB for keys with the timestamp index prefix and rebuild timestampIndex.
+		// Scan the DB for keys with the timestamp index prefix and rebuild timestampBRI.
 		itr := seg.dataDB.CreateScanner(kTimestampIndexPrefixKeyBytes, startIdxKey, false)
 		defer itr.Close()
 		itr.Seek(startIdxKey)
@@ -700,10 +700,10 @@ func (seg *BadgerSegment) rebuildIndexes() {
 			}
 			var tse TimestampIndexEntry
 			tse.InitializeFromRaw(val)
-			seg.timestampIndex = append(seg.timestampIndex, tse)
+			seg.timestampBRI = append(seg.timestampBRI, tse)
 			count++
 		}
-		seg.logger.VInfof(1, "Found %d index entries persisted in segment", len(seg.timestampIndex))
+		seg.logger.VInfof(1, "Found %d index entries persisted in segment", len(seg.timestampBRI))
 	})
 }
 
