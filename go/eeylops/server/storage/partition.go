@@ -546,8 +546,8 @@ func (p *Partition) getLiveSegment() segments.Segment {
 	return p.segments[len(p.segments)-1]
 }
 
-// findSegmentIdxWithOffset finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
-// been acquired.
+// findSegmentIdxWithOffset finds the segment index that contains the given offset. This function assumes the
+// partitionCfgLock has been acquired.
 func (p *Partition) findSegmentIdxWithOffset(offset base.Offset) int {
 	offsetCmp := func(idx int) int {
 		sOff, _ := p.segments[idx].GetRange()
@@ -765,8 +765,14 @@ func (p *Partition) createNewSegmentUnsafe() {
 	}
 	// Set the metadata and close and reopen the segment.
 	newSeg.SetMetadata(metadata)
-	newSeg.Close()
+	err = newSeg.Close()
+	if err != nil {
+		p.logger.Fatalf("Error while closing and reopening new segment: %d", segID)
+	}
 	newSeg, err = segments.NewBadgerSegment(&opts)
+	if err != nil {
+		p.logger.Fatalf("Error while closing and reopening new segment: %d", segID)
+	}
 	newSeg.Open()
 	if isImmutizing {
 		<-immutizeDone
