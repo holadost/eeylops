@@ -30,4 +30,7 @@ var (
 
 	// ErrTopicNotFound is returned when the given topic is not found.
 	ErrTopicNotFound = errors.New("ErrTopicNotFound: topic not found")
+
+	// errPartitionOffsetTsNotFound is returned when an offset or timestamp was not found
+	errPartitionOffsetTsNotFound = errors.New("errPartitionOffsetTsNotFound: offset/timestamp not found")
 )

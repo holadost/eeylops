@@ -3,8 +3,6 @@ package segments
 import "errors"
 
 var (
-	// ErrSegmentGeneric when we have an unexpected segment error.
-
 	// ErrSegmentBackend when we have an unexpected segment error.
 	ErrSegmentBackend = errors.New("ErrSegmentBackend: segment backend error")
 

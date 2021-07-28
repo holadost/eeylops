@@ -459,7 +459,7 @@ func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.
 	var segs []segments.Segment
 
 	// Find start offset segment.
-	startSegIdx := p.findSegmentIdxWithOffset(0, len(p.segments)-1, startOffset)
+	startSegIdx := p.findSegmentIdxWithOffset(startOffset)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with offset: %d", startOffset)
 		// We did not find any segments that contains our offsets.
@@ -482,7 +482,7 @@ func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.
 	}
 	// Slow path.
 	if endSegIdx == -1 {
-		endSegIdx = p.findSegmentIdxWithOffset(startSegIdx, len(p.segments)-1, endOffset)
+		endSegIdx = p.findSegmentIdxWithOffset(endOffset)
 	}
 	// Populate segments.
 	segs = append(segs, p.segments[startSegIdx])
@@ -498,13 +498,13 @@ func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.
 	return segs
 }
 
-// getSegmentsByOffset returns a list of segments that contains all the elements between the given start and end offsets.
-// This function assumes that a partitionCfgLock has been acquired.
+// getSegmentsByTimestamp returns a list of segments that contains all the elements between the given start and end
+// offsets. This function assumes that a partitionCfgLock has been acquired.
 func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) []segments.Segment {
 	var segs []segments.Segment
 
 	// Find start offset segment.
-	startSegIdx := p.findSegmentIdxWithTimestamp(0, len(p.segments)-1, startTs)
+	startSegIdx := p.findSegmentIdxWithTimestamp(startTs)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with ts: %d", startTs)
 		// We did not find any segments that contains our offsets.
@@ -527,7 +527,7 @@ func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) []segment
 	}
 	// Slow path.
 	if endSegIdx == -1 {
-		endSegIdx = p.findSegmentIdxWithTimestamp(startSegIdx, len(p.segments)-1, endTs)
+		endSegIdx = p.findSegmentIdxWithTimestamp(endTs)
 	}
 	// Populate segments.
 	segs = append(segs, p.segments[startSegIdx])
@@ -550,46 +550,50 @@ func (p *Partition) getLiveSegment() segments.Segment {
 
 // findSegmentIdxWithOffset finds the segment index that contains the given offset. This function assumes the partitionCfgLock has
 // been acquired.
-func (p *Partition) findSegmentIdxWithOffset(startIdx int, endIdx int, offset base.Offset) int {
-	// Base cases.
-	if startIdx > endIdx {
-		return -1
-	}
-	if startIdx == endIdx {
-		if p.offsetInSegment(offset, p.segments[startIdx]) {
-			return startIdx
+func (p *Partition) findSegmentIdxWithOffset(offset base.Offset) int {
+	offsetCmp := func(idx int) int {
+		sOff, _ := p.segments[idx].GetRange()
+		if p.offsetInSegment(offset, p.segments[idx]) {
+			return 0
+		} else if offset < sOff {
+			return -1
+		} else {
+			return 1
 		}
-		return -1
 	}
-	midIdx := startIdx + (endIdx-startIdx)/2
-	sOff, _ := p.segments[midIdx].GetRange()
-	if p.offsetInSegment(offset, p.segments[midIdx]) {
-		return midIdx
-	} else if offset < sOff {
-		return p.findSegmentIdxWithOffset(startIdx, midIdx-1, offset)
-	} else {
-		return p.findSegmentIdxWithOffset(midIdx+1, endIdx, offset)
-	}
+	return p.binarySearchSegments(0, len(p.segments)-1, offsetCmp)
 }
 
-func (p *Partition) findSegmentIdxWithTimestamp(startIdx int, endIdx int, timestamp int64) int {
+// findSegmentIdxWithTimestamp finds the segment index that contains the given offset. This method assumes the
+// partitionCfgLock has been acquired.
+func (p *Partition) findSegmentIdxWithTimestamp(timestamp int64) int {
+	timestampCmp := func(idx int) int {
+		sts, _ := p.segments[idx].GetMsgTimestampRange()
+		if p.timestampInSegment(timestamp, p.segments[idx]) {
+			return idx
+		} else if timestamp < sts {
+			return -1
+		} else {
+			return 1
+		}
+	}
+	return p.binarySearchSegments(0, len(p.segments)-1, timestampCmp)
+}
+
+// binarySearchSegments searches segments using the cmp function. The cmp function should return 0, if a match
+// was found with the given segments idx, -1 if it is lesser and 1 if it is greater.
+func (p *Partition) binarySearchSegments(startIdx, endIdx int, cmp func(int) int) int {
 	if startIdx > endIdx {
 		return -1
 	}
-	if startIdx == endIdx {
-		if p.timestampInSegment(timestamp, p.segments[startIdx]) {
-			return startIdx
-		}
-		return -1
-	}
 	midIdx := startIdx + (endIdx-startIdx)/2
-	sts, _ := p.segments[midIdx].GetMsgTimestampRange()
-	if p.timestampInSegment(timestamp, p.segments[midIdx]) {
+	res := cmp(midIdx)
+	if res == 0 {
 		return midIdx
-	} else if timestamp < sts {
-		return p.findSegmentIdxWithTimestamp(0, midIdx-1, timestamp)
+	} else if res == -1 {
+		return p.binarySearchSegments(startIdx, midIdx-1, cmp)
 	} else {
-		return p.findSegmentIdxWithTimestamp(midIdx+1, endIdx, timestamp)
+		return p.binarySearchSegments(midIdx+1, endIdx, cmp)
 	}
 }
 
