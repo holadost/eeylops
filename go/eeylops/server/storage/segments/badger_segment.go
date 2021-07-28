@@ -33,6 +33,7 @@ type BadgerSegment struct {
 	ttlSeconds  int                // TTL seconds for a message.
 	dataDB      kv_store.KVStore   // Backing KV store to hold the data.
 	metadataDB  *SegmentMetadataDB // Segment metadata DB.
+	startOffset int64              // Segment start offset
 
 	// Flags that indicate whether segment has been opened and closed.
 	closed            bool          // Flag that indicates whether the segment is closed.
@@ -99,17 +100,12 @@ func (seg *BadgerSegment) initialize() {
 	seg.metadata = seg.metadataDB.GetMetadata()
 	if seg.metadata.ID == 0 {
 		seg.logger.Infof("Did not find any metadata associated with this segment. This must be a new segment!")
+		seg.startOffset = -1
+	} else {
+		seg.startOffset = int64(seg.metadata.StartOffset)
 	}
 	seg.segmentClosedChan = make(chan struct{}, 1)
 	seg.timestampIndexChan = make(chan []TimestampIndexEntry, 128)
-	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
-	opts.SyncWrites = true
-	opts.NumMemtables = 3
-	opts.VerifyValueChecksum = true
-	if seg.metadata.Immutable {
-		opts.ReadOnly = true
-	}
-	seg.dataDB = kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
 }
 
 // ID returns the segment id.
@@ -141,7 +137,10 @@ func (seg *BadgerSegment) Close() error {
 	seg.logger.Infof("Closing segment")
 	close(seg.segmentClosedChan)
 	seg.metadataDB.Close()
-	err := seg.dataDB.Close()
+	var err error
+	if seg.dataDB != nil {
+		err = seg.dataDB.Close()
+	}
 	seg.metadataDB = nil
 	seg.closed = true
 	return err
@@ -300,28 +299,16 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 
 // GetRange returns the range(start and end offset) of the segment.
 func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
-	seg.segLock.RLock()
-	defer seg.segLock.RUnlock()
-
-	sOff = seg.metadata.StartOffset
-	eOff = seg.metadata.EndOffset
-	if !seg.metadata.Immutable {
-		seg.liveStateLock.RLock()
-		defer seg.liveStateLock.RUnlock()
-		nextOff := seg.getNextOffset()
-		if nextOff == sOff {
-			eOff = -1
-		} else {
-			eOff = nextOff - 1
-		}
+	startOff := seg.getStartOffset()
+	nextOff := seg.getNextOffset()
+	if nextOff == startOff {
+		return startOff, -1
 	}
-	return
+	return startOff, nextOff - 1
 }
 
 // GetMsgTimestampRange returns the first and last message unix timestamps(in nanoseconds).
 func (seg *BadgerSegment) GetMsgTimestampRange() (int64, int64) {
-	seg.segLock.RLock()
-	defer seg.segLock.RUnlock()
 	if seg.IsEmpty() {
 		return -1, -1
 	}
@@ -331,7 +318,9 @@ func (seg *BadgerSegment) GetMsgTimestampRange() (int64, int64) {
 	if firstMsgTs <= lastMsgTs {
 		return firstMsgTs, lastMsgTs
 	}
-	// Slow path.
+
+	// The data did not make sense i.e. the firstMsg was greater than the lastMsg. This could have only  happened if
+	// we were racing with the very first append. Take the liveStateLock and then read the values.
 	seg.liveStateLock.RLock()
 	defer seg.liveStateLock.RUnlock()
 	return seg.getFirstMsgTs(), seg.getLastMsgTs()
@@ -343,11 +332,23 @@ func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
 	defer seg.segLock.Unlock()
 	seg.metadataDB.PutMetadata(&sm)
 	seg.metadata = &sm
+	// We do this because when the segment is first initialized, the parent will set the metadata and then
+	// open the segment i.e. the segment might not be reinitialized. Set it here again for paranoia reasons.
+	// Doing this should not affect correctness.
+	seg.setStartOffset(seg.metadata.StartOffset)
 }
 
 // Stats returns the stats of the segment.
 func (seg *BadgerSegment) Stats() {
 
+}
+
+func (seg *BadgerSegment) getStartOffset() base.Offset {
+	return base.Offset(atomic.LoadInt64(&seg.startOffset))
+}
+
+func (seg *BadgerSegment) setStartOffset(off base.Offset) {
+	atomic.StoreInt64(&seg.startOffset, int64(off))
 }
 
 // Returns the current nextOffset of the segment.
@@ -751,6 +752,15 @@ func (seg *BadgerSegment) rebuildIndexes() {
 
 // Opens the segment. This method assumes that segLock has been acquired.
 func (seg *BadgerSegment) open() {
+	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
+	opts.SyncWrites = true
+	opts.NumMemtables = 3
+	opts.VerifyValueChecksum = true
+	if seg.metadata.Immutable {
+		opts.ReadOnly = true
+	}
+	seg.dataDB = kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
+
 	go seg.indexer()
 	// Gather the last replicated log index in the segment.
 	val, err := seg.dataDB.Get(kLastRLogIdxKeyBytes)

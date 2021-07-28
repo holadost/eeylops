@@ -760,7 +760,10 @@ func (p *Partition) createNewSegmentUnsafe() {
 		CreatedTimestamp: time.Now(),
 		StartOffset:      startOffset,
 	}
+	// Set the metadata and close and reopen the segment.
 	newSeg.SetMetadata(metadata)
+	newSeg.Close()
+	newSeg, err = segments.NewBadgerSegment(&opts)
 	newSeg.Open()
 	if isImmutizing {
 		<-immutizeDone
