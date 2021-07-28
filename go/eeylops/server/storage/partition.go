@@ -24,6 +24,7 @@ const KNumSegmentRecordsThreshold = 9.5e6 // 9.5 million
 const KSegmentsDirectoryName = "segments"
 const KMaxScanSizeBytes = 15 * 1024 * 1024 // 15MB
 const KExpiredSegmentDirSuffix = "-expired"
+const KSegmentSizeThreshold = 40 * (1024 * 1024 * 1024) // 40GB
 
 var (
 	FlagExpiredSegmentMonitorIntervalSecs = flag.Int("partition_exp_segment_monitor_interval_seconds", 600,
@@ -34,6 +35,8 @@ var (
 		"Number of records in a segment threshold")
 	FlagMaxScanSizeBytes = flag.Int("partition_max_scan_size_bytes", KMaxScanSizeBytes,
 		"Max scan size in bytes. Defaults to 15MB")
+	FlagSegmentSizeThreshold = flag.Int64("segment_size_threshold_bytes", KSegmentSizeThreshold,
+		"Segment size threshold. Defaults to 40GB")
 )
 
 type Partition struct {
@@ -57,6 +60,8 @@ type Partition struct {
 	numRecordsPerSegment int
 	// Max scan size bytes.
 	maxScanSizeBytes int
+	// Segment size(in bytes) threshold.
+	segmentSizeThresholdBytes int64
 	// List of segments in the partition.
 	segments []segments.Segment
 	// Notification to ask background goroutines to exit.
@@ -92,6 +97,9 @@ type PartitionOpts struct {
 
 	// The number of records per segment. This is an optional parameter.
 	NumRecordsPerSegmentThreshold int
+
+	// Size threshold bytes.
+	SizeThresholdBytes int64
 
 	// Maximum scan size in bytes. This is an optional parameter.
 	MaxScanSizeBytes int
@@ -160,6 +168,15 @@ func NewPartition(opts PartitionOpts) *Partition {
 		p.maxScanSizeBytes = *FlagMaxScanSizeBytes
 	} else {
 		p.maxScanSizeBytes = opts.MaxScanSizeBytes
+	}
+
+	if opts.SizeThresholdBytes <= 0 {
+		if *FlagSegmentSizeThreshold <= 0 {
+			p.logger.Fatalf("Segment size threshold not defined")
+		}
+		p.segmentSizeThresholdBytes = *FlagSegmentSizeThreshold
+	} else {
+		p.segmentSizeThresholdBytes = opts.SizeThresholdBytes
 	}
 	p.initialize()
 	p.logger.Infof("Partition initialized. Partition Config:\n------------------------------------------------"+
@@ -658,6 +675,12 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	if numRecords >= base.Offset(p.numRecordsPerSegment) {
 		p.logger.Infof("Current live segment records(%d) has reached/exceeded threshold(%d). "+
 			"New segment is required", numRecords, p.numRecordsPerSegment)
+		return true
+	}
+	size := seg.Size()
+	if seg.Size() >= p.segmentSizeThresholdBytes {
+		p.logger.Infof("Current live segment size(%d) has reached/exceeded threshold(%d). "+
+			"New segment is required", size, p.segmentSizeThresholdBytes)
 		return true
 	}
 	return false
