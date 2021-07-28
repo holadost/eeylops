@@ -484,37 +484,21 @@ func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.
 	if endSegIdx == -1 {
 		endSegIdx = p.findSegmentIdxWithOffset(endOffset)
 	}
-	// Populate segments.
-	segs = append(segs, p.segments[startSegIdx])
-	if startSegIdx == endSegIdx {
-		return segs
-	}
-	if endSegIdx == -1 {
-		endSegIdx = len(p.segments) - 1
-	}
-	for ii := startSegIdx + 1; ii <= endSegIdx; ii++ {
-		segs = append(segs, p.segments[ii])
-	}
-	return segs
+	// TODO: We can avoid this memory allocation and just return the start and seg idx.
+	return p.fetchSegments(startSegIdx, endSegIdx)
 }
 
 // getSegmentsByTimestamp returns a list of segments that contains all the elements between the given start and end
 // offsets. This function assumes that a partitionCfgLock has been acquired.
 func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) []segments.Segment {
-	var segs []segments.Segment
-
 	// Find start offset segment.
 	startSegIdx := p.findSegmentIdxWithTimestamp(startTs)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with ts: %d", startTs)
-		// We did not find any segments that contains our offsets.
-		return segs
+		return nil
 	}
 
-	// Find the end offset segment. Finding the end offset is split into two paths: fast and slow.
-	// Fast Path: For the most part, the endIdx is going to be in the start or the next couple of
-	// segments right after start. Check these segments first and if not present, fall back to
-	// scanning all the segments.
+	// Fast path. Look at getSegmentsByOffset for more info.
 	endSegIdx := -1
 	for ii := startSegIdx; ii < startSegIdx+3; ii++ {
 		if ii >= len(p.segments) {
@@ -530,14 +514,20 @@ func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) []segment
 		endSegIdx = p.findSegmentIdxWithTimestamp(endTs)
 	}
 	// Populate segments.
-	segs = append(segs, p.segments[startSegIdx])
-	if startSegIdx == endSegIdx {
+	return p.fetchSegments(startSegIdx, endSegIdx)
+}
+
+// fetchSegments fetches the segments between startIdx and endIdx.
+func (p *Partition) fetchSegments(startIdx int, endIdx int) []segments.Segment {
+	var segs []segments.Segment
+	segs = append(segs, p.segments[startIdx])
+	if startIdx == endIdx {
 		return segs
 	}
-	if endSegIdx == -1 {
-		endSegIdx = len(p.segments) - 1
+	if endIdx == -1 {
+		endIdx = len(p.segments) - 1
 	}
-	for ii := startSegIdx + 1; ii <= endSegIdx; ii++ {
+	for ii := startIdx + 1; ii <= endIdx; ii++ {
 		segs = append(segs, p.segments[ii])
 	}
 	return segs
@@ -597,6 +587,7 @@ func (p *Partition) binarySearchSegments(startIdx, endIdx int, cmp func(int) int
 	}
 }
 
+// findSegmentIdxByID returns the index in segments whose segment ID is segID.
 func (p *Partition) findSegmentIdxByID(segID int) int {
 	fsegID := p.segments[0].ID()
 	if segID < fsegID {
@@ -621,6 +612,7 @@ func (p *Partition) offsetInSegment(offset base.Offset, seg segments.Segment) bo
 	return false
 }
 
+// timestampInSegment checks whether the given timestamp is in the segment or not.
 func (p *Partition) timestampInSegment(timestamp int64, seg segments.Segment) bool {
 	if seg.IsEmpty() {
 		return false
@@ -859,12 +851,12 @@ func (p *Partition) clearExpiredSegsAndMaybeCreateNewSeg() []segments.Segment {
 	return expiredSegs
 }
 
+// isSegExpirable returns true if the segment can be expired. False otherwise.
 func (p *Partition) isSegExpirable(metadata *segments.SegmentMetadata) bool {
 	now := time.Now().Unix()
 	its := metadata.ImmutableTimestamp.Unix()
 	lt := now - its
 	if !metadata.Immutable {
-		p.logger.VInfof(1, "Segment: %d is not immutable. Segment has not expired", metadata.ID)
 		return false
 	}
 	if lt <= int64(p.ttlSeconds) {
