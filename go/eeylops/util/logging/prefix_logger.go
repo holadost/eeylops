@@ -68,6 +68,13 @@ func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
 	}
 }
 
+func (logger *PrefixLogger) Debugf(format string, args ...interface{}) {
+	if glog.V(glog.Level(1)) {
+		logStr := fmt.Sprintf(format, args...)
+		glog.InfoDepth(1, fmt.Sprintf("%s %s", logger.prefix, logStr))
+	}
+}
+
 func createPrefixStr(prefix string) string {
 	if len(prefix) == 0 {
 		return ""

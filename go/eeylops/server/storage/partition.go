@@ -522,25 +522,6 @@ func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) (int, int
 	return startSegIdx, endSegIdx
 }
 
-// fetchSegments fetches the segments between startIdx and endIdx. This method is for testOnly purposes.
-func (p *Partition) fetchSegments(startIdx int, endIdx int) []segments.Segment {
-	var segs []segments.Segment
-	if startIdx == -1 {
-		return segs
-	}
-	segs = append(segs, p.segments[startIdx])
-	if startIdx == endIdx {
-		return segs
-	}
-	if endIdx == -1 {
-		endIdx = len(p.segments) - 1
-	}
-	for ii := startIdx + 1; ii <= endIdx; ii++ {
-		segs = append(segs, p.segments[ii])
-	}
-	return segs
-}
-
 // getLiveSegment returns the current live segment. This function assumes that the partitionCfgLock has been acquired.
 func (p *Partition) getLiveSegment() segments.Segment {
 	return p.segments[len(p.segments)-1]

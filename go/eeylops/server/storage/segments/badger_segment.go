@@ -759,6 +759,7 @@ func (seg *BadgerSegment) open() {
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
 	}
+	opts.Logger = seg.logger
 	seg.dataDB = kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
 
 	go seg.indexer()
