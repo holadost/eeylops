@@ -204,7 +204,7 @@ func TestBadgerSegment(t *testing.T) {
 			if iter == 0 {
 				ex = -1
 			} else {
-				ex = bds.nextOffset - 1
+				ex = bds.getNextOffset() - 1
 			}
 			if got.EndOffset != ex {
 				logger.Fatalf("End offset mismatch. Expected: %d, Got: %d", ex, got.EndOffset)
@@ -277,7 +277,7 @@ func TestBadgerSegment(t *testing.T) {
 		Immutable:          true,
 		Expired:            true,
 		StartOffset:        initialMeta.StartOffset,
-		EndOffset:          bds.nextOffset - 1,
+		EndOffset:          bds.getNextOffset() - 1,
 		CreatedTimestamp:   initialMeta.CreatedTimestamp,
 		ImmutableTimestamp: time.Time{},
 		ImmutableReason:    0,

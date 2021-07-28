@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,7 +42,7 @@ type BadgerSegment struct {
 	// Segment metadata.
 	liveStateLock sync.RWMutex     // Protects access to nextOffset, firstMsgTs, lastMsgTs and lastRLogIdx
 	metadata      *SegmentMetadata // Cached segment metadata.
-	nextOffset    base.Offset      // Next start offset for new appends.
+	nextOffset    int64            // Next start offset for new appends.
 	lastRLogIdx   int64            // Last replicated log index.
 	firstMsgTs    int64            // First message timestamp.
 	lastMsgTs     int64            // Last message timestamp.
@@ -148,7 +149,8 @@ func (seg *BadgerSegment) Close() error {
 
 // IsEmpty implements the Segment interface. Returns true if the segment is empty. False otherwise.
 func (seg *BadgerSegment) IsEmpty() bool {
-	return seg.nextOffset == seg.metadata.StartOffset
+	nextOff := seg.getNextOffset()
+	return nextOff == seg.metadata.StartOffset
 }
 
 // Append appends the given entries to the segment.
@@ -164,8 +166,9 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		ret.Error = ErrSegmentClosed
 		return &ret
 	}
-	if arg.Timestamp < seg.lastMsgTs {
-		seg.logger.Errorf("Invalid timestamp: %d. Expected timestamp >= %d", arg.Timestamp, seg.lastMsgTs)
+	lastMsgTs := seg.getLastMsgTs()
+	if arg.Timestamp < lastMsgTs {
+		seg.logger.Errorf("Invalid timestamp: %d. Expected timestamp >= %d", arg.Timestamp, lastMsgTs)
 		ret.Error = ErrSegmentInvalidTimestamp
 		return &ret
 	}
@@ -175,18 +178,18 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 		ret.Error = ErrSegmentInvalidRLogIdx
 		return &ret
 	}
-
-	oldNextOffset := seg.nextOffset
+	nextOff := seg.getNextOffset()
+	oldNextOffset := nextOff
 	// Convert entries into (key, value) pairs
-	keys := seg.generateKeys(seg.nextOffset, base.Offset(len(arg.Entries)))
-	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp, seg.currentIndexBatchSizeBytes, seg.nextOffset)
+	keys := seg.generateKeys(nextOff, base.Offset(len(arg.Entries)))
+	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp, seg.currentIndexBatchSizeBytes, nextOff)
 
 	// Add an index entry if required.
 	currIndexSize := len(seg.timestampBRI)
 	for ii, tse := range tsEntries {
 		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(currIndexSize+ii))...))
 		tse.SetTimestamp(arg.Timestamp)
-		tse.SetOffset(seg.nextOffset)
+		tse.SetOffset(nextOff)
 		values = append(values, tse.Serialize())
 	}
 
@@ -207,11 +210,12 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	seg.currentIndexBatchSizeBytes = nextIndexBatchSizeBytes
 	if oldNextOffset == seg.metadata.StartOffset {
 		// These were the first messages appended to the segment. Save the first message timestamp.
-		seg.firstMsgTs = arg.Timestamp
+		seg.setFirstMsgTs(arg.Timestamp)
 	}
 	seg.lastRLogIdx = arg.RLogIdx
-	seg.lastMsgTs = arg.Timestamp
-	seg.nextOffset += base.Offset(len(arg.Entries))
+	seg.setLastMsgTs(arg.Timestamp)
+	nextOff += base.Offset(len(arg.Entries))
+	seg.setNextOffset(nextOff)
 	seg.liveStateLock.Unlock()
 
 	if len(tsEntries) > 0 {
@@ -255,9 +259,10 @@ func (seg *BadgerSegment) MarkImmutable() {
 		//time(as we have a write lock on the segment). Lets acquire the lock however for paranoia reasons.
 		seg.liveStateLock.RLock()
 		defer seg.liveStateLock.RUnlock()
-		seg.metadata.EndOffset = seg.nextOffset - 1
-		seg.metadata.FirstMsgTimestamp = time.Unix(0, seg.firstMsgTs)
-		seg.metadata.LastMsgTimestamp = time.Unix(0, seg.lastMsgTs)
+		nextOff := seg.getNextOffset()
+		seg.metadata.EndOffset = nextOff - 1
+		seg.metadata.FirstMsgTimestamp = time.Unix(0, seg.getFirstMsgTs())
+		seg.metadata.LastMsgTimestamp = time.Unix(0, seg.getLastMsgTs())
 	}
 	seg.metadataDB.PutMetadata(seg.metadata)
 }
@@ -281,13 +286,14 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 	if !metadata.Immutable {
 		seg.liveStateLock.RLock()
 		defer seg.liveStateLock.RUnlock()
-		if seg.nextOffset == metadata.StartOffset {
+		nextOff := seg.getNextOffset()
+		if nextOff == metadata.StartOffset {
 			metadata.EndOffset = -1
 		} else {
-			metadata.EndOffset = seg.nextOffset - 1
+			metadata.EndOffset = nextOff - 1
 		}
-		metadata.FirstMsgTimestamp = time.Unix(0, seg.firstMsgTs)
-		metadata.LastMsgTimestamp = time.Unix(0, seg.lastMsgTs)
+		metadata.FirstMsgTimestamp = time.Unix(0, seg.getFirstMsgTs())
+		metadata.LastMsgTimestamp = time.Unix(0, seg.getLastMsgTs())
 	}
 	return metadata
 }
@@ -302,10 +308,11 @@ func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 	if !seg.metadata.Immutable {
 		seg.liveStateLock.RLock()
 		defer seg.liveStateLock.RUnlock()
-		if seg.nextOffset == sOff {
+		nextOff := seg.getNextOffset()
+		if nextOff == sOff {
 			eOff = -1
 		} else {
-			eOff = seg.nextOffset - 1
+			eOff = nextOff - 1
 		}
 	}
 	return
@@ -318,9 +325,16 @@ func (seg *BadgerSegment) GetMsgTimestampRange() (int64, int64) {
 	if seg.IsEmpty() {
 		return -1, -1
 	}
+	// Fast path. Just load and see if the values look sane and if they do, just return.
+	firstMsgTs := seg.getFirstMsgTs()
+	lastMsgTs := seg.getLastMsgTs()
+	if firstMsgTs <= lastMsgTs {
+		return firstMsgTs, lastMsgTs
+	}
+	// Slow path.
 	seg.liveStateLock.RLock()
 	defer seg.liveStateLock.RUnlock()
-	return seg.firstMsgTs, seg.lastMsgTs
+	return seg.getFirstMsgTs(), seg.getLastMsgTs()
 }
 
 // SetMetadata sets the metadata for the segment.
@@ -336,6 +350,32 @@ func (seg *BadgerSegment) Stats() {
 
 }
 
+// Returns the current nextOffset of the segment.
+func (seg *BadgerSegment) getNextOffset() base.Offset {
+	return base.Offset(atomic.LoadInt64(&seg.nextOffset))
+}
+
+// Returns the current nextOffset of the segment.
+func (seg *BadgerSegment) setNextOffset(val base.Offset) {
+	atomic.StoreInt64(&seg.nextOffset, int64(val))
+}
+
+func (seg *BadgerSegment) getFirstMsgTs() int64 {
+	return atomic.LoadInt64(&seg.firstMsgTs)
+}
+
+func (seg *BadgerSegment) setFirstMsgTs(ts int64) {
+	atomic.StoreInt64(&seg.firstMsgTs, ts)
+}
+
+func (seg *BadgerSegment) getLastMsgTs() int64 {
+	return atomic.LoadInt64(&seg.lastMsgTs)
+}
+
+func (seg *BadgerSegment) setLastMsgTs(ts int64) {
+	atomic.StoreInt64(&seg.lastMsgTs, ts)
+}
+
 // sanitizeScanArg is a helper method to Scan that checks if the arguments provided are fine. If not, it populates
 // ret and returns an error. This method assumes that the segLock has been acquired.
 func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesRet) error {
@@ -347,17 +387,18 @@ func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesR
 		seg.logger.Errorf("Segment is already closed")
 		ret.Error = ErrSegmentClosed
 	}
+	nextOff := seg.getNextOffset()
 	// Sanity checks to see if the segment contains our start offset.
 	if (arg.StartOffset >= 0) && (arg.StartOffset < seg.metadata.StartOffset) {
 		// The start offset does not belong to this segment.
 		seg.logger.Errorf("Start offset does not belong to this segment. Given start offset: %d, "+
-			"Seg start offset: %d, Segment next offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
+			"Seg start offset: %d, Segment next offset: %d", arg.StartOffset, seg.metadata.StartOffset, nextOff)
 		ret.Error = ErrSegmentInvalid
 	}
-	if seg.IsEmpty() || (arg.StartOffset >= seg.nextOffset) {
+	if seg.IsEmpty() || (arg.StartOffset >= nextOff) {
 		// Either the segment is empty or it does not contain our desired offset yet.
 		seg.logger.VInfof(1, "Requested offset: %d is not present in this segment. "+
-			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, seg.nextOffset)
+			"Seg Start offset: %d, Segment Next Offset: %d", arg.StartOffset, seg.metadata.StartOffset, nextOff)
 		ret.Error = nil
 		ret.Values = nil
 		ret.NextOffset = -1
@@ -447,8 +488,9 @@ func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet,
 	var endOffset base.Offset
 	var sk []byte
 	tmpNumMsgs = base.Offset(arg.NumMessages)
-	if startOffset+tmpNumMsgs >= seg.nextOffset {
-		tmpNumMsgs = seg.nextOffset - startOffset
+	nextOff := seg.getNextOffset()
+	if startOffset+tmpNumMsgs >= nextOff {
+		tmpNumMsgs = nextOff - startOffset
 	}
 	endOffset = startOffset + tmpNumMsgs - 1
 	sk = seg.offsetToKey(startOffset)
@@ -653,7 +695,7 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 		}
 	}
 	if nearestIdx == -1 {
-		if ts >= seg.firstMsgTs {
+		if ts >= seg.getFirstMsgTs() {
 			return seg.metadata.StartOffset
 		}
 		return base.Offset(-1)
@@ -715,7 +757,7 @@ func (seg *BadgerSegment) open() {
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// Segment is empty.
-			seg.nextOffset = seg.metadata.StartOffset
+			seg.nextOffset = int64(seg.metadata.StartOffset)
 			seg.firstMsgTs = -1
 			seg.lastMsgTs = -1
 			seg.lastRLogIdx = -1
@@ -758,7 +800,7 @@ func (seg *BadgerSegment) open() {
 			msg.InitializeFromRaw(item)
 			if dir {
 				// We are scanning in reverse direction. Set last append ts and next offset.
-				seg.nextOffset = seg.keyToOffset(key) + 1
+				seg.nextOffset = int64(seg.keyToOffset(key) + 1)
 				seg.lastMsgTs = msg.GetTimestamp()
 			} else {
 				// Scanning in forward direction. Set the first append timestamp.
