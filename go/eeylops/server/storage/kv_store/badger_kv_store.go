@@ -45,6 +45,12 @@ func (kvStore *BadgerKVStore) GetDataDir() string {
 	return kvStore.rootDir
 }
 
+// Size returns the size of the KV store in bytes.
+func (kvStore *BadgerKVStore) Size() int64 {
+	a, b := kvStore.db.Size()
+	return a + b
+}
+
 // Get gets the value associated with the key.
 func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
 	var val []byte

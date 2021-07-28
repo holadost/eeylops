@@ -2,6 +2,7 @@ package kv_store
 
 type KVStore interface {
 	GetDataDir() string
+	Size() int64 // Size in bytes.
 	Close() error
 	// Get and GetS gets the value for the given key from the store.
 	Get(key []byte) (value []byte, err error)

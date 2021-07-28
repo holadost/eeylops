@@ -621,6 +621,7 @@ func (psw *partitionStressWorkload) consumer(partitionID int, consumerID int) {
 		time.Sleep(psw.consumerDelayMs)
 		scanner := NewPartitionScanner(psw.partitionMap[partitionID], 0)
 		count := 0
+		glog.Infof("Restarting scanner. Consumer ID: %d, Partition ID: %d", consumerID, partitionID)
 		for scanner.Rewind(); scanner.Valid(); scanner.Next() {
 			item, err := scanner.Get()
 			if err != nil {
@@ -629,11 +630,18 @@ func (psw *partitionStressWorkload) consumer(partitionID int, consumerID int) {
 			if item.Offset != base.Offset(count) {
 				glog.Fatalf("Wrong message got from partition. Expected: %d, got: %d", count, item.Offset)
 			}
+			if count%1000 == 0 {
+				glog.Infof("Comsumer ID: %d, Partition ID: %d, Scanned up to offset: %d",
+					consumerID, partitionID, count)
+			}
 			count++
 		}
-		_, ok := <-psw.doneChan
-		if !ok {
+		select {
+		case <-psw.doneChan:
 			glog.Infof("Consumer: %d, partition: %d exiting", consumerID, partitionID)
+			return
+		default:
+			// Do nothing
 		}
 	}
 }

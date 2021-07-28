@@ -23,6 +23,8 @@ type Segment interface {
 	IsEmpty() bool
 	// Stats fetches the stats for this instance of segment.
 	Stats()
+	// Size returns the size of the segment(in bytes).
+	Size() int64
 	// GetMetadata fetches the metadata of the segment.
 	GetMetadata() SegmentMetadata
 	// GetRange returns the start and end offset of the segment.

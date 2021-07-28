@@ -343,6 +343,13 @@ func (seg *BadgerSegment) Stats() {
 
 }
 
+// Size returns the stats of the segment.
+func (seg *BadgerSegment) Size() int64 {
+	seg.segLock.RLock()
+	defer seg.segLock.RUnlock()
+	return seg.dataDB.Size()
+}
+
 func (seg *BadgerSegment) getStartOffset() base.Offset {
 	return base.Offset(atomic.LoadInt64(&seg.startOffset))
 }
