@@ -172,6 +172,7 @@ func NewPartition(opts PartitionOpts) *Partition {
 	return p
 }
 
+// initialize initializes the partition.
 func (p *Partition) initialize() {
 	p.backgroundJobDone = make(chan bool)
 	p.snapshotChan = make(chan bool)
@@ -339,7 +340,6 @@ func (p *Partition) Close() {
 
 // offsetScan is a helper method of scan that does offset based scans.
 func (p *Partition) offsetScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
-	var segs []segments.Segment
 	var startOffset base.Offset
 	var endOffset base.Offset
 	numMsgsOffset := base.Offset(arg.NumMessages)
@@ -352,20 +352,18 @@ func (p *Partition) offsetScan(ctx context.Context, arg *sbase.ScanEntriesArg, r
 		ret.Error = nil
 		return
 	}
-	segs = p.getSegmentsByOffset(startOffset, endOffset)
-	if segs == nil || len(segs) == 0 {
-		// The start offset has still not been created in the partition.
-		// Set next offset to -1 indicating that the scan is complete.
+	startIdx, endIdx := p.getSegmentsByOffset(startOffset, endOffset)
+	if startIdx == -1 {
+		// We didn't find any segments. The scan is complete.
 		ret.NextOffset = -1
 		ret.Error = nil
 		return
 	}
-	p.scanMessages(ctx, arg, ret, segs, true, arg.EndTimestamp)
+	p.scanMessages(ctx, arg, ret, true, arg.EndTimestamp, startIdx, endIdx)
 }
 
 // timestampScan is a helper method of scan that does timestamp based scans.
 func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
-	var segs []segments.Segment
 	if arg.StartTimestamp <= 0 {
 		p.logger.Errorf("Invalid inputs. Either timestamp/offset must be provided")
 		ret.Error = ErrPartitionScan
@@ -389,44 +387,45 @@ func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg
 		return
 	}
 
-	segs = p.getSegmentsByTimestamp(startTs, endTs)
-	if segs == nil || len(segs) == 0 {
-		// The start offset has still not been created in the partition.
-		// Set next offset to -1 indicating that the scan is complete.
+	startIdx, endIdx := p.getSegmentsByTimestamp(startTs, endTs)
+	if startIdx == -1 {
+		// We didn't find any segments. The scan is complete.
 		ret.NextOffset = -1
 		ret.Error = nil
 		return
 	}
-	p.scanMessages(ctx, arg, ret, segs, false, endTs)
+	p.scanMessages(ctx, arg, ret, false, endTs, startIdx, endIdx)
 }
 
 // scanMessages scans messages based on the given arg and populates the results in the given ret.
 func (p *Partition) scanMessages(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet,
-	segs []segments.Segment, offsetType bool, endTs int64) {
+	offsetType bool, endTs int64, startIdx, endIdx int) {
 	var scanSizeBytes int
 	scanSizeBytes = 0
 	numPendingMsgs := arg.NumMessages
-	for ii, seg := range segs {
+	count := -1
+	for ii := startIdx; ii <= endIdx; ii++ {
+		count++
+		seg := p.segments[ii]
 		if numPendingMsgs == 0 {
 			break
 		}
 		var sarg segments.ScanEntriesArg
 		if offsetType {
 			sarg.StartTimestamp = -1 // Unset timestamp type.
-		} else {
-			sarg.StartOffset = -1 // Unset offset type.
-		}
-		if ii == 0 {
-			if offsetType {
+			if count == 0 {
 				sarg.StartOffset = arg.StartOffset
 			} else {
-				sarg.StartTimestamp = arg.StartTimestamp
+				sOff, _ := seg.GetRange()
+				sarg.StartOffset = sOff
 			}
 		} else {
-			if offsetType {
-				sarg.StartOffset = seg.GetMetadata().StartOffset
+			sarg.StartOffset = -1 // Unset offset type.
+			if count == 0 {
+				sarg.StartTimestamp = arg.StartTimestamp
 			} else {
-				sarg.StartTimestamp = seg.GetMetadata().FirstMsgTimestamp.UnixNano()
+				sts, _ := seg.GetMsgTimestampRange()
+				sarg.StartTimestamp = sts
 			}
 		}
 		sarg.EndTimestamp = endTs
@@ -458,15 +457,13 @@ func (p *Partition) scanMessages(ctx context.Context, arg *sbase.ScanEntriesArg,
 
 // getSegmentsByOffset returns a list of segments that contains all the elements between the given start and end offsets.
 // This function assumes that a partitionCfgLock has been acquired.
-func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.Offset) []segments.Segment {
-	var segs []segments.Segment
-
+func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.Offset) (int, int) {
 	// Find start offset segment.
 	startSegIdx := p.findSegmentIdxWithOffset(startOffset)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with offset: %d", startOffset)
 		// We did not find any segments that contains our offsets.
-		return segs
+		return -1, -1
 	}
 
 	// Find the end offset segment. Finding the end offset is split into two paths: fast and slow.
@@ -487,18 +484,20 @@ func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.
 	if endSegIdx == -1 {
 		endSegIdx = p.findSegmentIdxWithOffset(endOffset)
 	}
-	// TODO: We can avoid this memory allocation and just return the start and seg idx.
-	return p.fetchSegments(startSegIdx, endSegIdx)
+	if endSegIdx == -1 {
+		endSegIdx = len(p.segments) - 1
+	}
+	return startSegIdx, endSegIdx
 }
 
 // getSegmentsByTimestamp returns a list of segments that contains all the elements between the given start and end
 // offsets. This function assumes that a partitionCfgLock has been acquired.
-func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) []segments.Segment {
+func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) (int, int) {
 	// Find start offset segment.
 	startSegIdx := p.findSegmentIdxWithTimestamp(startTs)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with ts: %d", startTs)
-		return nil
+		return -1, -1
 	}
 
 	// Fast path. Look at getSegmentsByOffset for more info.
@@ -516,13 +515,19 @@ func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) []segment
 	if endSegIdx == -1 {
 		endSegIdx = p.findSegmentIdxWithTimestamp(endTs)
 	}
+	if endSegIdx == -1 {
+		endSegIdx = len(p.segments) - 1
+	}
 	// Populate segments.
-	return p.fetchSegments(startSegIdx, endSegIdx)
+	return startSegIdx, endSegIdx
 }
 
-// fetchSegments fetches the segments between startIdx and endIdx.
+// fetchSegments fetches the segments between startIdx and endIdx. This method is for testOnly purposes.
 func (p *Partition) fetchSegments(startIdx int, endIdx int) []segments.Segment {
 	var segs []segments.Segment
+	if startIdx == -1 {
+		return segs
+	}
 	segs = append(segs, p.segments[startIdx])
 	if startIdx == endIdx {
 		return segs
