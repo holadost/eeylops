@@ -10,6 +10,7 @@ import (
 	"github.com/golang/glog"
 	"math/rand"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -527,6 +528,7 @@ func TestPartitionScan2(t *testing.T) {
 }
 
 func TestPartitionStress(t *testing.T) {
+	runtime.GOMAXPROCS(8)
 	util.LogTestMarker("TestPartitionStress")
 	testDir := util.CreateTestDir(t, "TestPartitionStress")
 	pMap := make(map[int]*Partition)
@@ -544,7 +546,7 @@ func TestPartitionStress(t *testing.T) {
 		p := NewPartition(opts)
 		pMap[ii] = p
 	}
-	psw := newPartitionStressWorkload(pMap, 1, 4096, 10, 2000)
+	psw := newPartitionStressWorkload(pMap, 4, 100, 10, 2000)
 	psw.start()
 	time.Sleep(time.Second * 20)
 	psw.stop()
@@ -594,7 +596,7 @@ func (psw *partitionStressWorkload) producer(partitionID int) {
 	for ii := 0; ii < psw.batchSize; ii++ {
 		entries = append(entries, token)
 	}
-	ticker := time.NewTicker(time.Millisecond * 5)
+	ticker := time.NewTicker(time.Microsecond)
 	for {
 		select {
 		case <-psw.doneChan:
@@ -630,7 +632,7 @@ func (psw *partitionStressWorkload) consumer(partitionID int, consumerID int) {
 			if item.Offset != base.Offset(count) {
 				glog.Fatalf("Wrong message got from partition. Expected: %d, got: %d", count, item.Offset)
 			}
-			if count%1000 == 0 {
+			if count%5000 == 0 {
 				glog.Infof("Comsumer ID: %d, Partition ID: %d, Scanned up to offset: %d",
 					consumerID, partitionID, count)
 			}
