@@ -337,6 +337,7 @@ func (p *Partition) Close() {
 	}
 }
 
+// offsetScan is a helper method of scan that does offset based scans.
 func (p *Partition) offsetScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
 	var segs []segments.Segment
 	var startOffset base.Offset
@@ -362,6 +363,7 @@ func (p *Partition) offsetScan(ctx context.Context, arg *sbase.ScanEntriesArg, r
 	p.scanMessages(ctx, arg, ret, segs, true, arg.EndTimestamp)
 }
 
+// timestampScan is a helper method of scan that does timestamp based scans.
 func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
 	var segs []segments.Segment
 	if arg.StartTimestamp <= 0 {
@@ -398,6 +400,7 @@ func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg
 	p.scanMessages(ctx, arg, ret, segs, false, endTs)
 }
 
+// scanMessages scans messages based on the given arg and populates the results in the given ret.
 func (p *Partition) scanMessages(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet,
 	segs []segments.Segment, offsetType bool, endTs int64) {
 	var scanSizeBytes int
