@@ -608,7 +608,6 @@ func (p *Partition) findSegmentIdxByID(segID int) int {
 // offsetInSegment checks whether the given offset is in the segment or not.
 func (p *Partition) offsetInSegment(offset base.Offset, seg segments.Segment) bool {
 	if seg.IsEmpty() {
-		p.logger.Infof("Segment: %d is empty", seg.ID())
 		return false
 	}
 	sOff, eOff := seg.GetRange()
