@@ -507,7 +507,7 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	batchSize := 10
 	numIters := 1000
 	lastRLogIdx := int64(0)
-	token := make([]byte, 32*1024) // 32KB
+	token := make([]byte, 1024*1024) // 32KB
 	rand.Read(token)
 	var values [][]byte
 	for ii := 0; ii < batchSize; ii++ {

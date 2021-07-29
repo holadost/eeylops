@@ -4,7 +4,8 @@ import (
 	"eeylops/server/base"
 	"eeylops/server/storage/kv_store"
 	"encoding/json"
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/golang/glog"
 	"os"
 	"path"
@@ -37,11 +38,12 @@ func (ts *TopicStore) initialize() {
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
-	opts.BlockCacheSize = 0      // Disable block cache.
-	opts.NumCompactors = 3       // Use 3 compactors.
-	opts.MemTableSize = 32 << 20 // 32MB
+	opts.BlockCacheSize = 0 // Disable block cache.
+	opts.NumCompactors = 3  // Use 3 compactors.
 	opts.IndexCacheSize = 0
 	opts.Compression = 0
+	opts.TableLoadingMode = options.FileIO
+	opts.ValueLogLoadingMode = options.FileIO
 	ts.kvStore = kv_store.NewBadgerKVStore(ts.tsDir, opts)
 }
 

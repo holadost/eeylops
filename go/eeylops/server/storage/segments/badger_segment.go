@@ -10,7 +10,8 @@ import (
 	"eeylops/util/logging"
 	"errors"
 	"fmt"
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"os"
 	"path"
 	"sync"
@@ -763,11 +764,12 @@ func (seg *BadgerSegment) open() {
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
-	opts.BlockCacheSize = 0      // Disable block cache.
-	opts.NumCompactors = 3       // Use 3 compactors.
-	opts.MemTableSize = 32 << 20 // 32MB
+	opts.BlockCacheSize = 0 // Disable block cache.
+	opts.NumCompactors = 3  // Use 3 compactors.
 	opts.IndexCacheSize = 0
-	opts.Compression = 0
+	opts.Compression = options.None
+	opts.TableLoadingMode = options.FileIO
+	opts.ValueLogLoadingMode = options.FileIO
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
 	}

@@ -3,7 +3,7 @@ package kv_store
 import (
 	"eeylops/util"
 	"fmt"
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v2"
 	"github.com/golang/glog"
 	"math/rand"
 	"testing"
@@ -14,7 +14,7 @@ func TestBadgerKVStore(t *testing.T) {
 	util.LogTestMarker("TestBadgerKVStore")
 	testDir := util.CreateTestDir(t, "TestBadgerKVStore")
 	opts := badger.DefaultOptions(testDir)
-	opts.MaxLevels = 1
+	opts.MaxLevels = 7
 	opts.NumMemtables = 2
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true

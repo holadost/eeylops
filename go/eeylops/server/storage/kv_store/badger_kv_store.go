@@ -1,7 +1,7 @@
 package kv_store
 
 import (
-	badger "github.com/dgraph-io/badger/v3"
+	badger "github.com/dgraph-io/badger/v2"
 	"github.com/golang/glog"
 	"os"
 )
