@@ -50,7 +50,7 @@ type Partition struct {
 	rootDir string
 	// TTL seconds for every record.
 	ttlSeconds int
-	// Current start offset of the partition.
+	// Current Start offset of the partition.
 	currStartOffset base.Offset
 	// Expired segment poll interval seconds.
 	expiredSegmentPollIntervalSecs time.Duration
@@ -472,10 +472,10 @@ func (p *Partition) scanMessages(ctx context.Context, arg *sbase.ScanEntriesArg,
 	return
 }
 
-// getSegmentsByOffset returns a list of segments that contains all the elements between the given start and end offsets.
+// getSegmentsByOffset returns a list of segments that contains all the elements between the given Start and end offsets.
 // This function assumes that a partitionCfgLock has been acquired.
 func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.Offset) (int, int) {
-	// Find start offset segment.
+	// Find Start offset segment.
 	startSegIdx := p.findSegmentIdxWithOffset(startOffset)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with offset: %d", startOffset)
@@ -484,8 +484,8 @@ func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.
 	}
 
 	// Find the end offset segment. Finding the end offset is split into two paths: fast and slow.
-	// Fast Path: For the most part, the endIdx is going to be in the start or the next couple of
-	// segments right after start. Check these segments first and if not present, fall back to
+	// Fast Path: For the most part, the endIdx is going to be in the Start or the next couple of
+	// segments right after Start. Check these segments first and if not present, fall back to
 	// scanning all the segments.
 	endSegIdx := -1
 	for ii := startSegIdx; ii < startSegIdx+3; ii++ {
@@ -507,10 +507,10 @@ func (p *Partition) getSegmentsByOffset(startOffset base.Offset, endOffset base.
 	return startSegIdx, endSegIdx
 }
 
-// getSegmentsByTimestamp returns a list of segments that contains all the elements between the given start and end
+// getSegmentsByTimestamp returns a list of segments that contains all the elements between the given Start and end
 // offsets. This function assumes that a partitionCfgLock has been acquired.
 func (p *Partition) getSegmentsByTimestamp(startTs int64, endTs int64) (int, int) {
-	// Find start offset segment.
+	// Find Start offset segment.
 	startSegIdx := p.findSegmentIdxWithTimestamp(startTs)
 	if startSegIdx == -1 {
 		p.logger.Infof("Did not find any segment with ts: %d", startTs)

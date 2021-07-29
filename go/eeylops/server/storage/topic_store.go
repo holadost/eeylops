@@ -5,7 +5,6 @@ import (
 	"eeylops/server/storage/kv_store"
 	"encoding/json"
 	"github.com/dgraph-io/badger/v3"
-	"github.com/dgraph-io/badger/v3/options"
 	"github.com/golang/glog"
 	"os"
 	"path"
@@ -36,11 +35,13 @@ func (ts *TopicStore) initialize() {
 	glog.Infof("Initializing topic store located at: %s", ts.tsDir)
 	opts := badger.DefaultOptions(ts.tsDir)
 	opts.SyncWrites = true
-	opts.NumCompactors = 2
-	opts.NumMemtables = 2
-	opts.BlockCacheSize = 0
-	opts.Compression = options.None
+	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
+	opts.BlockCacheSize = 0      // Disable block cache.
+	opts.NumCompactors = 3       // Use 3 compactors.
+	opts.MemTableSize = 32 << 20 // 32MB
+	opts.IndexCacheSize = 0
+	opts.Compression = 0
 	ts.kvStore = kv_store.NewBadgerKVStore(ts.tsDir, opts)
 }
 

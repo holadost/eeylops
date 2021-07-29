@@ -10,7 +10,6 @@ import (
 	"github.com/golang/glog"
 	"math/rand"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -523,127 +522,6 @@ func TestPartitionScan2(t *testing.T) {
 			if sret.Values[jj].Offset != expected {
 				glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expected, sret.Values[jj].Offset)
 			}
-		}
-	}
-}
-
-func TestPartitionStress(t *testing.T) {
-	runtime.GOMAXPROCS(8)
-	util.LogTestMarker("TestPartitionStress")
-	testDir := util.CreateTestDir(t, "TestPartitionStress")
-	pMap := make(map[int]*Partition)
-	for ii := 0; ii < 5; ii++ {
-		opts := PartitionOpts{
-			TopicName:                      "topic1",
-			PartitionID:                    ii + 1,
-			RootDirectory:                  testDir,
-			ExpiredSegmentPollIntervalSecs: 1,
-			LiveSegmentPollIntervalSecs:    1,
-			NumRecordsPerSegmentThreshold:  10000,
-			MaxScanSizeBytes:               15 * 1024 * 1024,
-			TTLSeconds:                     86400 * 7,
-		}
-		p := NewPartition(opts)
-		pMap[ii] = p
-	}
-	psw := newPartitionStressWorkload(pMap, 4, 100, 10, 2000)
-	psw.start()
-	time.Sleep(time.Second * 20)
-	psw.stop()
-}
-
-type partitionStressWorkload struct {
-	partitionMap             map[int]*Partition
-	topicName                string
-	numConsumersPerPartition int
-	doneChan                 chan struct{}
-	dataSizeBytes            int
-	batchSize                int
-	consumerDelayMs          time.Duration // Consumer delay in ms.
-}
-
-func newPartitionStressWorkload(partitionMap map[int]*Partition, numConsumerPerPartition int, payloadSizeBytes int, batchSize int, consumerDelayMs int) *partitionStressWorkload {
-	psw := new(partitionStressWorkload)
-	psw.numConsumersPerPartition = 2
-	psw.doneChan = make(chan struct{})
-	psw.dataSizeBytes = payloadSizeBytes
-	psw.partitionMap = partitionMap
-	psw.numConsumersPerPartition = numConsumerPerPartition
-	psw.batchSize = batchSize
-	psw.consumerDelayMs = time.Duration(consumerDelayMs) * time.Millisecond
-	return psw
-}
-
-func (psw *partitionStressWorkload) start() {
-	glog.Infof("Starting workloads")
-	for key, _ := range psw.partitionMap {
-		go psw.producer(key)
-		for ii := 0; ii < psw.numConsumersPerPartition; ii++ {
-			go psw.consumer(key, ii)
-		}
-	}
-}
-
-func (psw *partitionStressWorkload) stop() {
-	glog.Infof("Stopping workloads")
-	close(psw.doneChan)
-}
-
-func (psw *partitionStressWorkload) producer(partitionID int) {
-	token := make([]byte, psw.dataSizeBytes)
-	rand.Read(token)
-	var entries [][]byte
-	for ii := 0; ii < psw.batchSize; ii++ {
-		entries = append(entries, token)
-	}
-	ticker := time.NewTicker(time.Microsecond)
-	for {
-		select {
-		case <-psw.doneChan:
-			glog.Infof("Producer for partition: %d exiting", partitionID)
-			return
-		case <-ticker.C:
-			now := time.Now().UnixNano()
-			arg := sbase.AppendEntriesArg{
-				Entries:   entries,
-				Timestamp: now,
-				RLogIdx:   now,
-			}
-			p := psw.partitionMap[partitionID]
-			ret := p.Append(context.Background(), &arg)
-			if ret.Error != nil {
-				glog.Fatalf("Unexpected error while appending to partition: %d", partitionID)
-			}
-		}
-	}
-}
-
-func (psw *partitionStressWorkload) consumer(partitionID int, consumerID int) {
-	for {
-		time.Sleep(psw.consumerDelayMs)
-		scanner := NewPartitionScanner(psw.partitionMap[partitionID], 0)
-		count := 0
-		glog.Infof("Restarting scanner. Consumer ID: %d, Partition ID: %d", consumerID, partitionID)
-		for scanner.Rewind(); scanner.Valid(); scanner.Next() {
-			item, err := scanner.Get()
-			if err != nil {
-				glog.Fatalf("Unexpected error from consumer: %d while scanning partition: %d", consumerID, partitionID)
-			}
-			if item.Offset != base.Offset(count) {
-				glog.Fatalf("Wrong message got from partition. Expected: %d, got: %d", count, item.Offset)
-			}
-			if count%5000 == 0 {
-				glog.Infof("Comsumer ID: %d, Partition ID: %d, Scanned up to offset: %d",
-					consumerID, partitionID, count)
-			}
-			count++
-		}
-		select {
-		case <-psw.doneChan:
-			glog.Infof("Consumer: %d, partition: %d exiting", consumerID, partitionID)
-			return
-		default:
-			// Do nothing
 		}
 	}
 }

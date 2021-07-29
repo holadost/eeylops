@@ -763,6 +763,11 @@ func (seg *BadgerSegment) open() {
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
+	opts.BlockCacheSize = 0      // Disable block cache.
+	opts.NumCompactors = 3       // Use 3 compactors.
+	opts.MemTableSize = 32 << 20 // 32MB
+	opts.IndexCacheSize = 0
+	opts.Compression = 0
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
 	}
