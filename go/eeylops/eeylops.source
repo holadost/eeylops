@@ -3,7 +3,7 @@ PARENT_DIR="$(dirname "${PWD}")"
 GOLANG_DIR="${PARENT_DIR}/${ENV_NAME}"
 GOROOT_DIR="${GOLANG_DIR}/go"
 GO_MAJOR_VERSION="1"
-GO_VERSION="${GO_MAJOR_VERSION}.15.7"
+GO_VERSION="${GO_MAJOR_VERSION}.16.6"
 CHECK_IF_GOLANG_IS_INSTALLED="${GOROOT_DIR}/bin/go version | grep ${GO_VERSION} &> /dev/null"
 INSTALL_GOLANG="wget -c https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz && tar -C ${GOLANG_DIR} -xvzf go${GO_VERSION}.linux-amd64.tar.gz && rm -f go${GO_VERSION}.linux-amd64.tar.gz"
 
@@ -28,6 +28,7 @@ fi
 export GOROOT="${GOROOT_DIR}"
 export GOPATH="${PARENT_DIR}/.go"
 alias go='${GOROOT_DIR}/bin/go'
+export PATH="$PATH:$(go env GOPATH)/bin"
 BK_PS1=${PS1}
 PS1="(${ENV_NAME}) $PS1"
 
