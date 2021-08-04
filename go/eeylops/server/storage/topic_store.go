@@ -52,7 +52,7 @@ func (ts *TopicStore) Close() error {
 }
 
 func (ts *TopicStore) AddTopic(topic base.Topic) error {
-	glog.Infof("Adding new topic: %s", topic.ToString())
+	glog.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
 	key := []byte(topic.Name)
 	val := ts.marshalTopic(&topic)
 	err := ts.kvStore.Put(key, val)
