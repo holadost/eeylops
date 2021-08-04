@@ -566,7 +566,7 @@ func (p *Partition) findSegmentIdxWithTimestamp(timestamp int64) int {
 	timestampCmp := func(idx int) int {
 		sts, _ := p.segments[idx].GetMsgTimestampRange()
 		if p.timestampInSegment(timestamp, p.segments[idx]) {
-			return idx
+			return 0
 		} else if timestamp < sts {
 			return -1
 		} else {
