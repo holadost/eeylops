@@ -7,6 +7,8 @@ import (
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"io"
+	"strconv"
+	"time"
 )
 
 func main() {
@@ -19,6 +21,7 @@ func main() {
 	client := greet.NewGreetServiceClient(cc)
 	doUnary(client)
 	doServerStreaming(client)
+	doClientStreaming(client)
 }
 
 func doUnary(client greet.GreetServiceClient) {
@@ -56,4 +59,37 @@ func doServerStreaming(client greet.GreetServiceClient) {
 		}
 		glog.Infof("Received message: %s", resp.GetResult())
 	}
+}
+
+func doClientStreaming(client greet.GreetServiceClient) {
+	glog.Infof("\n=============================== Client Streaming RPC ===============================\n")
+	var requests []*greet.LongGreetReq
+	for ii := 0; ii < 10; ii++ {
+		var req greet.LongGreetReq
+		var greeting greet.Greeting
+		greeting.FirstName = "Nikhil" + strconv.Itoa(ii)
+		greeting.LastName = "Srinivasan"
+		req.Greeting = &greeting
+		requests = append(requests, &req)
+	}
+	stream, err := client.LongGreet(context.Background())
+	if err != nil {
+		glog.Fatalf("Unable to start client side streaming due to err: %s", err.Error())
+	}
+	for ii, req := range requests {
+		err = stream.Send(req)
+		if err != nil {
+			if err == io.EOF {
+				glog.Warningf("Server ended the stream earlier than expected?")
+				break
+			}
+		}
+		glog.Infof("Sent %d messages", ii+1)
+		time.Sleep(300 * time.Millisecond)
+	}
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		glog.Fatalf("Unexpected error while receiving response from server: %s", err.Error())
+	}
+	glog.Infof("Successfully finished client side streaming as well!  Output: %s", resp.GetResult())
 }

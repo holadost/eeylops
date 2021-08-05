@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
+	"io"
 	"net"
 	"strconv"
 	"time"
@@ -26,6 +27,7 @@ func (s *Server) Greet(ctx context.Context, req *greet.GreetReq) (*greet.GreetRe
 }
 
 func (s *Server) GreetManyTimes(req *greet.GreetManyTimesReq, stream greet.GreetService_GreetManyTimesServer) error {
+	glog.Infof("============================= GreetManyTimes invoked!! ========================================")
 	firstName := req.GetGreeting().GetFirstName()
 	for ii := 0; ii < 10; ii++ {
 		ret := "Hello " + firstName + " " + strconv.Itoa(ii)
@@ -35,9 +37,36 @@ func (s *Server) GreetManyTimes(req *greet.GreetManyTimesReq, stream greet.Greet
 			return err
 		}
 		if ii%3 == 0 {
-			glog.Infof("Sent %d message", (ii + 1))
+			glog.Infof("Sent %d message(s)", ii+1)
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
+	}
+	return nil
+}
+
+func (s *Server) LongGreet(stream greet.GreetService_LongGreetServer) error {
+	glog.Infof("============================= LongGreet invoked!! ========================================")
+	result := "Hello "
+	count := 0
+	for {
+		req, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				var resp greet.LongGreetResp
+				resp.Result = result
+				serr := stream.SendAndClose(&resp)
+				if serr != nil {
+					glog.Fatalf("Unable to send and close client stream due to err: %s", err.Error())
+				}
+				break
+			}
+			glog.Fatalf("Received unexpected error: %s", err.Error())
+		}
+		if count%3 == 0 {
+			glog.Infof("Received %d messages", count+1)
+		}
+		count += 1
+		result += req.GetGreeting().GetFirstName() + "! "
 	}
 	return nil
 }
