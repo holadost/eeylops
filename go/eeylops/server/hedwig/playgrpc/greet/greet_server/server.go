@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"eeylops/server/hedwig/playgrpc/greet"
 	"flag"
 	"fmt"
@@ -11,6 +12,15 @@ import (
 
 type Server struct {
 	greet.UnimplementedGreetServiceServer
+}
+
+func (s *Server) Greet(ctx context.Context, req *greet.GreetReq) (*greet.GreetResp, error) {
+	firstName := req.GetGreeting().GetFirstName()
+	ret := "Hello " + firstName
+	var resp greet.GreetResp
+	resp.Result = ret
+	glog.Infof("Hello %s %s", req.GetGreeting().GetFirstName(), req.GetGreeting().GetLastName())
+	return &resp, nil
 }
 
 func main() {

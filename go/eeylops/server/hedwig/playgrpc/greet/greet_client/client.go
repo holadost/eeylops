@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"eeylops/server/hedwig/playgrpc/greet"
 	"flag"
 	"github.com/golang/glog"
@@ -15,5 +16,14 @@ func main() {
 	}
 	defer cc.Close()
 	client := greet.NewGreetServiceClient(cc)
-	glog.Infof("Successfully created client: %f", client)
+	var req greet.GreetReq
+	var greeting greet.Greeting
+	greeting.FirstName = "Nikhil"
+	greeting.LastName = "Srinivasan"
+	req.Greeting = &greeting
+	resp, err := client.Greet(context.Background(), &req)
+	if err != nil {
+		glog.Fatalf("Unable to get greeting from server due to err: %v", err)
+	}
+	glog.Infof("Response: %s", resp.GetResult())
 }
