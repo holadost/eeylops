@@ -3,6 +3,19 @@ syntax = "proto3";
 
 package greet;
 
-service GreetService{}
+message Greeting {
+  string first_name = 1;
+  string last_name = 2;
+}
 
+message GreetReq {
+  Greeting greeting = 1;
+}
 
+message GreetResp {
+  string result = 1;
+}
+
+service GreetService{
+  rpc Greet(GreetReq) returns (GreetResp);
+}
