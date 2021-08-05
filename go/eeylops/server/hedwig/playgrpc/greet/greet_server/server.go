@@ -8,6 +8,8 @@ import (
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"net"
+	"strconv"
+	"time"
 )
 
 type Server struct {
@@ -21,6 +23,23 @@ func (s *Server) Greet(ctx context.Context, req *greet.GreetReq) (*greet.GreetRe
 	resp.Result = ret
 	glog.Infof("Hello %s %s", req.GetGreeting().GetFirstName(), req.GetGreeting().GetLastName())
 	return &resp, nil
+}
+
+func (s *Server) GreetManyTimes(req *greet.GreetManyTimesReq, stream greet.GreetService_GreetManyTimesServer) error {
+	firstName := req.GetGreeting().GetFirstName()
+	for ii := 0; ii < 10; ii++ {
+		ret := "Hello " + firstName + " " + strconv.Itoa(ii)
+		resp := &greet.GreetManyTimesResp{Result: ret}
+		err := stream.Send(resp)
+		if err != nil {
+			return err
+		}
+		if ii%3 == 0 {
+			glog.Infof("Sent %d message", (ii + 1))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return nil
 }
 
 func main() {
