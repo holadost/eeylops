@@ -394,7 +394,7 @@ func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg
 		startTs = firstUnexpiredTs
 	}
 	endTs := now
-	if arg.EndTimestamp <= 0 {
+	if arg.EndTimestamp > 0 {
 		endTs = arg.EndTimestamp
 	}
 	if startTs >= endTs {
