@@ -1,0 +1,130 @@
+
+syntax = "proto3";
+
+package comm;
+
+message Error {
+  int32 error_code = 1;
+  string error_msg = 2;
+}
+
+message Value {
+  int64 offset = 1;
+  int64 timestamp = 2;
+  bytes value = 3;
+}
+
+message Topic {
+  string topic_name = 1;
+  repeated int32 partition_ids = 2;
+  int32 ttl_seconds = 3;
+}
+
+message CreateTopicRequest {
+  Topic topic = 1;
+}
+
+message CreateTopicResponse {
+  Error error = 1;
+}
+
+message RemoveTopicRequest {
+  string topic_name = 1;
+}
+
+message RemoveTopicResponse {
+  Error error = 1;
+}
+
+message GetTopicRequest {
+  string topic_name = 1;
+}
+
+message GetTopicResponse {
+  Error error = 1;
+  Topic topic = 3;
+}
+
+message GetAllTopicsRequest {
+  string topic_name = 1;
+}
+
+message GetAllTopicsResponse {
+  Error error = 1;
+  repeated Topic topics = 3;
+}
+
+message PublishRequest {
+  string topic_name = 1;
+  int32 partition_id = 2;
+  repeated bytes values = 3;
+}
+
+message PublishResponse {
+  Error error = 1;
+}
+
+message ConsumeRequest {
+  string topic_name = 1;
+  int32 partition_id = 2;
+  int32 batch_size = 3;
+  int64 start_offset = 4;
+  int64 start_timestamp = 5;
+  int64 end_timestamp = 6;
+  string client_id = 7;
+  bool auto_commit = 8;
+}
+
+message ConsumeResponse {
+  Error error = 1;
+  repeated Value values = 2;
+  int64 next_offset = 3;
+}
+
+message CommitRequest {
+  string topic_name = 1;
+  int32 partition_id = 2;
+  string client_id = 3;
+}
+
+message CommitResponse {
+  Error error = 1;
+}
+
+service EeylopsService{
+  // Creates a new topic with eeylops. If the topic already exists,
+  // returns KTopicAlreadyExists.
+  //
+  // If ttl_seconds is not provided, it defaults to 7 days.
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
+
+  // Removes a topic with eeylops. If the topic does not exist, KTopicNotFound
+  // error code is returned.
+  rpc RemoveTopic(RemoveTopicRequest) returns (RemoveTopicResponse);
+
+  // Get a the requested topic. If the topic does not exist, KTopicNotFound
+  // error code is returned.
+  rpc GetTopic(GetTopicRequest) returns (GetTopicResponse);
+
+  // Get a the requested topic. If the topic does not exist, KTopicNotFound
+  // error code is returned.
+  rpc GetAllTopics(GetAllTopicsRequest) returns (GetAllTopicsResponse);
+
+  // Publishes one or more messages to the given topic and partition.
+  // Returns KTopicNotFound if the topic or partition was not found.
+  rpc Publish(PublishRequest) returns (PublishResponse);
+
+  // Publish using client side streaming.
+  rpc PublishStream(stream PublishRequest) returns (PublishResponse);
+
+  // Consumes one or more messages from the given topic and partition.
+  // Returns KTopicNotFound if the topic or partition was not found.
+  rpc Consume(ConsumeRequest) returns (ConsumeResponse);
+
+  // Consumes using server side streaming.
+  rpc ConsumeStream(ConsumeRequest) returns (stream ConsumeResponse);
+
+  // Commits the offset provided by the client. Future consumers can start
+  // directly start from the last committed offset of that consumer.
+  rpc Commit(CommitRequest) returns (CommitResponse);
+}
