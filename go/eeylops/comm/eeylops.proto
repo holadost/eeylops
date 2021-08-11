@@ -3,20 +3,29 @@ syntax = "proto3";
 
 package comm;
 
+// Base error returned with every RPC response.
 message Error {
   int32 error_code = 1;
   string error_msg = 2;
 }
 
+// Value.
 message Value {
+  // This holds the offset of the message in the partition.
   int64 offset = 1;
+  // This holds the timestamp when the message was written to the partition.
   int64 timestamp = 2;
+  // Value.
   bytes value = 3;
 }
 
 message Topic {
+  // Name of the topic.
   string topic_name = 1;
+  // List of partition IDs associated with this topic.
   repeated int32 partition_ids = 2;
+  // Time to live(in seconds) or retention policy for messages
+  // in this topic.
   int32 ttl_seconds = 3;
 }
 
@@ -55,8 +64,11 @@ message GetAllTopicsResponse {
 }
 
 message PublishRequest {
+  // Name of the topic.
   string topic_name = 1;
+  // Partition where the given values must be appended.
   int32 partition_id = 2;
+  // List of values to append to the partition.
   repeated bytes values = 3;
 }
 
@@ -64,27 +76,54 @@ message PublishResponse {
   Error error = 1;
 }
 
-message ConsumeRequest {
-  string topic_name = 1;
-  int32 partition_id = 2;
-  int32 batch_size = 3;
-  int64 start_offset = 4;
-  int64 start_timestamp = 5;
-  int64 end_timestamp = 6;
-  string client_id = 7;
-  bool auto_commit = 8;
+message RegisterSubscriberRequest {
+  // Subscriber ID. Must be <= 256 characters.
+  string subscriber_id = 1;
 }
 
-message ConsumeResponse {
+message RegisterSubscriberResponse {
   Error error = 1;
+}
+
+message SubscribeRequest {
+  // Name of the topic. This is a compulsory parameter.
+  string topic_name = 1;
+  // Partition ID. This is a compulsory parameter.
+  int32 partition_id = 2;
+  // Batch size(number of messages) to fetch per scan RPC.
+  // This is a compulsory parameter.
+  int32 batch_size = 3;
+  // Specifies the start offset from where the scan starts.
+  // Defaults to 0.
+  int64 start_offset = 4;
+  // Filters messages such that only messages >= start_timestamp
+  // are fetched.
+  int64 start_timestamp = 5;
+  // Filters messages such that only messages < end_timestamp are
+  // fetched.
+  int64 end_timestamp = 6;
+  // Subscriber ID. This is a compulsory parameter.
+  string subscriber_id = 7;
+  // If True, start_offset - 1 is committed. Defaults to false.
+  bool commit_prev_offset = 9;
+}
+
+message SubscribeResponse {
+  Error error = 1;
+  // List of values.
   repeated Value values = 2;
+  // The next offset to start scan from. If -1, it means that
+  // the scan is complete.
   int64 next_offset = 3;
 }
 
 message CommitRequest {
+  // Name of the topic. This is a compulsory parameter.
   string topic_name = 1;
+  // Partition ID. This is a compulsory parameter.
   int32 partition_id = 2;
-  string client_id = 3;
+  // Subscriber ID. This is a compulsory parameter.
+  string subscriber_id = 3;
 }
 
 message CommitResponse {
@@ -117,14 +156,17 @@ service EeylopsService{
   // Publish using client side streaming.
   rpc PublishStream(stream PublishRequest) returns (PublishResponse);
 
-  // Consumes one or more messages from the given topic and partition.
+  // Registers a subscriber.
+  rpc RegisterSubscriber(stream RegisterSubscriberRequest) returns (RegisterSubscriberResponse);
+
+  // Subscribes one or more messages from the given topic and partition.
   // Returns KTopicNotFound if the topic or partition was not found.
-  rpc Consume(ConsumeRequest) returns (ConsumeResponse);
+  rpc Subscribe(SubscribeRequest) returns (SubscribeResponse);
 
-  // Consumes using server side streaming.
-  rpc ConsumeStream(ConsumeRequest) returns (stream ConsumeResponse);
+  // Subscribes using server side streaming.
+  rpc SubscribeStream(SubscribeRequest) returns (stream SubscribeResponse);
 
-  // Commits the offset provided by the client. Future consumers can start
-  // directly start from the last committed offset of that consumer.
+  // Commits the offset provided by the client. Future Subscribers can
+  // directly start from the last committed offset of that Subscriber.
   rpc Commit(CommitRequest) returns (CommitResponse);
 }
