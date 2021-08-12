@@ -9,7 +9,7 @@ type PeerAddress struct {
 
 type ClusterControllerOptions struct {
 	DataDirectory string        // Data directory for this ClusterController.
-	BrokerID      string        // Broker ID.
+	ClusterID     string        // Broker ID.
 	PeerAddresses []PeerAddress // List of peer addresses. The first address must be the current host's address.
 }
 
@@ -23,7 +23,7 @@ func NewClusterController(opts *ClusterControllerOptions) *ClusterController {
 	var topts StorageControllerOpts
 	topts.StoreScanIntervalSecs = 300
 	topts.RootDirectory = opts.DataDirectory
-	topts.ControllerID = opts.BrokerID
+	topts.ControllerID = opts.ClusterID
 	cc.topicController = NewStorageController(topts)
 	return &cc
 }
