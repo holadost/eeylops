@@ -22,7 +22,7 @@ func createTestDirForInstanceManager(t *testing.T, testName string) string {
 	return dataDir
 }
 
-func TestTopicController(t *testing.T) {
+func TestStorageController(t *testing.T) {
 	glog.Infof("*******************************************************************************************\n\n")
 	glog.Infof("Starting TestTopicController")
 	scanIntervalSecs := 5

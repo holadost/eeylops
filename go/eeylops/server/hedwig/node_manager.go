@@ -1,8 +1,7 @@
 package hedwig
 
 type NodeManager struct {
-	rpcServer  *RPCServer
-	fsmManager *FSMManager
+	rpcServer *RPCServer
 }
 
 func NewNodeManager() *NodeManager {
