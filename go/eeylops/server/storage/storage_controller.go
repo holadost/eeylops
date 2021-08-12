@@ -1,8 +1,8 @@
-package hedwig
+package storage
 
 import (
 	"eeylops/server/base"
-	"eeylops/server/storage"
+	"eeylops/server/hedwig"
 	"github.com/golang/glog"
 	"os"
 	"path"
@@ -11,15 +11,15 @@ import (
 )
 
 type StorageController struct {
-	topicStore            *storage.TopicStore      // Backing topicStore for topics registered with eeylops.
-	consumerStore         *storage.ConsumerStore   // Consumer store.
-	topicMap              map[string]*topicEntry   // In memory map that holds the topics and partitions.
-	topicMapLock          sync.RWMutex             // Read-write lock to protect access to topicMap.
-	rootDir               string                   // Root directory for this topic controller.
-	controllerID          string                   // Controller ID.
-	storeScanIntervalSecs int                      // Store scan interval in seconds.
-	disposer              *storage.StorageDisposer // Disposer to help remove deleted topics.
-	disposedChan          chan string              // Callback channel after disposer has removed topics.
+	topicStore            *TopicStore            // Backing topicStore for topics registered with eeylops.
+	consumerStore         *ConsumerStore         // Consumer store.
+	topicMap              map[string]*topicEntry // In memory map that holds the topics and partitions.
+	topicMapLock          sync.RWMutex           // Read-write lock to protect access to topicMap.
+	rootDir               string                 // Root directory for this topic controller.
+	controllerID          string                 // Controller ID.
+	storeScanIntervalSecs int                    // Store scan interval in seconds.
+	disposer              *StorageDisposer       // Disposer to help remove deleted topics.
+	disposedChan          chan string            // Callback channel after disposer has removed topics.
 }
 
 type StorageControllerOpts struct {
@@ -31,14 +31,14 @@ type StorageControllerOpts struct {
 	ControllerID string // Controller ID.
 
 	// The interval at which the topic store is scanned by the janitor to dispose removed topics.
-	StoreScanIntervalSecs int
+	StoreGCScanIntervalSecs int
 }
 
 func NewStorageController(opts StorageControllerOpts) *StorageController {
 	sc := &StorageController{}
 	sc.rootDir = opts.RootDirectory
 	sc.controllerID = opts.ControllerID
-	sc.storeScanIntervalSecs = opts.StoreScanIntervalSecs
+	sc.storeScanIntervalSecs = opts.StoreGCScanIntervalSecs
 	if sc.controllerID == "" {
 		glog.Fatalf("No controller ID provided")
 	}
@@ -47,8 +47,8 @@ func NewStorageController(opts StorageControllerOpts) *StorageController {
 }
 
 func (sc *StorageController) initialize() {
-	sc.topicStore = storage.NewTopicStore(sc.getControllerRootDirectory())
-	sc.consumerStore = storage.NewConsumerStore(sc.getControllerRootDirectory())
+	sc.topicStore = NewTopicStore(sc.getControllerRootDirectory())
+	sc.consumerStore = NewConsumerStore(sc.getControllerRootDirectory())
 	sc.topicMap = make(map[string]*topicEntry)
 	sc.disposedChan = make(chan string, 200)
 
@@ -72,15 +72,15 @@ func (sc *StorageController) initialize() {
 				topic.Name, err.Error())
 			return
 		}
-		pMap := make(map[int]*storage.Partition)
+		pMap := make(map[int]*Partition)
 		for _, ii := range topic.PartitionIDs {
-			opts := storage.PartitionOpts{
+			opts := PartitionOpts{
 				TopicName:     topic.Name,
 				PartitionID:   ii,
 				RootDirectory: topicDir,
 				TTLSeconds:    topic.TTLSeconds,
 			}
-			pMap[ii] = storage.NewPartition(opts)
+			pMap[ii] = NewPartition(opts)
 		}
 		entry := &topicEntry{
 			topic:        &topic,
@@ -108,25 +108,25 @@ func (sc *StorageController) AddTopic(topic base.Topic) error {
 	_, exists := sc.topicMap[topic.Name]
 	if exists {
 		glog.Errorf("Topic: %s already exists", topic.Name)
-		return ErrTopicExists
+		return hedwig.ErrTopicExists
 	}
 	if err := os.MkdirAll(sc.getTopicRootDirectory(topic.Name), 0774); err != nil {
 		glog.Errorf("Unable to create directory for topic: %s due to err: %s", topic.Name, err.Error())
-		return ErrTopicController
+		return hedwig.ErrTopicController
 	}
 	if err := sc.topicStore.AddTopic(topic); err != nil {
 		glog.Errorf("Unable to add topic to topic: %s topicStore due to err: %s", topic.Name, err.Error())
-		return ErrTopicController
+		return hedwig.ErrTopicController
 	}
-	partMap := make(map[int]*storage.Partition)
+	partMap := make(map[int]*Partition)
 	for _, elem := range topic.PartitionIDs {
-		opts := storage.PartitionOpts{
+		opts := PartitionOpts{
 			TopicName:     topic.Name,
 			PartitionID:   elem,
 			RootDirectory: sc.getTopicRootDirectory(topic.Name),
 			TTLSeconds:    topic.TTLSeconds,
 		}
-		part := storage.NewPartition(opts)
+		part := NewPartition(opts)
 		partMap[elem] = part
 	}
 	entry := &topicEntry{
@@ -143,28 +143,28 @@ func (sc *StorageController) RemoveTopic(topicName string) error {
 	_, exists := sc.topicMap[topicName]
 	if !exists {
 		glog.Errorf("Topic: %s does not exist. Cannot remove topic", topicName)
-		return ErrTopicNotFound
+		return hedwig.ErrTopicNotFound
 	}
 	if err := sc.topicStore.MarkTopicForRemoval(topicName); err != nil {
 		glog.Errorf("Unable to mark topic: %s for removal due to err: %s", topicName, err.Error())
-		return ErrTopicController
+		return hedwig.ErrTopicController
 	}
 	delete(sc.topicMap, topicName)
 	return nil
 }
 
-func (sc *StorageController) GetPartition(topicName string, partitionID int) (*storage.Partition, error) {
+func (sc *StorageController) GetPartition(topicName string, partitionID int) (*Partition, error) {
 	sc.topicMapLock.RLock()
 	defer sc.topicMapLock.RUnlock()
 	entry, exists := sc.topicMap[topicName]
 	if !exists {
 		glog.Errorf("Unable to find topic: %s", topicName)
-		return nil, ErrTopicNotFound
+		return nil, hedwig.ErrTopicNotFound
 	}
 	partition, exists := entry.partitionMap[partitionID]
 	if !exists {
 		glog.Errorf("Unable to find partition: %d for topic: %s", partitionID, topicName)
-		return nil, ErrPartitionNotFound
+		return nil, hedwig.ErrPartitionNotFound
 	}
 	return partition, nil
 }
@@ -205,7 +205,7 @@ func (sc *StorageController) disposeTopics() {
 	}
 	for _, topic := range topics {
 		if topic.ToRemove {
-			ds := storage.DefaultDisposer()
+			ds := DefaultDisposer()
 			ds.Dispose(sc.getTopicRootDirectory(topic.Name), sc.createDisposeCb(topic.Name))
 		}
 	}
@@ -224,5 +224,5 @@ func (sc *StorageController) createDisposeCb(topicName string) func(error) {
 
 type topicEntry struct {
 	topic        *base.Topic
-	partitionMap map[int]*storage.Partition
+	partitionMap map[int]*Partition
 }

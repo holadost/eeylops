@@ -1,6 +1,9 @@
 package hedwig
 
-import "eeylops/server/replication"
+import (
+	"eeylops/server/replication"
+	"eeylops/server/storage"
+)
 
 type PeerAddress struct {
 	Host string // Host name.
@@ -16,16 +19,16 @@ type InstanceManagerOpts struct {
 // InstanceManager manages the replication and storage controller for the node.
 type InstanceManager struct {
 	replicationController *replication.RaftController
-	storageController     *StorageController
+	storageController     *storage.StorageController
 }
 
 func NewClusterController(opts *InstanceManagerOpts) *InstanceManager {
 	var im InstanceManager
-	var topts StorageControllerOpts
-	topts.StoreScanIntervalSecs = 300
+	var topts storage.StorageControllerOpts
+	topts.StoreGCScanIntervalSecs = 300
 	topts.RootDirectory = opts.DataDirectory
 	topts.ControllerID = opts.ClusterID
-	im.storageController = NewStorageController(topts)
+	im.storageController = storage.NewStorageController(topts)
 	return &im
 }
 

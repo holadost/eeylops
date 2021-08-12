@@ -1,7 +1,8 @@
-package hedwig
+package storage
 
 import (
 	"eeylops/server/base"
+	"eeylops/server/hedwig"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -27,9 +28,9 @@ func TestStorageController(t *testing.T) {
 	glog.Infof("Starting TestStorageController")
 	scanIntervalSecs := 5
 	opts := StorageControllerOpts{
-		RootDirectory:         createTestDirForInstanceManager(t, "TestStorageController"),
-		ControllerID:          "1",
-		StoreScanIntervalSecs: scanIntervalSecs,
+		RootDirectory:           createTestDirForInstanceManager(t, "TestStorageController"),
+		ControllerID:            "1",
+		StoreGCScanIntervalSecs: scanIntervalSecs,
 	}
 	controller := NewStorageController(opts)
 	topicName := "topic1"
@@ -43,7 +44,7 @@ func TestStorageController(t *testing.T) {
 		glog.Fatalf("Unable to add topic due to err: %s", err.Error())
 	}
 	err := controller.AddTopic(topic)
-	if err == ErrTopicExists {
+	if err == hedwig.ErrTopicExists {
 		glog.V(1).Infof("Topic was not updated as expected")
 	} else {
 		glog.Fatalf("Added topic: %s even though we should not have. Error: %v", topicName, err)
@@ -56,7 +57,7 @@ func TestStorageController(t *testing.T) {
 	glog.V(1).Infof("Topic: %v", tp)
 
 	_, err = controller.GetTopic("topic2")
-	if err != ErrTopicNotFound {
+	if err != hedwig.ErrTopicNotFound {
 		glog.Fatalf("Fetched a topic that was never created")
 	}
 
