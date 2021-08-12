@@ -1,10 +1,10 @@
 package hedwig
 
 type FSMCommitOp struct {
-	fsm *ClusterController
+	fsm *InstanceManager
 }
 
-func NewFSMCommitOp(fsm *ClusterController) *FSMCommitOp {
+func NewFSMCommitOp(fsm *InstanceManager) *FSMCommitOp {
 	var op FSMCommitOp
 	op.fsm = fsm
 	return &op
