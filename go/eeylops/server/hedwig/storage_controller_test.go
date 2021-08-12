@@ -24,14 +24,14 @@ func createTestDirForInstanceManager(t *testing.T, testName string) string {
 
 func TestStorageController(t *testing.T) {
 	glog.Infof("*******************************************************************************************\n\n")
-	glog.Infof("Starting TestTopicController")
+	glog.Infof("Starting TestStorageController")
 	scanIntervalSecs := 5
-	opts := TopicControllerOpts{
-		RootDirectory:         createTestDirForInstanceManager(t, "TestTopicController"),
+	opts := StorageControllerOpts{
+		RootDirectory:         createTestDirForInstanceManager(t, "TestStorageController"),
 		ControllerID:          "1",
 		StoreScanIntervalSecs: scanIntervalSecs,
 	}
-	controller := NewTopicController(opts)
+	controller := NewStorageController(opts)
 	topicName := "topic1"
 	topic := base.Topic{
 		Name:         topicName,

@@ -22,7 +22,7 @@ type StorageController struct {
 	disposedChan          chan string              // Callback channel after disposer has removed topics.
 }
 
-type TopicControllerOpts struct {
+type StorageControllerOpts struct {
 	// The root directory for this topic controller.
 	RootDirectory string // Root directory for the topic controller.
 
@@ -34,7 +34,7 @@ type TopicControllerOpts struct {
 	StoreScanIntervalSecs int
 }
 
-func NewTopicController(opts TopicControllerOpts) *StorageController {
+func NewStorageController(opts StorageControllerOpts) *StorageController {
 	sc := &StorageController{}
 	sc.rootDir = opts.RootDirectory
 	sc.controllerID = opts.ControllerID

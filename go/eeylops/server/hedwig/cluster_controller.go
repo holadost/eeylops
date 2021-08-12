@@ -20,11 +20,11 @@ type ClusterController struct {
 
 func NewClusterController(opts *ClusterControllerOptions) *ClusterController {
 	var cc ClusterController
-	var topts TopicControllerOpts
+	var topts StorageControllerOpts
 	topts.StoreScanIntervalSecs = 300
 	topts.RootDirectory = opts.DataDirectory
 	topts.ControllerID = opts.BrokerID
-	cc.topicController = NewTopicController(topts)
+	cc.topicController = NewStorageController(topts)
 	return &cc
 }
 
