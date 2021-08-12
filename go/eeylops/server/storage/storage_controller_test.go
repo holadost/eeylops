@@ -2,7 +2,6 @@ package storage
 
 import (
 	"eeylops/server/base"
-	"eeylops/server/hedwig"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -44,7 +43,7 @@ func TestStorageController(t *testing.T) {
 		glog.Fatalf("Unable to add topic due to err: %s", err.Error())
 	}
 	err := controller.AddTopic(topic)
-	if err == hedwig.ErrTopicExists {
+	if err == ErrTopicExists {
 		glog.V(1).Infof("Topic was not updated as expected")
 	} else {
 		glog.Fatalf("Added topic: %s even though we should not have. Error: %v", topicName, err)
@@ -57,7 +56,7 @@ func TestStorageController(t *testing.T) {
 	glog.V(1).Infof("Topic: %v", tp)
 
 	_, err = controller.GetTopic("topic2")
-	if err != hedwig.ErrTopicNotFound {
+	if err != ErrTopicNotFound {
 		glog.Fatalf("Fetched a topic that was never created")
 	}
 

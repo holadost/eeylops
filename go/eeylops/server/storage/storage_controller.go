@@ -2,7 +2,6 @@ package storage
 
 import (
 	"eeylops/server/base"
-	"eeylops/server/hedwig"
 	"github.com/golang/glog"
 	"os"
 	"path"
@@ -108,15 +107,15 @@ func (sc *StorageController) AddTopic(topic base.Topic) error {
 	_, exists := sc.topicMap[topic.Name]
 	if exists {
 		glog.Errorf("Topic: %s already exists", topic.Name)
-		return hedwig.ErrTopicExists
+		return ErrTopicExists
 	}
 	if err := os.MkdirAll(sc.getTopicRootDirectory(topic.Name), 0774); err != nil {
 		glog.Errorf("Unable to create directory for topic: %s due to err: %s", topic.Name, err.Error())
-		return hedwig.ErrTopicController
+		return ErrStorageController
 	}
 	if err := sc.topicStore.AddTopic(topic); err != nil {
-		glog.Errorf("Unable to add topic to topic: %s topicStore due to err: %s", topic.Name, err.Error())
-		return hedwig.ErrTopicController
+		glog.Errorf("Unable to add topic: %s to topic store due to err: %s", topic.Name, err.Error())
+		return ErrStorageController
 	}
 	partMap := make(map[int]*Partition)
 	for _, elem := range topic.PartitionIDs {
@@ -143,11 +142,11 @@ func (sc *StorageController) RemoveTopic(topicName string) error {
 	_, exists := sc.topicMap[topicName]
 	if !exists {
 		glog.Errorf("Topic: %s does not exist. Cannot remove topic", topicName)
-		return hedwig.ErrTopicNotFound
+		return ErrTopicNotFound
 	}
 	if err := sc.topicStore.MarkTopicForRemoval(topicName); err != nil {
 		glog.Errorf("Unable to mark topic: %s for removal due to err: %s", topicName, err.Error())
-		return hedwig.ErrTopicController
+		return ErrStorageController
 	}
 	delete(sc.topicMap, topicName)
 	return nil
@@ -159,12 +158,12 @@ func (sc *StorageController) GetPartition(topicName string, partitionID int) (*P
 	entry, exists := sc.topicMap[topicName]
 	if !exists {
 		glog.Errorf("Unable to find topic: %s", topicName)
-		return nil, hedwig.ErrTopicNotFound
+		return nil, ErrTopicNotFound
 	}
 	partition, exists := entry.partitionMap[partitionID]
 	if !exists {
 		glog.Errorf("Unable to find partition: %d for topic: %s", partitionID, topicName)
-		return nil, hedwig.ErrPartitionNotFound
+		return nil, ErrPartitionNotFound
 	}
 	return partition, nil
 }
@@ -178,8 +177,8 @@ func (sc *StorageController) getTopicRootDirectory(topicName string) string {
 }
 
 /********************************************** TOPICS JANITOR ********************************************************/
-// janitor is a long running background goroutine that periodically checks which topics have been marked for removal and
-// removes those topics from the underlying storage.
+// janitor is a long-running background goroutine that periodically checks topics that have been marked for removal and
+// clears those topics from the underlying storage.
 func (sc *StorageController) janitor() {
 	glog.Infof("Starting janitor for topic controller: %s", sc.controllerID)
 	disposeTicker := time.NewTicker(time.Duration(sc.storeScanIntervalSecs) * time.Second)
@@ -201,7 +200,7 @@ func (sc *StorageController) janitor() {
 func (sc *StorageController) disposeTopics() {
 	topics, err := sc.topicStore.GetAllTopics()
 	if err != nil {
-		glog.Fatalf("Unable to fesch all topics from topic topicStore due to err: %s", err.Error())
+		glog.Fatalf("Unable to fetch all topics from topic topicStore due to err: %s", err.Error())
 	}
 	for _, topic := range topics {
 		if topic.ToRemove {
@@ -222,6 +221,7 @@ func (sc *StorageController) createDisposeCb(topicName string) func(error) {
 	return cb
 }
 
+// topicEntry is a wrapper struct to hold the topic config and the partition(s) of this topic.
 type topicEntry struct {
 	topic        *base.Topic
 	partitionMap map[int]*Partition

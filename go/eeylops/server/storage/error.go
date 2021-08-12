@@ -31,6 +31,15 @@ var (
 	// ErrTopicNotFound is returned when the given topic is not found.
 	ErrTopicNotFound = errors.New("ErrTopicNotFound: topic not found")
 
+	// ErrTopicExists is returned when a topic with the given name already exists.
+	ErrTopicExists = errors.New("ErrTopicExists: topic already exists")
+
+	// ErrStorageController is a generic error that is returned for any unhandled errors.
+	ErrStorageController = errors.New("ErrStorageController: storage controller error")
+
+	// ErrPartitionNotFound is a returned when the given partition is not found by the instance topic manager.
+	ErrPartitionNotFound = errors.New("ErrPartitionNotFound: partition not found")
+
 	// errPartitionOffsetTsNotFound is returned when an offset or timestamp was not found
 	errPartitionOffsetTsNotFound = errors.New("errPartitionOffsetTsNotFound: offset/timestamp not found")
 )
