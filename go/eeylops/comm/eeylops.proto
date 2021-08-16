@@ -7,6 +7,19 @@ package comm;
 message Error {
   int32 error_code = 1;
   string error_msg = 2;
+  int32 leader_id = 3;
+}
+
+message ClusterConfig {
+  string cluster_id = 1;
+  repeated NodeConfig node_config_list = 2;
+  int32 leader_id = 3;
+}
+
+message NodeConfig {
+  int32 id = 1;
+  string host = 2;
+  int32 port = 3;
 }
 
 // Value.
@@ -105,7 +118,7 @@ message SubscribeRequest {
   // Subscriber ID. This is a compulsory parameter.
   string subscriber_id = 7;
   // If True, start_offset - 1 is committed. Defaults to false.
-  bool commit_prev_offset = 9;
+  bool auto_commit = 9;
 }
 
 message SubscribeResponse {
@@ -131,6 +144,47 @@ message CommitRequest {
 message CommitResponse {
   Error error = 1;
 }
+
+message LastCommittedRequest {
+  // Name of the topic. This is a compulsory parameter.
+  string topic_name = 1;
+  // Partition ID. This is a compulsory parameter.
+  int32 partition_id = 2;
+  // Subscriber ID. This is a compulsory parameter.
+  string subscriber_id = 3;
+}
+
+message LastCommittedResponse {
+  // Error.
+  Error error = 1;
+  // Last committed offset.
+  int64 offset = 3;
+}
+
+message GetLeaderRequest {
+  // Cluster ID.
+  string cluster_id = 1;
+}
+
+message GetLeaderResponse {
+  // Error.
+  Error error = 1;
+  // Leader configuration.
+  NodeConfig leader_config = 2;
+}
+
+message GetClusterConfigRequest {
+  // Cluster ID.
+  string cluster_id = 1;
+}
+
+message GetClusterConfigResponse {
+  // Error.
+  Error error = 1;
+  // Cluster configuration.
+  ClusterConfig config = 2;
+}
+
 
 service EeylopsService{
   // Creates a new topic with eeylops. If the topic already exists,
@@ -171,4 +225,13 @@ service EeylopsService{
   // Commits the offset provided by the client. Future Subscribers can
   // directly start from the last committed offset of that Subscriber.
   rpc Commit(CommitRequest) returns (CommitResponse);
+
+  // Fetches the last committed offset by the client.
+  rpc GetLastCommitted(LastCommittedRequest) returns (LastCommittedResponse);
+
+  // Fetches the node configuration of the leader for the given cluster_id.
+  rpc GetLeader(GetLeaderRequest) returns (GetLeaderResponse);
+
+  // Fetches the cluster configuration for the given cluster_id.
+  rpc GetClusterConfig(GetClusterConfigRequest) returns (GetClusterConfigResponse);
 }
