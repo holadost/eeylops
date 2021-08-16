@@ -124,6 +124,8 @@ message CommitRequest {
   int32 partition_id = 2;
   // Subscriber ID. This is a compulsory parameter.
   string subscriber_id = 3;
+  // Offset number. This is a compulsory parameter.
+  int64 offset = 4;
 }
 
 message CommitResponse {
