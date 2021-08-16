@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"eeylops/server/storage/kv_store"
 	"encoding/binary"
 	"github.com/dgraph-io/badger/v2"
@@ -73,7 +74,7 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, p
 	return nil
 }
 
-func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID uint, offsetNum uint64) error {
+func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID uint, offsetNum base.Offset) error {
 	key := generateConsumerKey(consumerID, topicName, partitionID)
 	_, err := cs.kvStore.Get(key)
 	if err != nil {
@@ -82,7 +83,7 @@ func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID
 		return ErrConsumerStoreCommit
 	}
 	val := make([]byte, 8)
-	binary.BigEndian.PutUint64(val, offsetNum)
+	binary.BigEndian.PutUint64(val, uint64(offsetNum))
 	err = cs.kvStore.Put(key, val)
 	if err != nil {
 		glog.Errorf("Unable to commit an offset due to err: %s", err.Error())

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"eeylops/server/base"
 	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
@@ -34,7 +35,7 @@ func TestConsumerStore(t *testing.T) {
 	}
 	numCommits := 100
 	for ii := 0; ii < numCommits; ii++ {
-		if err := cs.Commit(consumerID, topidName, partitionID, uint64(ii)); err != nil {
+		if err := cs.Commit(consumerID, topidName, partitionID, base.Offset(ii)); err != nil {
 			glog.Fatalf("Unable to commit for consumer due to err: %s", err.Error())
 			return
 		}

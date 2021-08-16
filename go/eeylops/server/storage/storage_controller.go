@@ -168,6 +168,10 @@ func (sc *StorageController) GetPartition(topicName string, partitionID int) (*P
 	return partition, nil
 }
 
+func (sc *StorageController) GetConsumerStore() *ConsumerStore {
+	return sc.consumerStore
+}
+
 func (sc *StorageController) getControllerRootDirectory() string {
 	return path.Join(sc.rootDir, sc.controllerID)
 }
