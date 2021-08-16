@@ -1,3 +1,7 @@
 package hedwig
 
-var ()
+import "errors"
+
+var (
+	ErrInvalidArg = errors.New("ErrInvalidArg: invalid argument(s)")
+)

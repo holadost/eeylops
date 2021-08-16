@@ -1,6 +1,9 @@
 package hedwig
 
 import (
+	"context"
+	"eeylops/comm"
+	"eeylops/server/hedwig/ops"
 	"eeylops/server/replication"
 	"eeylops/server/storage"
 )
@@ -20,6 +23,7 @@ type InstanceManagerOpts struct {
 type InstanceManager struct {
 	replicationController *replication.RaftController
 	storageController     *storage.StorageController
+	fsm                   *FSM
 }
 
 func NewClusterController(opts *InstanceManagerOpts) *InstanceManager {
@@ -30,6 +34,15 @@ func NewClusterController(opts *InstanceManagerOpts) *InstanceManager {
 	topts.ControllerID = opts.ClusterID
 	im.storageController = storage.NewStorageController(topts)
 	return &im
+}
+
+func (im *InstanceManager) Produce(ctx context.Context, in *comm.PublishRequest) error {
+	op := ops.NewPublishOpForSingleNode(ctx, im.replicationController, im.storageController, in, im.fsm)
+	return op.Execute()
+}
+
+func (im *InstanceManager) Consume() {
+
 }
 
 func (im *InstanceManager) Publish() {

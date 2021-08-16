@@ -1,10 +1,12 @@
-package hedwig
+package ops
+
+import "eeylops/server/hedwig"
 
 type FSMCommitOp struct {
-	fsm *InstanceManager
+	fsm *hedwig.InstanceManager
 }
 
-func NewFSMCommitOp(fsm *InstanceManager) *FSMCommitOp {
+func NewFSMCommitOp(fsm *hedwig.InstanceManager) *FSMCommitOp {
 	var op FSMCommitOp
 	op.fsm = fsm
 	return &op

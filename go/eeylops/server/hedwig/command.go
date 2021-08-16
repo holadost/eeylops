@@ -8,11 +8,12 @@ import (
 )
 
 const (
-	KAppendCommand      = 1
-	KCommitCommand      = 2
-	KAddTopicCommand    = 3
-	KRemoveTopicCommand = 4
-	KNoOpCommand        = 5
+	KNoOpCommand             = 1
+	KAppendCommand           = 2
+	KCommitCommand           = 3
+	KAddTopicCommand         = 4
+	KRemoveTopicCommand      = 5
+	KRegisterConsumerCommand = 6
 )
 
 type Command struct {
