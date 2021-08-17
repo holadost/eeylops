@@ -71,6 +71,8 @@ message GetTopicRequest {
   string cluster_id = 1;
   // Topic name.
   string topic_name = 2;
+  // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
+  bool sync = 3;
 }
 
 message GetTopicResponse {
@@ -83,6 +85,8 @@ message GetTopicResponse {
 message GetAllTopicsRequest {
   // Cluster ID.
   string cluster_id = 1;
+  // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
+  bool sync = 2;
 }
 
 message GetAllTopicsResponse {
@@ -109,6 +113,10 @@ message PublishResponse {
 message RegisterSubscriberRequest {
   // Subscriber ID. Must be <= 256 characters.
   string subscriber_id = 1;
+  // Topic name.
+  string topic_name = 2;
+  // Partition Id.
+  int32 partition_id = 3;
 }
 
 message RegisterSubscriberResponse {
