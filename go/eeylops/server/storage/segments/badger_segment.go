@@ -182,7 +182,8 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	oldNextOffset := nextOff
 	// Convert entries into (key, value) pairs
 	keys := seg.generateKeys(nextOff, base.Offset(len(arg.Entries)))
-	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp, seg.currentIndexBatchSizeBytes, nextOff)
+	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp,
+		seg.currentIndexBatchSizeBytes, nextOff)
 
 	// Add an index entry if required.
 	currIndexSize := len(seg.timestampBRI)
