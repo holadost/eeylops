@@ -770,6 +770,8 @@ func (seg *BadgerSegment) open() {
 	opts.Compression = options.None
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
+	opts.CompactL0OnClose = false
+	opts.Logger = seg.logger
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
 	}
