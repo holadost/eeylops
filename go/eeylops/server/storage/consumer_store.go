@@ -92,7 +92,7 @@ func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID
 	return nil
 }
 
-func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicName string, partitionID uint) (uint64, error) {
+func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicName string, partitionID uint) (base.Offset, error) {
 	key := generateConsumerKey(consumerID, topicName, partitionID)
 	val, err := cs.kvStore.Get(key)
 	if err != nil {
@@ -100,7 +100,7 @@ func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicName string, p
 			consumerID, topicName, partitionID)
 		return 0, ErrConsumerStoreFetch
 	}
-	lastCommitted := binary.BigEndian.Uint64(val)
+	lastCommitted := base.Offset(binary.BigEndian.Uint64(val))
 	return lastCommitted, nil
 }
 

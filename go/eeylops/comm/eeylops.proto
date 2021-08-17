@@ -43,36 +43,52 @@ message Topic {
 }
 
 message CreateTopicRequest {
-  Topic topic = 1;
+  // Cluster ID where the topic is to be created.
+  string cluster_id = 1;
+  // Topic to be created.
+  Topic topic = 2;
 }
 
 message CreateTopicResponse {
+  // Error.
   Error error = 1;
 }
 
 message RemoveTopicRequest {
-  string topic_name = 1;
+  // Cluster ID.
+  string cluster_id = 1;
+  // Name of the topic.
+  string topic_name = 2;
 }
 
 message RemoveTopicResponse {
+  // Error.
   Error error = 1;
 }
 
 message GetTopicRequest {
-  string topic_name = 1;
+  // Cluster ID.
+  string cluster_id = 1;
+  // Topic name.
+  string topic_name = 2;
 }
 
 message GetTopicResponse {
+  // Error.
   Error error = 1;
+  // Topic.
   Topic topic = 3;
 }
 
 message GetAllTopicsRequest {
-  string topic_name = 1;
+  // Cluster ID.
+  string cluster_id = 1;
 }
 
 message GetAllTopicsResponse {
+  // Error.
   Error error = 1;
+  // All topics.
   repeated Topic topics = 3;
 }
 
@@ -86,6 +102,7 @@ message PublishRequest {
 }
 
 message PublishResponse {
+  // Error.
   Error error = 1;
 }
 
@@ -95,33 +112,36 @@ message RegisterSubscriberRequest {
 }
 
 message RegisterSubscriberResponse {
+  // Error.
   Error error = 1;
 }
 
 message SubscribeRequest {
-  // Name of the topic. This is a compulsory parameter.
-  string topic_name = 1;
-  // Partition ID. This is a compulsory parameter.
-  int32 partition_id = 2;
-  // Batch size(number of messages) to fetch per scan RPC.
-  // This is a compulsory parameter.
-  int32 batch_size = 3;
+  // Subscriber ID.
+  string subscriber_id = 1;
+  // Name of the topic.
+  string topic_name = 2;
+  // Partition ID.
+  int32 partition_id = 3;
+  // Batch size(number of messages) to fetch per scan RPC. Defaults to 1.
+  int32 batch_size = 4;
   // Specifies the start offset from where the scan starts.
-  // Defaults to 0.
-  int64 start_offset = 4;
+  // Defaults to -1.
+  int64 start_offset = 5;
   // Filters messages such that only messages >= start_timestamp
   // are fetched.
-  int64 start_timestamp = 5;
+  int64 start_timestamp = 6;
   // Filters messages such that only messages < end_timestamp are
   // fetched.
-  int64 end_timestamp = 6;
-  // Subscriber ID. This is a compulsory parameter.
-  string subscriber_id = 7;
-  // If True, start_offset - 1 is committed. Defaults to false.
-  bool auto_commit = 9;
+  int64 end_timestamp = 7;
+  // If True, start_offset - 1 is committed before sending out the response. Defaults to false.
+  bool auto_commit = 8;
+  // If true, subscribe resumes from the last committed offset. Defaults to false.
+  bool resume_from_last_committed_offset = 9;
 }
 
 message SubscribeResponse {
+  // Error.
   Error error = 1;
   // List of values.
   repeated Value values = 2;
@@ -131,27 +151,30 @@ message SubscribeResponse {
 }
 
 message CommitRequest {
-  // Name of the topic. This is a compulsory parameter.
+  // Name of the topic.
   string topic_name = 1;
-  // Partition ID. This is a compulsory parameter.
+  // Partition ID.
   int32 partition_id = 2;
-  // Subscriber ID. This is a compulsory parameter.
+  // Subscriber ID.
   string subscriber_id = 3;
-  // Offset number. This is a compulsory parameter.
+  // Offset number.
   int64 offset = 4;
 }
 
 message CommitResponse {
+  // Error.
   Error error = 1;
 }
 
 message LastCommittedRequest {
-  // Name of the topic. This is a compulsory parameter.
+  // Name of the topic.
   string topic_name = 1;
-  // Partition ID. This is a compulsory parameter.
+  // Partition ID.
   int32 partition_id = 2;
-  // Subscriber ID. This is a compulsory parameter.
+  // Subscriber ID.
   string subscriber_id = 3;
+  // If true, a sync read is performed i.e. the latest value is fetched. Defaults to false.
+  bool sync = 4;
 }
 
 message LastCommittedResponse {

@@ -135,8 +135,27 @@ func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) 
 
 }
 
-func (im *InstanceManager) GetLastCommitted(ctx context.Context) {
-
+func (im *InstanceManager) GetLastCommitted(ctx context.Context, req *comm.LastCommittedRequest) (base.Offset, error) {
+	if len(req.GetSubscriberId()) == 0 {
+		glog.Errorf("Invalid argument. Subscriber ID has not been defined")
+		return -1, ErrInvalidArg
+	}
+	if len(req.GetTopicName()) == 0 {
+		glog.Errorf("Invalid argument. Topic name is not defined")
+		return -1, ErrInvalidArg
+	}
+	if req.GetPartitionId() < 0 {
+		glog.Errorf("Invalid partition ID: %d. Expected >= 0", req.GetPartitionId())
+		return -1, ErrInvalidArg
+	}
+	cs := im.storageController.GetConsumerStore()
+	offset, err := cs.GetLastCommitted(req.GetSubscriberId(), req.GetTopicName(), uint(req.GetPartitionId()))
+	if err != nil {
+		glog.Errorf("Unable to fetch last committed offset for subscriber: %s, topic: %s, partition: %d due "+
+			"to err: %s", req.GetSubscriberId(), req.GetTopicName(), req.GetPartitionId())
+		return -1, err
+	}
+	return offset, nil
 }
 
 func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) error {
@@ -213,10 +232,25 @@ func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopi
 	return nil
 }
 
-func (im *InstanceManager) GetTopic() {
-
+func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*base.Topic, error) {
+	if len(req.GetTopicName()) == 0 {
+		glog.Errorf("Invalid argument. Topic name not provided")
+		return nil, ErrInvalidArg
+	}
+	topic, err := im.storageController.GetTopic(req.GetTopicName())
+	if err != nil {
+		glog.Errorf("Unable to get topic: %s due to err: %s", req.GetTopicName(), err.Error())
+		return nil, err
+	}
+	return &topic, nil
 }
 
-func (im *InstanceManager) GetAllTopics() {
-
+func (im *InstanceManager) GetAllTopics(ctx context.Context) ([]base.Topic, error) {
+	ts := im.storageController.GetTopicStore()
+	topics, err := ts.GetAllTopics()
+	if err != nil {
+		glog.Errorf("Unable to fetch all topics due to err: %s", err.Error())
+		return nil, err
+	}
+	return topics, nil
 }

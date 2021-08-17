@@ -45,7 +45,7 @@ func TestConsumerStore(t *testing.T) {
 				glog.Fatalf("Unable to get last committed offset due to err: %s", err.Error())
 				return
 			}
-			if num != uint64(ii) {
+			if num != base.Offset(ii) {
 				glog.Fatalf("Value Mismatch. Expected: %d, Got: %d", uint64(ii), num)
 				return
 			}

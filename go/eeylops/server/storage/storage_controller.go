@@ -5,6 +5,8 @@ import (
 	"github.com/golang/glog"
 	"os"
 	"path"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -101,6 +103,22 @@ func (sc *StorageController) GetTopic(topicName string) (base.Topic, error) {
 	return *val.topic, nil
 }
 
+func (sc *StorageController) GetAllTopics() []base.Topic {
+	sc.topicMapLock.RLock()
+	defer sc.topicMapLock.RUnlock()
+	var topics []base.Topic
+	for _, topicEntry := range sc.topicMap {
+		topics = append(topics, *topicEntry.topic)
+	}
+	sort.SliceStable(topics, func(i int, j int) bool {
+		if strings.Compare(topics[i].Name, topics[j].Name) == -1 {
+			return true
+		}
+		return false
+	})
+	return topics
+}
+
 func (sc *StorageController) AddTopic(topic base.Topic) error {
 	sc.topicMapLock.Lock()
 	defer sc.topicMapLock.Unlock()
@@ -170,6 +188,10 @@ func (sc *StorageController) GetPartition(topicName string, partitionID int) (*P
 
 func (sc *StorageController) GetConsumerStore() *ConsumerStore {
 	return sc.consumerStore
+}
+
+func (sc *StorageController) GetTopicStore() *TopicStore {
+	return sc.topicStore
 }
 
 func (sc *StorageController) getControllerRootDirectory() string {
