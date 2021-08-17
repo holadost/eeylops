@@ -1,15 +1,49 @@
 package hedwig
 
+import (
+	"eeylops/server/base"
+	"flag"
+	"github.com/golang/glog"
+)
+
+var (
+	FLAGclusterID = flag.String("cluster_id", "", "Cluster ID")
+)
+
 type NodeManager struct {
-	rpcServer *RPCServer
+	rpcServer      *RPCServer
+	instanceMgrMap map[string]*InstanceManager
+	observers      []chan *NodeManagerEvent
 }
 
 func NewNodeManager() *NodeManager {
+	glog.Infof("Starting node manager")
 	nm := new(NodeManager)
 	nm.initialize()
 	return nm
 }
 
-func (nm *NodeManager) initialize() {
+type NodeManagerEvent struct {
+}
 
+func (nm *NodeManager) initialize() {
+	dataDir := base.GetDataDirectory()
+	// For now, we are going to have only one instance.
+	var iopts InstanceManagerOpts
+	iopts.DataDirectory = dataDir
+	if len(*FLAGclusterID) == 0 {
+		glog.Fatalf("Cluster ID has not been provided")
+	}
+	iopts.ClusterID = *FLAGclusterID
+	iopts.PeerAddresses = nil
+	im := NewInstanceManager(&iopts)
+	nm.instanceMgrMap = make(map[string]*InstanceManager)
+	nm.instanceMgrMap[iopts.ClusterID] = im
+	nm.rpcServer = NewRPCServer("", 0, nm.instanceMgrMap)
+}
+
+func (nm *NodeManager) Run() {
+	glog.Infof("Starting node manager")
+	nm.rpcServer.Run()
+	select {}
 }

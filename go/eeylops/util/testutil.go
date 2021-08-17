@@ -20,8 +20,11 @@ func CreateTestDir(t *testing.T, testName string) string {
 	return dataDir
 }
 
-func CreateDir(dirName string) string {
+// CreateFreshTestDir creates a fresh directory. If a directory already exists, it is first deleted and then
+// recreated.
+func CreateFreshTestDir(dirName string) string {
 	dataDir := fmt.Sprintf("/tmp/%s", dirName)
+	glog.Infof("Deleting and recreating directory: %s", dataDir)
 	err := os.RemoveAll(dataDir)
 	if err != nil {
 		glog.Fatalf("Unable to delete test directory: %s", dataDir)

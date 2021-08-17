@@ -12,7 +12,7 @@ import (
 
 func main() {
 	runtime.GOMAXPROCS(4)
-	testDir := util.CreateDir("TestPartitionStress")
+	testDir := util.CreateFreshTestDir("TestPartitionStress")
 	go func() {
 		log.Println(http.ListenAndServe("localhost:8080", nil))
 	}()

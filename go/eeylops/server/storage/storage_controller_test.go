@@ -73,7 +73,7 @@ func TestStorageController(t *testing.T) {
 
 	glog.Infof("Waiting for janitor to reclaim the topic directory")
 	time.Sleep(15 * time.Second)
-	_, err = os.Stat(controller.getTopicRootDirectory(topicName))
+	_, err = os.Stat(controller.getTopicDirectory(topicName))
 	glog.V(1).Infof("Stat Err: %v", err)
 	if err == nil {
 		glog.Fatalf("Directory should have been deleted but it wasn't")

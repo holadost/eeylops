@@ -7,8 +7,11 @@ import (
 	"eeylops/server/replication"
 	"eeylops/server/storage"
 	sbase "eeylops/server/storage/base"
+	"eeylops/util"
+	"eeylops/util/logging"
 	"github.com/golang/glog"
 	"github.com/hashicorp/raft"
+	"path"
 	"time"
 )
 
@@ -25,19 +28,40 @@ type InstanceManagerOpts struct {
 
 // InstanceManager manages the replication and storage controller for the node.
 type InstanceManager struct {
+	instanceDir           string
+	clusterID             string
+	peerAddresses         []PeerAddress
 	replicationController *replication.RaftController
 	storageController     *storage.StorageController
 	fsm                   *FSM
 }
 
-func NewClusterController(opts *InstanceManagerOpts) *InstanceManager {
-	var im InstanceManager
-	var topts storage.StorageControllerOpts
-	topts.StoreGCScanIntervalSecs = 300
-	topts.RootDirectory = opts.DataDirectory
-	topts.ControllerID = opts.ClusterID
-	im.storageController = storage.NewStorageController(topts)
-	return &im
+func NewInstanceManager(opts *InstanceManagerOpts) *InstanceManager {
+	im := new(InstanceManager)
+	im.initialize(opts)
+	return im
+}
+
+func (im *InstanceManager) initialize(opts *InstanceManagerOpts) {
+	im.clusterID = opts.ClusterID
+	im.peerAddresses = opts.PeerAddresses
+
+	// Create a root directory for this instance.
+	clusterRootDir := path.Join(opts.DataDirectory, im.clusterID)
+	util.CreateDir(clusterRootDir)
+
+	// Initialize storage controller.
+	var stopts storage.StorageControllerOpts
+	stopts.StoreGCScanIntervalSecs = 300
+	stopts.RootDirectory = path.Join(clusterRootDir, "storage")
+	stopts.ControllerID = im.clusterID
+	im.storageController = storage.NewStorageController(stopts)
+
+	// Initialize FSM.
+	fsm := NewFSM(im.storageController, logging.NewPrefixLogger(im.clusterID))
+	im.fsm = fsm
+
+	// TODO: Initialize replication controller.
 }
 
 func (im *InstanceManager) Produce(ctx context.Context, req *comm.PublishRequest) error {

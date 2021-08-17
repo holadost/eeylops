@@ -2,6 +2,7 @@ package storage
 
 import (
 	"eeylops/server/base"
+	"eeylops/util"
 	"github.com/golang/glog"
 	"os"
 	"path"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"time"
 )
+
+const kTopicsDirName = "topics"
 
 type StorageController struct {
 	topicStore            *TopicStore            // Backing topicStore for topics registered with eeylops.
@@ -60,34 +63,38 @@ func (sc *StorageController) initialize() {
 	if err != nil {
 		glog.Fatalf("Unable to get all topics in the topic topicStore due to err: %s", err.Error())
 	}
-	for _, topic := range allTopics {
-		if topic.ToRemove {
-			glog.Infof("Skipping initializing topic: %s as it has been marked for removal", topic.Name)
-			continue
-		}
-		glog.Infof("Initializing topic: %s for controller: %s", topic.Name, sc.controllerID)
-
-		topicDir := sc.getTopicRootDirectory(topic.Name)
-		if err := os.MkdirAll(topicDir, 0774); err != nil {
-			glog.Fatalf("Unable to create topic directory for topic: %s due to err: %s",
-				topic.Name, err.Error())
-			return
-		}
-		pMap := make(map[int]*Partition)
-		for _, ii := range topic.PartitionIDs {
-			opts := PartitionOpts{
-				TopicName:     topic.Name,
-				PartitionID:   ii,
-				RootDirectory: topicDir,
-				TTLSeconds:    topic.TTLSeconds,
+	if len(allTopics) == 0 {
+		util.CreateDir(sc.getTopicsRootDirectory())
+	} else {
+		for _, topic := range allTopics {
+			if topic.ToRemove {
+				glog.Infof("Skipping initializing topic: %s as it has been marked for removal", topic.Name)
+				continue
 			}
-			pMap[ii] = NewPartition(opts)
+			glog.Infof("Initializing topic: %s for controller: %s", topic.Name, sc.controllerID)
+
+			topicDir := sc.getTopicDirectory(topic.Name)
+			if err := os.MkdirAll(topicDir, 0774); err != nil {
+				glog.Fatalf("Unable to create topic directory for topic: %s due to err: %s",
+					topic.Name, err.Error())
+				return
+			}
+			pMap := make(map[int]*Partition)
+			for _, ii := range topic.PartitionIDs {
+				opts := PartitionOpts{
+					TopicName:     topic.Name,
+					PartitionID:   ii,
+					RootDirectory: topicDir,
+					TTLSeconds:    topic.TTLSeconds,
+				}
+				pMap[ii] = NewPartition(opts)
+			}
+			entry := &topicEntry{
+				topic:        &topic,
+				partitionMap: pMap,
+			}
+			sc.topicMap[topic.Name] = entry
 		}
-		entry := &topicEntry{
-			topic:        &topic,
-			partitionMap: pMap,
-		}
-		sc.topicMap[topic.Name] = entry
 	}
 	go sc.janitor()
 }
@@ -127,7 +134,7 @@ func (sc *StorageController) AddTopic(topic base.Topic) error {
 		glog.Errorf("Topic: %s already exists", topic.Name)
 		return ErrTopicExists
 	}
-	if err := os.MkdirAll(sc.getTopicRootDirectory(topic.Name), 0774); err != nil {
+	if err := os.MkdirAll(sc.getTopicDirectory(topic.Name), 0774); err != nil {
 		glog.Errorf("Unable to create directory for topic: %s due to err: %s", topic.Name, err.Error())
 		return ErrStorageController
 	}
@@ -140,7 +147,7 @@ func (sc *StorageController) AddTopic(topic base.Topic) error {
 		opts := PartitionOpts{
 			TopicName:     topic.Name,
 			PartitionID:   elem,
-			RootDirectory: sc.getTopicRootDirectory(topic.Name),
+			RootDirectory: sc.getTopicDirectory(topic.Name),
 			TTLSeconds:    topic.TTLSeconds,
 		}
 		part := NewPartition(opts)
@@ -195,18 +202,22 @@ func (sc *StorageController) GetTopicStore() *TopicStore {
 }
 
 func (sc *StorageController) getControllerRootDirectory() string {
-	return path.Join(sc.rootDir, sc.controllerID)
+	return sc.rootDir
 }
 
-func (sc *StorageController) getTopicRootDirectory(topicName string) string {
-	return path.Join(sc.getControllerRootDirectory(), "topics", topicName)
+func (sc *StorageController) getTopicsRootDirectory() string {
+	return path.Join(sc.getControllerRootDirectory(), kTopicsDirName)
+}
+
+func (sc *StorageController) getTopicDirectory(topicName string) string {
+	return path.Join(sc.getTopicsRootDirectory(), topicName)
 }
 
 /********************************************** TOPICS JANITOR ********************************************************/
 // janitor is a long-running background goroutine that periodically checks topics that have been marked for removal and
 // clears those topics from the underlying storage.
 func (sc *StorageController) janitor() {
-	glog.Infof("Starting janitor for topic controller: %s", sc.controllerID)
+	glog.Infof("Starting janitor for storage controller: %s", sc.controllerID)
 	disposeTicker := time.NewTicker(time.Duration(sc.storeScanIntervalSecs) * time.Second)
 	for {
 		select {
@@ -231,7 +242,7 @@ func (sc *StorageController) disposeTopics() {
 	for _, topic := range topics {
 		if topic.ToRemove {
 			ds := DefaultDisposer()
-			ds.Dispose(sc.getTopicRootDirectory(topic.Name), sc.createDisposeCb(topic.Name))
+			ds.Dispose(sc.getTopicDirectory(topic.Name), sc.createDisposeCb(topic.Name))
 		}
 	}
 }
