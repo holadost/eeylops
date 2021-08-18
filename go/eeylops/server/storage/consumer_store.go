@@ -54,7 +54,7 @@ func (cs *ConsumerStore) Close() error {
 }
 
 func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicIDType, partitionID uint) error {
-	glog.Infof("Registering new consumer for topic: %d, partition: %d. Consumer ID: %s",
+	glog.Infof("Registering consumer for topic: %d, partition: %d. Consumer ID: %s",
 		topicID, partitionID, consumerID)
 	key := generateConsumerKey(consumerID, topicID, partitionID)
 	_, err := cs.kvStore.Get(key)
@@ -68,6 +68,7 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicI
 			glog.Errorf("Unable to register consumer in KV store due to err: %s", err.Error())
 			return ErrConsumerStoreCommit
 		}
+		return nil
 	}
 	// The consumer is already registered.
 	glog.Infof("The consumer: %s for topic ID: %d and partition: %d was already registered "+

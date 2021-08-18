@@ -124,3 +124,30 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 	}
 	time.Sleep(5 * time.Second)
 }
+
+func TestInstanceManager_Consumer(t *testing.T) {
+	util.LogTestMarker("TestInstanceManager_Consumer")
+	testDirName := util.CreateTestDir(t, "TestInstanceManager_Consumer")
+	clusterID := "nikhil1nikhil1"
+	opts := InstanceManagerOpts{
+		DataDirectory: testDirName,
+		ClusterID:     clusterID,
+		PeerAddresses: nil,
+	}
+	generateConsumerName := func(id int) string {
+		return fmt.Sprintf("hello_consumer_%d", id)
+	}
+	numConsumers := 15
+	im := NewInstanceManager(&opts)
+	// Add topics.
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.RegisterSubscriberRequest
+		req.SubscriberId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		err := im.RegisterSubscriber(context.Background(), &req)
+		if err != nil {
+			glog.Fatalf("Expected no error but got: %s. Unable to add topic", err.Error())
+		}
+	}
+}
