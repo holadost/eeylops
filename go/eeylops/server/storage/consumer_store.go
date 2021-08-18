@@ -38,10 +38,10 @@ func (cs *ConsumerStore) initialize() {
 	glog.Infof("Initializing consumer store located at: %s", cs.csDir)
 	opts := badger.DefaultOptions(cs.csDir)
 	opts.SyncWrites = true
-	opts.NumMemtables = 3
+	opts.NumMemtables = 2
 	opts.VerifyValueChecksum = true
 	opts.BlockCacheSize = 0 // Disable block cache.
-	opts.NumCompactors = 3  // Use 3 compactors.
+	opts.NumCompactors = 2
 	opts.IndexCacheSize = 0
 	opts.Compression = 0
 	opts.TableLoadingMode = options.FileIO
