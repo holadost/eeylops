@@ -61,7 +61,7 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicI
 	if err != nil {
 		if err != kv_store.ErrKVStoreKeyNotFound {
 			glog.Errorf("Unable to register consumer due to err: %s", err.Error())
-			return ErrConsumerStoreCommit
+			return ErrConsumerStoreFetch
 		}
 		err = cs.kvStore.Put(key, []byte("nil"))
 		if err != nil {
@@ -82,7 +82,7 @@ func (cs *ConsumerStore) Commit(consumerID string, topicID base.TopicIDType, par
 	if err != nil {
 		glog.Errorf("Attempting to commit an offset even though consumer: %s is not registered for "+
 			"topic ID: %d, partition: %d", consumerID, topicID, partitionID)
-		return ErrConsumerStoreCommit
+		return ErrConsumerNotRegistered
 	}
 	val := make([]byte, 8)
 	binary.BigEndian.PutUint64(val, uint64(offsetNum))

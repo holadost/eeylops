@@ -268,7 +268,6 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 	tc.Name = topic.GetTopicName()
 	tc.PartitionIDs = prtIds
 	tc.TTLSeconds = int(topic.TtlSeconds)
-	tc.ToRemove = false
 	tc.CreatedAt = now
 	tc.ID = base.TopicIDType(now.UnixNano())
 	addTopicMsg := AddTopicMessage{TopicConfig: tc}

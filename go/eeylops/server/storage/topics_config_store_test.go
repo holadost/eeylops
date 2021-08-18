@@ -37,7 +37,6 @@ func TestTopicConfigStore(t *testing.T) {
 		// Add a new topic.
 		var topic base.TopicConfig
 		topic.Name = topicNameGen(ii)
-		topic.ToRemove = false
 		topic.PartitionIDs = []int{0, 1, 2, 3}
 		topic.TTLSeconds = 86400
 		topic.ID = base.TopicIDType(ii)

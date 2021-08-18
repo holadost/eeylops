@@ -19,6 +19,9 @@ var (
 	// ErrConsumerStore is returned when we have unexpected consumer store error.
 	// ErrConsumerStore = errors.New("ErrConsumerStore: consumer store error")
 
+	// ErrConsumerNotRegistered is returned when a consumer is not registered.
+	ErrConsumerNotRegistered = errors.New("ErrConsumerNotRegistered: consumer not registered")
+
 	// ErrConsumerStoreCommit is returned when we have an error while committing an offset for a consumer.
 	ErrConsumerStoreCommit = errors.New("ErrConsumerStoreCommit: consumer store commit error")
 
