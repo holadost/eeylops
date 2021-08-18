@@ -229,11 +229,12 @@ func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) 
 		if !err {
 			glog.Fatalf("Invalid return type for commit command. Expected error, got something else")
 		}
-		if retErr != nil {
+		if retErr != storage.ErrConsumerNotRegistered {
 			// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
 			// This will require manual intervention.
 			glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
 		}
+		return makeHedwigError(KErrSubscriberNotRegistered, retErr, "Subscriber is not registered")
 	}
 	return nil
 }

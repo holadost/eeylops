@@ -19,6 +19,10 @@ func (ec ErrorCode) ToString() string {
 		return "ErrReplication"
 	case KErrTopicNotFound:
 		return "ErrTopicNotFound"
+	case KErrSubscriberNotRegistered:
+		return "ErrSubscriberNotRegistered"
+	case KErrTopicExists:
+		return "ErrTopicExists"
 	default:
 		glog.Fatalf("Invalid error code: %d", ec)
 		return "Invalid error code"
@@ -26,11 +30,13 @@ func (ec ErrorCode) ToString() string {
 }
 
 const (
-	KErrInvalidArg     ErrorCode = 1
-	KErrNotLeader      ErrorCode = 2
-	KErrBackendStorage ErrorCode = 3
-	KErrReplication    ErrorCode = 4
-	KErrTopicNotFound  ErrorCode = 5
+	KErrInvalidArg              ErrorCode = 1
+	KErrNotLeader               ErrorCode = 2
+	KErrBackendStorage          ErrorCode = 3
+	KErrReplication             ErrorCode = 4
+	KErrTopicNotFound           ErrorCode = 5
+	KErrTopicExists             ErrorCode = 6
+	KErrSubscriberNotRegistered ErrorCode = 7
 )
 
 type hedwigError struct {

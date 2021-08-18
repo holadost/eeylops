@@ -5,7 +5,6 @@ import (
 	"eeylops/server/storage"
 	sbase "eeylops/server/storage/base"
 	"eeylops/util/logging"
-	"github.com/golang/glog"
 	"github.com/hashicorp/raft"
 	"io"
 )
@@ -60,12 +59,14 @@ func (fsm *FSM) append(cmd *Command, log *raft.Log) error {
 	if len(cmd.AppendCommand.Data) == 0 {
 		fsm.logger.Fatalf("Received an append command with nothing to append. Log Index: %d, Log Term: %d",
 			log.Index, log.Term)
-		return nil
 	}
 	prt, err := fsm.storageController.GetPartition(cmd.AppendCommand.TopicID, cmd.AppendCommand.PartitionID)
 	if err != nil {
 		if err == storage.ErrPartitionNotFound {
 			return err
+		} else {
+			fsm.logger.Fatalf("Unable to get partition: %d, topic ID: %d due to err: %s",
+				cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, err.Error())
 		}
 	}
 	arg := sbase.AppendEntriesArg{
@@ -76,7 +77,7 @@ func (fsm *FSM) append(cmd *Command, log *raft.Log) error {
 	ret := prt.Append(context.Background(), &arg)
 	if ret.Error != nil {
 		if ret.Error == storage.ErrPartitionClosed {
-			glog.Warningf("The partition has been closed. This could have happened only if the topic"+
+			fsm.logger.Warningf("The partition has been closed. This could have happened only if the topic"+
 				"was recently deleted. Skipping append for partition: %d, topic: %d, log index: %d, term: %d",
 				cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, log.Index, log.Term)
 			return nil
@@ -84,7 +85,6 @@ func (fsm *FSM) append(cmd *Command, log *raft.Log) error {
 			fsm.logger.Fatalf("Unable to append entries to partition: %d, topic: %d, log index: %d, "+
 				"term: %d due to err: %s", cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, log.Index,
 				log.Term, ret.Error.Error())
-			return ret.Error
 		}
 	}
 	return nil
@@ -108,12 +108,11 @@ func (fsm *FSM) addTopic(cmd *Command, log *raft.Log) error {
 			fsm.logger.Warningf("Unable to add topic as it already exists. Topic Details: %s, "+
 				"Log Index: %d, Log Term: %d", cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
 				log.Term)
-			return nil
+			return err
 		} else {
 			fsm.logger.Fatalf("Unable to add topic due to err: %s. Topic details: %s, "+
 				"Log Index: %d, Term: %d", err.Error(), cmd.AddTopicCommand.TopicConfig.ToString(),
 				log.Index, log.Term)
-			return err
 		}
 	}
 	return nil
@@ -156,7 +155,6 @@ func (fsm *FSM) registerConsumer(cmd *Command, log *raft.Log) error {
 		fsm.logger.Fatalf("Unable to register consumer: %s for topic: %d, partition: %d due to err: %s. "+
 			"Log Index: %d, Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
 			cmd.RegisterConsumerCommand.PartitionID, err.Error(), log.Index, log.Term)
-		return err
 	}
 	return nil
 }
@@ -173,16 +171,15 @@ func (fsm *FSM) commit(cmd *Command, log *raft.Log) error {
 	if err := cs.Commit(cmd.CommitCommand.ConsumerID, cmd.CommitCommand.TopicID,
 		uint(cmd.CommitCommand.PartitionID), cmd.CommitCommand.Offset); err != nil {
 		if err == storage.ErrConsumerNotRegistered {
-			glog.Warningf("Subscriber: %s is not registered for partition: %d, topic: %d. "+
+			fsm.logger.Warningf("Subscriber: %s is not registered for partition: %d, topic: %d. "+
 				"Skipping this command. Log Index: %d, Log Term: %d",
 				cmd.CommitCommand.ConsumerID, cmd.CommitCommand.PartitionID, cmd.CommitCommand.TopicID,
 				log.Index, log.Term)
-			return nil
+			return err
 		}
 		fsm.logger.Fatalf("Unable to add consumer commit for subscriber: %s, partition: %d, topic: %d, "+
 			"Log Index: %d, Log Term: %d due to err: %s", cmd.CommitCommand.ConsumerID, cmd.CommitCommand.PartitionID,
 			cmd.CommitCommand.TopicID, log.Index, log.Term, err.Error())
-		return err
 	}
 	return nil
 }

@@ -223,7 +223,7 @@ func TestInstanceManager_Consumer(t *testing.T) {
 		req.PartitionId = 2
 		req.Offset = int64(commitOffset)
 		err := im.Commit(context.Background(), &req)
-		if err != nil {
+		if err == nil {
 			// We still expect no errors since FSM will just paper over it with a warning log!
 			glog.Fatalf("Unable to commit offset due to err: %s", err.Error())
 		}
