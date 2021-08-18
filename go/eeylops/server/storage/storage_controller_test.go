@@ -35,7 +35,7 @@ func TestStorageController(t *testing.T) {
 	topicName := "topic1"
 	var topic base.TopicConfig
 	topic.Name = topicName
-	topic.PartitionIDs = []int{0, 2, 4, 6, 8}
+	topic.PartitionIDs = []int{2, 4, 6, 8}
 	topic.TTLSeconds = 86400 * 7
 	topic.ID = 1
 	topic.CreatedAt = time.Now()

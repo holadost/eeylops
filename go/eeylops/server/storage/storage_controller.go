@@ -212,6 +212,7 @@ func (sc *StorageController) RemoveTopic(topicID base.TopicIDType) error {
 		glog.Errorf("Unable to remove topic due to err: %s", err.Error())
 		return err
 	}
+	sc.topicDeletionChan <- te
 	return nil
 }
 
@@ -274,11 +275,9 @@ func (sc *StorageController) janitor() {
 		case topicInfo := <-sc.disposedChan:
 			// The topic was disposed.
 			glog.Infof("Successfully removed topic: %s from underlying storage", topicInfo)
-			break
 		case te := <-sc.topicDeletionChan:
 			sc.closeTopic(te)
 			sc.disposeTopic(te)
-			break
 		}
 	}
 }
