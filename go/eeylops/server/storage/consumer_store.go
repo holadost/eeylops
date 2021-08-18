@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"eeylops/server/base"
 	"eeylops/server/storage/kv_store"
 	"encoding/binary"
@@ -15,6 +16,8 @@ import (
 
 const kConsumerStoreDirectory = "consumer_store"
 const kConsumerKeyDelimiter = "::::"
+
+var nilOffsetBytes = []byte("nil")
 
 type ConsumerStore struct {
 	kvStore *kv_store.BadgerKVStore
@@ -63,7 +66,7 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicI
 			glog.Errorf("Unable to register consumer due to err: %s", err.Error())
 			return ErrConsumerStoreFetch
 		}
-		err = cs.kvStore.Put(key, []byte("nil"))
+		err = cs.kvStore.Put(key, nilOffsetBytes)
 		if err != nil {
 			glog.Errorf("Unable to register consumer in KV store due to err: %s", err.Error())
 			return ErrConsumerStoreCommit
@@ -102,7 +105,10 @@ func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicID base.TopicI
 	if err != nil {
 		glog.Errorf("Did not find any offset committed by consumer: %s for topic ID: %d and partition: %d",
 			consumerID, topicID, partitionID)
-		return 0, ErrConsumerStoreFetch
+		return -1, ErrConsumerNotRegistered
+	}
+	if bytes.Compare(val, nilOffsetBytes) == 0 {
+		return -1, nil
 	}
 	lastCommitted := base.Offset(binary.BigEndian.Uint64(val))
 	return lastCommitted, nil

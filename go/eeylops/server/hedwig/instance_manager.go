@@ -224,17 +224,18 @@ func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) 
 		AppendedAt: time.Time{},
 	}
 	appErr := im.fsm.Apply(&log)
-	retErr, err := appErr.(error)
-	if !err {
-		glog.Fatalf("Invalid return type for commit command. Expected error, got something else")
-	}
-	if retErr != nil {
-		// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
-		// This will require manual intervention.
-		glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
+	if appErr != nil {
+		retErr, err := appErr.(error)
+		if !err {
+			glog.Fatalf("Invalid return type for commit command. Expected error, got something else")
+		}
+		if retErr != nil {
+			// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
+			// This will require manual intervention.
+			glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
+		}
 	}
 	return nil
-
 }
 
 func (im *InstanceManager) GetLastCommitted(ctx context.Context, req *comm.LastCommittedRequest) (base.Offset, error) {
