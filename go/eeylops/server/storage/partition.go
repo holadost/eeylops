@@ -344,6 +344,7 @@ func (p *Partition) Close() {
 	if p.closed {
 		return
 	}
+	p.logger.Infof("Closing partition")
 	p.closed = true
 	close(p.backgroundJobDone)
 	for _, seg := range p.segments {
