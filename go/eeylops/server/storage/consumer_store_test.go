@@ -27,7 +27,7 @@ func TestConsumerStore(t *testing.T) {
 	testDir := createConsumerStoreTestDir(t, "TestConsumerStore")
 	cs := NewConsumerStore(testDir)
 	consumerID := "consumer1"
-	topidName := "topic1"
+	topidName := base.TopicIDType(1)
 	partitionID := uint(1)
 	if err := cs.RegisterConsumer(consumerID, topidName, partitionID); err != nil {
 		glog.Fatalf("Unable to register consumer due to err: %s", err.Error())

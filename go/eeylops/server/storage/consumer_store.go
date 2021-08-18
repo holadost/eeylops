@@ -4,6 +4,7 @@ import (
 	"eeylops/server/base"
 	"eeylops/server/storage/kv_store"
 	"encoding/binary"
+	"fmt"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/golang/glog"
@@ -12,8 +13,8 @@ import (
 	"strconv"
 )
 
-const consumerStoreDirectory = "consumer_store"
-const keyDelimiter = "::::"
+const kConsumerStoreDirectory = "consumer_store"
+const kConsumerKeyDelimiter = "::::"
 
 type ConsumerStore struct {
 	kvStore *kv_store.BadgerKVStore
@@ -24,7 +25,7 @@ type ConsumerStore struct {
 func NewConsumerStore(rootDir string) *ConsumerStore {
 	cs := new(ConsumerStore)
 	cs.rootDir = rootDir
-	cs.csDir = path.Join(rootDir, consumerStoreDirectory)
+	cs.csDir = path.Join(rootDir, kConsumerStoreDirectory)
 	if err := os.MkdirAll(cs.csDir, 0774); err != nil {
 		glog.Fatalf("Unable to create directory for consumer store due to err: %v", err)
 		return nil
@@ -52,10 +53,10 @@ func (cs *ConsumerStore) Close() error {
 	return cs.kvStore.Close()
 }
 
-func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, partitionID uint) error {
-	glog.Infof("Registering new consumer for topic: %s, partition: %d. Consumer ID: %s",
-		topicName, partitionID, consumerID)
-	key := generateConsumerKey(consumerID, topicName, partitionID)
+func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicIDType, partitionID uint) error {
+	glog.Infof("Registering new consumer for topic: %d, partition: %d. Consumer ID: %s",
+		topicID, partitionID, consumerID)
+	key := generateConsumerKey(consumerID, topicID, partitionID)
 	_, err := cs.kvStore.Get(key)
 	if err != nil {
 		if err != kv_store.ErrKVStoreKeyNotFound {
@@ -69,17 +70,18 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicName string, p
 		}
 	}
 	// The consumer is already registered.
-	glog.Infof("The consumer: %s for topic: %s and partition: %d was already registered "+
-		"Avoiding re-registering", consumerID, topicName, partitionID)
+	glog.Infof("The consumer: %s for topic ID: %d and partition: %d was already registered "+
+		"Avoiding re-registering", consumerID, topicID, partitionID)
 	return nil
 }
 
-func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID uint, offsetNum base.Offset) error {
-	key := generateConsumerKey(consumerID, topicName, partitionID)
+func (cs *ConsumerStore) Commit(consumerID string, topicID base.TopicIDType, partitionID uint,
+	offsetNum base.Offset) error {
+	key := generateConsumerKey(consumerID, topicID, partitionID)
 	_, err := cs.kvStore.Get(key)
 	if err != nil {
 		glog.Errorf("Attempting to commit an offset even though consumer: %s is not registered for "+
-			"topic: %s, partition: %d", consumerID, topicName, partitionID)
+			"topic ID: %d, partition: %d", consumerID, topicID, partitionID)
 		return ErrConsumerStoreCommit
 	}
 	val := make([]byte, 8)
@@ -92,12 +94,13 @@ func (cs *ConsumerStore) Commit(consumerID string, topicName string, partitionID
 	return nil
 }
 
-func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicName string, partitionID uint) (base.Offset, error) {
-	key := generateConsumerKey(consumerID, topicName, partitionID)
+func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicID base.TopicIDType,
+	partitionID uint) (base.Offset, error) {
+	key := generateConsumerKey(consumerID, topicID, partitionID)
 	val, err := cs.kvStore.Get(key)
 	if err != nil {
-		glog.Errorf("Did not find any offset committed by consumer: %s for topic: %s and partition: %d",
-			consumerID, topicName, partitionID)
+		glog.Errorf("Did not find any offset committed by consumer: %s for topic ID: %d and partition: %d",
+			consumerID, topicID, partitionID)
 		return 0, ErrConsumerStoreFetch
 	}
 	lastCommitted := base.Offset(binary.BigEndian.Uint64(val))
@@ -112,6 +115,7 @@ func (cs *ConsumerStore) Restore() error {
 	return nil
 }
 
-func generateConsumerKey(consumerID string, topicName string, partitionID uint) []byte {
-	return []byte(consumerID + keyDelimiter + topicName + keyDelimiter + strconv.Itoa(int(partitionID)))
+func generateConsumerKey(consumerID string, topicID base.TopicIDType, partitionID uint) []byte {
+	return []byte(consumerID + kConsumerKeyDelimiter + fmt.Sprintf("%d", topicID) + kConsumerKeyDelimiter +
+		strconv.Itoa(int(partitionID)))
 }

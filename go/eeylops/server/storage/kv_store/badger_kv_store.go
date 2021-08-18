@@ -149,7 +149,7 @@ func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int, scanSizeBytes
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
 		valSize := int(item.ValueSize())
-		if currSizeBytes+valSize > scanSizeBytes {
+		if (scanSizeBytes > 0) && (currSizeBytes+valSize > scanSizeBytes) {
 			break
 		}
 		currSizeBytes += valSize

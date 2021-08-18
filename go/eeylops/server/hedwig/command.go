@@ -39,7 +39,7 @@ type CommitMessage struct {
 }
 
 type AddTopicMessage struct {
-	Topic base.Topic // Topic
+	TopicConfig base.TopicConfig // Topic
 }
 
 type RemoveTopicMessage struct {
