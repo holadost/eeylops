@@ -227,5 +227,13 @@ func TestInstanceManager_Consumer(t *testing.T) {
 			// We still expect no errors since FSM will just paper over it with a warning log!
 			glog.Fatalf("Unable to commit offset due to err: %s", err.Error())
 		}
+		he, ok := err.(*hedwigError)
+		if !ok {
+			glog.Fatalf("Unable to type cast error to hedwigError. Error: %v", err)
+		}
+		if he.errorCode != KErrSubscriberNotRegistered {
+			glog.Fatalf("Unexpected error code: %s, expected: %s",
+				he.errorCode.ToString(), KErrSubscriberNotRegistered.ToString())
+		}
 	}
 }
