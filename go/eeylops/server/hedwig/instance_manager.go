@@ -65,8 +65,9 @@ func (im *InstanceManager) initialize(opts *InstanceManagerOpts) {
 }
 
 func (im *InstanceManager) Produce(ctx context.Context, req *comm.PublishRequest) error {
-	if len(req.GetTopicName()) == 0 {
-		glog.Errorf("Invalid topic name. Req: %v", req.GetTopicName(), req)
+	topicID := base.TopicIDType(req.GetTopicId())
+	if topicID == 0 {
+		glog.Errorf("Invalid topic ID. Req: %v", topicID, req)
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if req.GetPartitionId() < 0 {
@@ -79,7 +80,7 @@ func (im *InstanceManager) Produce(ctx context.Context, req *comm.PublishRequest
 	// TODO: internally handle adding it to the storage controller. We just have to wait for
 	// TODO: that result.
 	appendCmd := AppendMessage{
-		TopicName:   req.GetTopicName(),
+		TopicID:     topicID,
 		PartitionID: int(req.GetPartitionId()),
 		Data:        req.GetValues(),
 		Timestamp:   time.Now().UnixNano(),
@@ -115,7 +116,8 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.SubscribeReque
 		glog.Errorf("Invalid argument. Subscriber id is not provided")
 		return nil, makeHedwigError(KErrInvalidArg, nil, "Subscriber ID is invalid")
 	}
-	if len(req.GetTopicName()) == 0 {
+	topicID := base.TopicIDType(req.GetTopicId())
+	if topicID == 0 {
 		glog.Errorf("Invalid argument. Topic name is not provided")
 		return nil, makeHedwigError(KErrInvalidArg, nil, "Topic name is invalid")
 	}
@@ -129,10 +131,10 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.SubscribeReque
 		return nil, makeHedwigError(KErrInvalidArg, nil,
 			"Either StartOffset, StartTimestamp or ResumeFromLastCommittedOffset must be provided")
 	}
-	prt, err := im.storageController.GetPartition(req.GetTopicName(), int(req.GetPartitionId()))
+	prt, err := im.storageController.GetPartition(topicID, int(req.GetPartitionId()))
 	if err != nil {
-		glog.Errorf("Unable to get partition: %d, topic: %s due to err: %s",
-			req.GetPartitionId(), req.GetTopicName(), err.Error())
+		glog.Errorf("Unable to get partition: %d, topic: %d due to err: %s",
+			req.GetPartitionId(), topicID, err.Error())
 		return nil, makeHedwigError(KErrBackendStorage, err, "Unable to find partition")
 	}
 	batchSize := uint64(1)
@@ -152,18 +154,18 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.SubscribeReque
 		// Resume from last committed offset.
 		// TODO: Ensure that we are leader before we do this or it could lead to inconsistencies.
 		off, err := im.storageController.GetConsumerStore().GetLastCommitted(
-			req.GetSubscriberId(), req.GetTopicName(), uint(req.GetPartitionId()))
+			req.GetSubscriberId(), topicID, uint(req.GetPartitionId()))
 		if err != nil {
-			glog.Errorf("Unable to determine last committed offset for subscriber: %s, topic: %s, "+
-				"partition: %d due to err: %s", req.GetSubscriberId(), req.GetTopicName(), req.GetPartitionId())
+			glog.Errorf("Unable to determine last committed offset for subscriber: %s, topic: %d, "+
+				"partition: %d due to err: %s", req.GetSubscriberId(), topicID, req.GetPartitionId())
 			return nil, makeHedwigError(KErrBackendStorage, err, "Unable to determine last committed offset")
 		}
 		scanArg.StartOffset = off
 	}
 	ret := prt.Scan(ctx, &scanArg)
 	if ret.Error != nil {
-		glog.Errorf("Scan failed for subscriber: %s, topic: %s, partition: %d due to err: %s",
-			req.GetSubscriberId(), req.GetTopicName(), req.GetPartitionId(), ret.Error.Error())
+		glog.Errorf("Scan failed for subscriber: %s, topic: %d, partition: %d due to err: %s",
+			req.GetSubscriberId(), topicID, req.GetPartitionId(), ret.Error.Error())
 		ret.Error = makeHedwigError(KErrBackendStorage, err, "Unable to subscribe")
 		return ret, ret.Error
 	}
@@ -179,8 +181,9 @@ func (im *InstanceManager) Subscribe() {
 }
 
 func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) error {
-	if len(req.GetTopicName()) == 0 {
-		glog.Errorf("Invalid topic name. Req: %v", req.GetTopicName(), req)
+	topicID := base.TopicIDType(req.GetTopicId())
+	if topicID == 0 {
+		glog.Errorf("Invalid topic name. Req: %v", topicID, req)
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if req.GetPartitionId() < 0 {
@@ -189,7 +192,7 @@ func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) 
 	}
 	// TODO: This must go through the replication controller and we must be the leader.
 	commitCmd := CommitMessage{
-		TopicName:   req.GetTopicName(),
+		TopicID:     topicID,
 		PartitionID: int(req.GetPartitionId()),
 		Offset:      base.Offset(req.GetOffset()),
 		ConsumerID:  req.GetSubscriberId(),
@@ -226,7 +229,8 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context, req *comm.LastC
 		glog.Errorf("Invalid argument. Subscriber ID has not been defined")
 		return -1, makeHedwigError(KErrInvalidArg, nil, "Invalid subscriber ID")
 	}
-	if len(req.GetTopicName()) == 0 {
+	topicID := base.TopicIDType(req.GetTopicId())
+	if topicID == 0 {
 		glog.Errorf("Invalid argument. Topic name is not defined")
 		return -1, makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
@@ -235,10 +239,10 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context, req *comm.LastC
 		return -1, makeHedwigError(KErrInvalidArg, nil, "Invalid partition ID")
 	}
 	cs := im.storageController.GetConsumerStore()
-	offset, err := cs.GetLastCommitted(req.GetSubscriberId(), req.GetTopicName(), uint(req.GetPartitionId()))
+	offset, err := cs.GetLastCommitted(req.GetSubscriberId(), topicID, uint(req.GetPartitionId()))
 	if err != nil {
-		glog.Errorf("Unable to fetch last committed offset for subscriber: %s, topic: %s, partition: %d due "+
-			"to err: %s", req.GetSubscriberId(), req.GetTopicName(), req.GetPartitionId())
+		glog.Errorf("Unable to fetch last committed offset for subscriber: %s, topic: %d, partition: %d due "+
+			"to err: %s", req.GetSubscriberId(), topicID, req.GetPartitionId())
 		return -1, makeHedwigError(KErrBackendStorage, err, "Unable to get last committed offset")
 	}
 	return offset, nil
@@ -259,19 +263,22 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 	for _, id := range topic.GetPartitionIds() {
 		prtIds = append(prtIds, int(id))
 	}
-	addTopicMsg := AddTopicMessage{Topic: base.Topic{
-		Name:         topic.GetTopicName(),
-		PartitionIDs: prtIds,
-		TTLSeconds:   int(topic.TtlSeconds),
-		ToRemove:     false,
-	}}
+	var tc base.TopicConfig
+	now := time.Now()
+	tc.Name = topic.GetTopicName()
+	tc.PartitionIDs = prtIds
+	tc.TTLSeconds = int(topic.TtlSeconds)
+	tc.ToRemove = false
+	tc.CreatedAt = now
+	tc.ID = base.TopicIDType(now.UnixNano())
+	addTopicMsg := AddTopicMessage{TopicConfig: tc}
 	cmd := Command{
 		CommandType:     KAddTopicCommand,
 		AddTopicCommand: addTopicMsg,
 	}
 	data := Serialize(&cmd)
 	log := raft.Log{
-		Index:      uint64(time.Now().UnixNano()),
+		Index:      uint64(now.UnixNano()),
 		Term:       0,
 		Type:       0,
 		Data:       data,
@@ -292,12 +299,13 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 }
 
 func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) error {
-	if len(req.GetTopicName()) == 0 {
-		glog.Errorf("Invalid topic name. Req: %v", req.GetTopicName(), req)
+	topicID := base.TopicIDType(req.GetTopicId())
+	if topicID == 0 {
+		glog.Errorf("Invalid topic name. Req: %v", topicID, req)
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	// TODO: This must go through the replication controller and we must be the leader.
-	rmTopicMsg := RemoveTopicMessage{TopicName: req.GetTopicName()}
+	rmTopicMsg := RemoveTopicMessage{TopicID: topicID}
 	cmd := Command{
 		CommandType:        KRemoveTopicCommand,
 		RemoveTopicCommand: rmTopicMsg,
@@ -324,12 +332,12 @@ func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopi
 	return nil
 }
 
-func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*base.Topic, error) {
+func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*base.TopicConfig, error) {
 	if len(req.GetTopicName()) == 0 {
 		glog.Errorf("Invalid argument. Topic name not provided")
 		return nil, makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
-	topic, err := im.storageController.GetTopic(req.GetTopicName())
+	topic, err := im.storageController.GetTopicByName(req.GetTopicName())
 	if err != nil {
 		glog.Errorf("Unable to get topic: %s due to err: %s", req.GetTopicName(), err.Error())
 		return nil, makeHedwigError(KErrBackendStorage, err, "Unable to fetch topic")
@@ -337,7 +345,7 @@ func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicReque
 	return &topic, nil
 }
 
-func (im *InstanceManager) GetAllTopics(ctx context.Context) []base.Topic {
+func (im *InstanceManager) GetAllTopics(ctx context.Context) []base.TopicConfig {
 	topics := im.storageController.GetAllTopics()
 	return topics
 }
@@ -347,7 +355,8 @@ func (im *InstanceManager) RegisterSubscriber(ctx context.Context, req *comm.Reg
 		glog.Errorf("Invalid argument. Subscriber ID must be provided")
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid subscriber ID")
 	}
-	if len(req.GetTopicName()) == 0 {
+	topicID := base.TopicIDType(req.GetTopicId())
+	if topicID == 0 {
 		glog.Errorf("Invalid argument. Topic name must be provided")
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
@@ -356,10 +365,10 @@ func (im *InstanceManager) RegisterSubscriber(ctx context.Context, req *comm.Reg
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid partition ID")
 	}
 	cs := im.storageController.GetConsumerStore()
-	err := cs.RegisterConsumer(req.GetSubscriberId(), req.GetTopicName(), uint(req.GetPartitionId()))
+	err := cs.RegisterConsumer(req.GetSubscriberId(), topicID, uint(req.GetPartitionId()))
 	if err != nil {
-		glog.Errorf("Unable to register subscriber: %s for topic: %s, partition: %d due to err: %s",
-			req.GetSubscriberId(), req.GetTopicName(), req.GetPartitionId(), err.Error())
+		glog.Errorf("Unable to register subscriber: %s for topic: %d, partition: %d due to err: %s",
+			req.GetSubscriberId(), topicID, req.GetPartitionId(), err.Error())
 		return makeHedwigError(KErrBackendStorage, err, "")
 	}
 	return nil

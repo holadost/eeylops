@@ -17,25 +17,32 @@ const (
 )
 
 type Command struct {
-	CommandType        int                // Command type as defined above.
-	AppendCommand      AppendMessage      // Append command must be populated if CommandType is Append.
-	CommitCommand      CommitMessage      // Commit command must be populated if CommandType is Commit.
-	AddTopicCommand    AddTopicMessage    // Add topic message must be populated if CommandType is add topic.
-	RemoveTopicCommand RemoveTopicMessage // Remove topic message must be populated if CommandType is remove topic.
+	// Command type as defined above.
+	CommandType int
+	// Append command must be populated if CommandType is Append.
+	AppendCommand AppendMessage
+	// Commit command must be populated if CommandType is Commit.
+	CommitCommand CommitMessage
+	// Add topic message must be populated if CommandType is add topic.
+	AddTopicCommand AddTopicMessage
+	// Remove topic message must be populated if CommandType is remove topic.
+	RemoveTopicCommand RemoveTopicMessage
+	// Register consumer message must be populated if CommandType is register consumer.
+	RegisterConsumerCommand RegisterConsumerMessage
 }
 
 type AppendMessage struct {
-	TopicName   string   // Name of the topic where the command will be applied.
-	PartitionID int      // Partition ID where the command is applied
-	Data        [][]byte // Data to be appended to the partition.
-	Timestamp   int64    // Epoch/timestamp when messages were appended.
+	TopicID     base.TopicIDType // Topic ID.
+	PartitionID int              // Partition ID where the command is applied
+	Data        [][]byte         // Data to be appended to the partition.
+	Timestamp   int64            // Epoch/timestamp when messages were appended.
 }
 
 type CommitMessage struct {
-	TopicName   string      // Name of the topic.
-	PartitionID int         // Partition ID.
-	Offset      base.Offset // Offset number.
-	ConsumerID  string      // Consumer ID.
+	TopicID     base.TopicIDType // Topic ID.
+	PartitionID int              // Partition ID.
+	Offset      base.Offset      // Offset number.
+	ConsumerID  string           // Consumer ID.
 }
 
 type AddTopicMessage struct {
@@ -43,7 +50,13 @@ type AddTopicMessage struct {
 }
 
 type RemoveTopicMessage struct {
-	TopicName string // Name of the topic.
+	TopicID base.TopicIDType // Topic ID.
+}
+
+type RegisterConsumerMessage struct {
+	ConsumerID  string           // Consumer ID.
+	TopicID     base.TopicIDType // Topic ID.
+	PartitionID int              // Partition ID.
 }
 
 func Serialize(cmd *Command) []byte {
