@@ -106,7 +106,7 @@ func (fsm *FSM) addTopic(cmd *Command, log *raft.Log) error {
 	if err := fsm.storageController.AddTopic(cmd.AddTopicCommand.TopicConfig); err != nil {
 		if err == storage.ErrTopicExists {
 			fsm.logger.Warningf("Unable to add topic as it already exists. Topic Details: %s, "+
-				"Log Index: %d, Log Term: %d", err.Error(), cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
+				"Log Index: %d, Log Term: %d", cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
 				log.Term)
 			return nil
 		} else {
@@ -128,7 +128,7 @@ func (fsm *FSM) removeTopic(cmd *Command, log *raft.Log) error {
 	if err := fsm.storageController.RemoveTopic(cmd.RemoveTopicCommand.TopicID); err != nil {
 		if err == storage.ErrTopicNotFound {
 			fsm.logger.Warningf("Unable to remove topic: %d as topic does not exist. Log Index: %d, "+
-				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, err.Error(), log.Index, log.Term)
+				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
 			return nil
 		} else {
 			fsm.logger.Fatalf("Unable to remove topic: %d due to err: %s, Log Index: %d, Log Term: %d",
@@ -155,7 +155,7 @@ func (fsm *FSM) registerConsumer(cmd *Command, log *raft.Log) error {
 	if err != nil {
 		fsm.logger.Fatalf("Unable to register consumer: %s for topic: %d, partition: %d due to err: %s. "+
 			"Log Index: %d, Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
-			cmd.RegisterConsumerCommand.PartitionID, err.Error())
+			cmd.RegisterConsumerCommand.PartitionID, err.Error(), log.Index, log.Term)
 		return err
 	}
 	return nil

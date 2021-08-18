@@ -34,6 +34,7 @@ type InstanceManager struct {
 	replicationController *replication.RaftController
 	storageController     *storage.StorageController
 	fsm                   *FSM
+	lastTopicIDAssigned   base.TopicIDType
 }
 
 func NewInstanceManager(opts *InstanceManagerOpts) *InstanceManager {
@@ -56,18 +57,28 @@ func (im *InstanceManager) initialize(opts *InstanceManagerOpts) {
 	stopts.RootDirectory = path.Join(clusterRootDir, "storage")
 	stopts.ControllerID = im.clusterID
 	im.storageController = storage.NewStorageController(stopts)
+	allTopics := im.GetAllTopics(context.Background())
+	max := base.TopicIDType(-1)
+	for _, topic := range allTopics {
+		if topic.ID > max {
+			max = topic.ID
+		}
+	}
+	im.lastTopicIDAssigned = max
+	if im.lastTopicIDAssigned == -1 {
+		im.lastTopicIDAssigned = 0
+	}
 
 	// Initialize FSM.
 	fsm := NewFSM(im.storageController, logging.NewPrefixLogger(im.clusterID))
 	im.fsm = fsm
-
 	// TODO: Initialize replication controller.
 }
 
 func (im *InstanceManager) Produce(ctx context.Context, req *comm.PublishRequest) error {
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
-		glog.Errorf("Invalid topic ID. Req: %v", topicID, req)
+		glog.Errorf("Invalid topic ID. Req: %v", topicID)
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if req.GetPartitionId() < 0 {
@@ -100,13 +111,15 @@ func (im *InstanceManager) Produce(ctx context.Context, req *comm.PublishRequest
 	}
 	appErr := im.fsm.Apply(&log)
 	retErr, err := appErr.(error)
-	if !err {
-		glog.Fatalf("Invalid return type for publish command. Expected error, got something else")
-	}
-	if retErr != nil {
-		// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
-		// This will require manual intervention.
-		glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
+	if appErr != nil {
+		if !err {
+			glog.Fatalf("Invalid return type for publish command. Expected error, got something else")
+		}
+		if retErr != nil {
+			// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
+			// This will require manual intervention.
+			glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
+		}
 	}
 	return nil
 }
@@ -157,7 +170,7 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.SubscribeReque
 			req.GetSubscriberId(), topicID, uint(req.GetPartitionId()))
 		if err != nil {
 			glog.Errorf("Unable to determine last committed offset for subscriber: %s, topic: %d, "+
-				"partition: %d due to err: %s", req.GetSubscriberId(), topicID, req.GetPartitionId())
+				"partition: %d due to err: %s", req.GetSubscriberId(), topicID, req.GetPartitionId(), err.Error())
 			return nil, makeHedwigError(KErrBackendStorage, err, "Unable to determine last committed offset")
 		}
 		scanArg.StartOffset = off
@@ -183,7 +196,7 @@ func (im *InstanceManager) Subscribe() {
 func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) error {
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
-		glog.Errorf("Invalid topic name. Req: %v", topicID, req)
+		glog.Errorf("Invalid topic name. Req: %v", req)
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if req.GetPartitionId() < 0 {
@@ -242,7 +255,7 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context, req *comm.LastC
 	offset, err := cs.GetLastCommitted(req.GetSubscriberId(), topicID, uint(req.GetPartitionId()))
 	if err != nil {
 		glog.Errorf("Unable to fetch last committed offset for subscriber: %s, topic: %d, partition: %d due "+
-			"to err: %s", req.GetSubscriberId(), topicID, req.GetPartitionId())
+			"to err: %s", req.GetSubscriberId(), topicID, req.GetPartitionId(), err.Error())
 		return -1, makeHedwigError(KErrBackendStorage, err, "Unable to get last committed offset")
 	}
 	return offset, nil
@@ -251,7 +264,7 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context, req *comm.LastC
 func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) error {
 	topic := req.GetTopic()
 	if len(topic.GetTopicName()) == 0 {
-		glog.Errorf("Invalid topic name. Req: %v", topic.GetTopicName(), req)
+		glog.Errorf("Invalid topic name. Req: %v", req)
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if len(topic.GetPartitionIds()) == 0 {
@@ -269,7 +282,7 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 	tc.PartitionIDs = prtIds
 	tc.TTLSeconds = int(topic.TtlSeconds)
 	tc.CreatedAt = now
-	tc.ID = base.TopicIDType(now.UnixNano())
+	tc.ID = im.lastTopicIDAssigned + 1
 	addTopicMsg := AddTopicMessage{TopicConfig: tc}
 	cmd := Command{
 		CommandType:     KAddTopicCommand,
@@ -285,22 +298,25 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 		AppendedAt: time.Time{},
 	}
 	appErr := im.fsm.Apply(&log)
-	retErr, err := appErr.(error)
-	if !err {
-		glog.Fatalf("Invalid return type for commit command. Expected error, got something else")
+	if appErr != nil {
+		retErr, err := appErr.(error)
+		if !err {
+			glog.Fatalf("Invalid return type for add topic command. Expected error, got something else: %v", appErr)
+		}
+		if retErr != nil {
+			// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
+			// This will require manual intervention.
+			glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
+		}
 	}
-	if retErr != nil {
-		// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
-		// This will require manual intervention.
-		glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
-	}
+	im.lastTopicIDAssigned++
 	return nil
 }
 
 func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) error {
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
-		glog.Errorf("Invalid topic name. Req: %v", topicID, req)
+		glog.Errorf("Invalid topic name. Req: %v", req)
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	// TODO: This must go through the replication controller and we must be the leader.
@@ -319,14 +335,17 @@ func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopi
 		AppendedAt: time.Time{},
 	}
 	appErr := im.fsm.Apply(&log)
-	retErr, err := appErr.(error)
-	if !err {
-		glog.Fatalf("Invalid return type for commit command. Expected error, got something else")
-	}
-	if retErr != nil {
-		// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
-		// This will require manual intervention.
-		glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
+	if appErr != nil {
+		retErr, err := appErr.(error)
+		if !err {
+			glog.Fatalf("Invalid return type for remove topic command. Expected error, "+
+				"got something else: %v", appErr)
+		}
+		if retErr != nil {
+			// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
+			// This will require manual intervention.
+			glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
+		}
 	}
 	return nil
 }
@@ -338,6 +357,9 @@ func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicReque
 	}
 	topic, err := im.storageController.GetTopicByName(req.GetTopicName())
 	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return nil, makeHedwigError(KErrTopicNotFound, err, "Unable to fetch topic")
+		}
 		glog.Errorf("Unable to get topic: %s due to err: %s", req.GetTopicName(), err.Error())
 		return nil, makeHedwigError(KErrBackendStorage, err, "Unable to fetch topic")
 	}
@@ -363,12 +385,33 @@ func (im *InstanceManager) RegisterSubscriber(ctx context.Context, req *comm.Reg
 		glog.Errorf("Invalid argument. Subscriber ID must be provided")
 		return makeHedwigError(KErrInvalidArg, nil, "Invalid partition ID")
 	}
-	cs := im.storageController.GetConsumerStore()
-	err := cs.RegisterConsumer(req.GetSubscriberId(), topicID, uint(req.GetPartitionId()))
-	if err != nil {
-		glog.Errorf("Unable to register subscriber: %s for topic: %d, partition: %d due to err: %s",
-			req.GetSubscriberId(), topicID, req.GetPartitionId(), err.Error())
-		return makeHedwigError(KErrBackendStorage, err, "")
+	rgMsg := RegisterConsumerMessage{
+		ConsumerID:  req.GetSubscriberId(),
+		TopicID:     base.TopicIDType(req.GetTopicId()),
+		PartitionID: int(req.GetPartitionId()),
+	}
+	cmd := Command{
+		CommandType:             KRegisterConsumerCommand,
+		RegisterConsumerCommand: rgMsg,
+	}
+	data := Serialize(&cmd)
+	log := raft.Log{
+		Index:      uint64(time.Now().UnixNano()),
+		Term:       0,
+		Type:       0,
+		Data:       data,
+		Extensions: nil,
+		AppendedAt: time.Time{},
+	}
+	appErr := im.fsm.Apply(&log)
+	if appErr != nil {
+		retErr, ok := appErr.(error)
+		if !ok {
+			glog.Fatalf("Expected error type but got: %v", appErr)
+		}
+		if retErr != nil {
+			glog.Fatalf("Unexpected error while registering consumer: %s", retErr.Error())
+		}
 	}
 	return nil
 }
