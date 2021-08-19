@@ -155,7 +155,7 @@ func (sc *StorageController) GetAllTopics() []base.TopicConfig {
 	return topics
 }
 
-func (sc *StorageController) AddTopic(topic base.TopicConfig) error {
+func (sc *StorageController) AddTopic(topic base.TopicConfig, rLogIdx int64) error {
 	_, exists := sc.topicMap[topic.ID]
 	if exists {
 		glog.Errorf("Topic: %s already exists", topic.Name)
@@ -197,7 +197,7 @@ func (sc *StorageController) AddTopic(topic base.TopicConfig) error {
 	return nil
 }
 
-func (sc *StorageController) RemoveTopic(topicID base.TopicIDType) error {
+func (sc *StorageController) RemoveTopic(topicID base.TopicIDType, rLogIdx int64) error {
 	te, exists := sc.topicMap[topicID]
 	if !exists {
 		glog.Errorf("Unable to remove topic as topic: %d was not found", topicID)
@@ -206,12 +206,12 @@ func (sc *StorageController) RemoveTopic(topicID base.TopicIDType) error {
 	// Remove topic from the store and map.
 	sc.topicMapLock.Lock()
 	defer sc.topicMapLock.Unlock()
-	delete(sc.topicMap, topicID)
 	err := sc.topicsConfigStore.RemoveTopic(te.topic.Name)
 	if err != nil {
 		glog.Errorf("Unable to remove topic due to err: %s", err.Error())
 		return err
 	}
+	delete(sc.topicMap, topicID)
 	sc.topicDeletionChan <- te
 	return nil
 }

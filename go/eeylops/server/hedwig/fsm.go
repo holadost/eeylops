@@ -103,7 +103,7 @@ func (fsm *FSM) addTopic(cmd *Command, log *raft.Log) error {
 		fsm.logger.Fatalf("Invalid partition IDs provided. Log Index: %d, Log Term: %d", log.Index, log.Term)
 	}
 	// Add topic.
-	if err := fsm.storageController.AddTopic(cmd.AddTopicCommand.TopicConfig); err != nil {
+	if err := fsm.storageController.AddTopic(cmd.AddTopicCommand.TopicConfig, int64(log.Index)); err != nil {
 		if err == storage.ErrTopicExists {
 			fsm.logger.Warningf("Unable to add topic as it already exists. Topic Details: %s, "+
 				"Log Index: %d, Log Term: %d", cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
@@ -124,7 +124,7 @@ func (fsm *FSM) removeTopic(cmd *Command, log *raft.Log) error {
 		fsm.logger.Fatalf("Invalid topic ID")
 	}
 	// Remove topic.
-	if err := fsm.storageController.RemoveTopic(cmd.RemoveTopicCommand.TopicID); err != nil {
+	if err := fsm.storageController.RemoveTopic(cmd.RemoveTopicCommand.TopicID, int64(log.Index)); err != nil {
 		if err == storage.ErrTopicNotFound {
 			fsm.logger.Warningf("Unable to remove topic: %d as topic does not exist. Log Index: %d, "+
 				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
@@ -150,7 +150,7 @@ func (fsm *FSM) registerConsumer(cmd *Command, log *raft.Log) error {
 	}
 	cs := fsm.storageController.GetConsumerStore()
 	err := cs.RegisterConsumer(cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
-		uint(cmd.RegisterConsumerCommand.PartitionID))
+		uint(cmd.RegisterConsumerCommand.PartitionID), int64(log.Index))
 	if err != nil {
 		fsm.logger.Fatalf("Unable to register consumer: %s for topic: %d, partition: %d due to err: %s. "+
 			"Log Index: %d, Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
@@ -169,7 +169,7 @@ func (fsm *FSM) commit(cmd *Command, log *raft.Log) error {
 	}
 	cs := fsm.storageController.GetConsumerStore()
 	if err := cs.Commit(cmd.CommitCommand.ConsumerID, cmd.CommitCommand.TopicID,
-		uint(cmd.CommitCommand.PartitionID), cmd.CommitCommand.Offset); err != nil {
+		uint(cmd.CommitCommand.PartitionID), cmd.CommitCommand.Offset, int64(log.Index)); err != nil {
 		if err == storage.ErrConsumerNotRegistered {
 			fsm.logger.Warningf("Subscriber: %s is not registered for partition: %d, topic: %d. "+
 				"Skipping this command. Log Index: %d, Log Term: %d",

@@ -215,6 +215,7 @@ func TestInstanceManager_Consumer(t *testing.T) {
 		}
 	}
 
+	// Commit offsets for non-registered consumers and expect errors.
 	glog.Infof("Committing offsets for non-registered consumers")
 	for ii := numConsumers; ii < 2*numConsumers; ii++ {
 		var req comm.CommitRequest

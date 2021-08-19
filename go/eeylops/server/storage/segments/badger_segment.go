@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	kLastRLogIdxKeyBytes          = []byte(kLastRLogIdxKey)
+	kLastRLogIdxKeyBytes          = sbase.KLastRLogIdxKeyBytes
 	kTimestampIndexPrefixKeyBytes = []byte(kTimestampIndexKeyPrefix)
 	KOffSetPrefixBytes            = []byte(kOffsetKeyPrefix)
 )

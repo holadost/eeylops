@@ -43,6 +43,9 @@ var (
 	// ErrPartitionNotFound is a returned when the given partition is not found by the instance topic manager.
 	ErrPartitionNotFound = errors.New("ErrPartitionNotFound: partition not found")
 
+	// ErrInvalidRLogIdx is a returned when the replicated log index applied was invalid.
+	ErrInvalidRLogIdx = errors.New("ErrInvalidRLogIdx: invalid replicated log index")
+
 	// errPartitionOffsetTsNotFound is returned when an offset or timestamp was not found
 	errPartitionOffsetTsNotFound = errors.New("errPartitionOffsetTsNotFound: offset/timestamp not found")
 )
