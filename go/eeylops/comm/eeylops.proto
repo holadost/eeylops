@@ -99,12 +99,14 @@ message GetAllTopicsResponse {
 }
 
 message PublishRequest {
+  // Cluster ID.
+  string cluster_id = 1;
   // Topic ID.
-  int32 topic_id = 1;
+  int32 topic_id = 2;
   // Partition where the given values must be appended.
-  int32 partition_id = 2;
+  int32 partition_id = 3;
   // List of values to append to the partition.
-  repeated bytes values = 3;
+  repeated bytes values = 4;
 }
 
 message PublishResponse {
@@ -127,27 +129,29 @@ message RegisterSubscriberResponse {
 }
 
 message SubscribeRequest {
+  // Cluster ID.
+  string cluster_id = 1;
   // Subscriber ID.
-  string subscriber_id = 1;
+  string subscriber_id = 2;
   // Topic ID.
-  int32 topic_id = 2;
+  int32 topic_id = 3;
   // Partition ID.
-  int32 partition_id = 3;
+  int32 partition_id = 4;
   // Batch size(number of messages) to fetch per scan RPC. Defaults to 1.
-  int32 batch_size = 4;
+  int32 batch_size = 5;
   // Specifies the start offset from where the scan starts.
   // Defaults to -1.
-  int64 start_offset = 5;
+  int64 start_offset = 6;
   // Filters messages such that only messages >= start_timestamp
   // are fetched.
-  int64 start_timestamp = 6;
+  int64 start_timestamp = 7;
   // Filters messages such that only messages < end_timestamp are
   // fetched.
-  int64 end_timestamp = 7;
+  int64 end_timestamp = 8;
   // If True, start_offset - 1 is committed before sending out the response. Defaults to false.
-  bool auto_commit = 8;
+  bool auto_commit = 9;
   // If true, subscribe resumes from the last committed offset. Defaults to false.
-  bool resume_from_last_committed_offset = 9;
+  bool resume_from_last_committed_offset = 10;
 }
 
 message SubscribeResponse {

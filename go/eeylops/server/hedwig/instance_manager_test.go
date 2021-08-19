@@ -1,6 +1,7 @@
 package hedwig
 
 import (
+	"bytes"
 	"context"
 	"eeylops/comm"
 	"eeylops/server/base"
@@ -258,4 +259,129 @@ func TestInstanceManager_Consumer(t *testing.T) {
 				he.errorCode.ToString(), KErrSubscriberNotRegistered.ToString())
 		}
 	}
+}
+
+func TestInstanceManager_ProduceConsume(t *testing.T) {
+	util.LogTestMarker("TestInstanceManager_ProduceConsume")
+	testDirName := util.CreateTestDir(t, "TestInstanceManager_ProduceConsume")
+	clusterID := "nikhil1nikhil1"
+	topicName := "produce_consume_topic"
+	opts := InstanceManagerOpts{
+		DataDirectory: testDirName,
+		ClusterID:     clusterID,
+		PeerAddresses: nil,
+	}
+	numIters := 500
+	batchSize := 10
+	im := NewInstanceManager(&opts)
+	partIDs := []int32{1, 2, 3, 4}
+	var req comm.CreateTopicRequest
+	var topic comm.Topic
+	topic.PartitionIds = partIDs
+	topic.TtlSeconds = 86400 * 7
+	topic.TopicName = topicName
+	req.Topic = &topic
+	err := im.AddTopic(context.Background(), &req)
+	if err != nil {
+		glog.Fatalf("Expected no error but got: %s. Unable to add topic", err.Error())
+	}
+	var greq comm.GetTopicRequest
+	greq.ClusterId = clusterID
+	greq.TopicName = topicName
+	topicCfg, err := im.GetTopic(context.Background(), &greq)
+	if err != nil {
+		glog.Fatalf("Error while fetching topic: %s", topicName)
+	}
+	glog.Infof("Received topic: %s, ID: %d", topicCfg.Name, topicCfg.ID)
+	producersDone := make(chan struct{}, len(topic.PartitionIds))
+	for _, pid := range partIDs {
+		go func(prtID int32) {
+			glog.Infof("Starting producer on partition: %d", prtID)
+			for ii := 0; ii < numIters; ii++ {
+				var values [][]byte
+				for jj := 0; jj < batchSize; jj++ {
+					values = append(values, []byte(fmt.Sprintf("value-%d", (ii*batchSize)+jj)))
+				}
+				var req comm.PublishRequest
+				req.ClusterId = clusterID
+				req.TopicId = int32(topicCfg.ID)
+				req.PartitionId = prtID
+				req.Values = values
+				err := im.Produce(context.Background(), &req)
+				if err != nil {
+					glog.Fatalf("Got error while producing. Err: %s", err.Error())
+				}
+			}
+			producersDone <- struct{}{}
+		}(pid)
+	}
+
+	for ii := 0; ii < len(partIDs); ii++ {
+		<-producersDone
+	}
+	close(producersDone)
+	glog.Infof("All producers have finished!")
+
+	consumersDone := make(chan struct{}, len(topic.PartitionIds))
+	for _, pid := range partIDs {
+		go func(prtID int32) {
+			glog.Infof("Starting consumer on partition: %d", prtID)
+			prevNextOffset := int64(0)
+			for ii := 0; ii < numIters+1; ii++ {
+				var req comm.SubscribeRequest
+				req.ClusterId = clusterID
+				req.TopicId = int32(topicCfg.ID)
+				req.PartitionId = prtID
+				req.StartOffset = prevNextOffset
+				req.SubscriberId = "nikhil"
+				req.BatchSize = int32(batchSize)
+				req.AutoCommit = false
+				req.ResumeFromLastCommittedOffset = false
+				ret, err := im.Consume(context.Background(), &req)
+				if err != nil {
+					glog.Fatalf("Got an unexpected error while scanning values: %s from partition: %d",
+						err.Error(), prtID)
+				}
+				if ret.Error != nil {
+					glog.Fatalf("Unexpected error while scanning values: %s from partition: %d",
+						ret.Error.Error(), prtID)
+				}
+				expectedNextOffset := base.Offset((ii + 1) * batchSize)
+				if ii < numIters-1 {
+					if ret.NextOffset != expectedNextOffset {
+						glog.Fatalf("Expected next offset: %d, Got: %d, Partition: %d",
+							expectedNextOffset, ret.NextOffset, prtID)
+					}
+				} else {
+					glog.Infof("Scan should have finished now. Next offset: %d", ret.NextOffset)
+					if !(ret.NextOffset == expectedNextOffset || ret.NextOffset == -1) {
+						glog.Fatalf("Expected next offset: %d or -1, Got: %d, Partition: %d",
+							expectedNextOffset, ret.NextOffset, prtID)
+					}
+				}
+				if ii < numIters {
+					for jj := 0; jj < batchSize; jj++ {
+						expectedVal := []byte(fmt.Sprintf("value-%d", (ii*batchSize)+jj))
+						if bytes.Compare(ret.Values[jj].Value, expectedVal) != 0 {
+							glog.Fatalf("Expected value: %s, Got: %s, Partition: %d",
+								string(expectedVal), string(ret.Values[jj].Value), prtID)
+						}
+					}
+				} else {
+					if len(ret.Values) != 0 {
+						glog.Fatalf("Expected 0 records, got: %d from partition: %d", len(ret.Values), prtID)
+					}
+				}
+				if ret.NextOffset >= 0 {
+					prevNextOffset = int64(ret.NextOffset)
+				}
+			}
+			consumersDone <- struct{}{}
+		}(pid)
+	}
+	for ii := 0; ii < len(partIDs); ii++ {
+		<-consumersDone
+	}
+	close(consumersDone)
+	glog.Infof("All consumers have finished!")
 }
