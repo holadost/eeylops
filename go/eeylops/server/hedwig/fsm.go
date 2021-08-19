@@ -81,6 +81,11 @@ func (fsm *FSM) append(cmd *Command, log *raft.Log) error {
 				"was recently deleted. Skipping append for partition: %d, topic: %d, log index: %d, term: %d",
 				cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, log.Index, log.Term)
 			return nil
+		} else if ret.Error == storage.ErrInvalidRLogIdx {
+			fsm.logger.Warningf("An older replicated log index was attempted on for Partition ID: %d, "+
+				"Topic ID: %d. Log Index: %d, Log Term: %d. Skipping this append as the partition already"+
+				"has this message", cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, log.Index, log.Term)
+			return nil
 		} else {
 			fsm.logger.Fatalf("Unable to append entries to partition: %d, topic: %d, log index: %d, "+
 				"term: %d due to err: %s", cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, log.Index,
@@ -109,6 +114,10 @@ func (fsm *FSM) addTopic(cmd *Command, log *raft.Log) error {
 				"Log Index: %d, Log Term: %d", cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
 				log.Term)
 			return err
+		} else if err == storage.ErrInvalidRLogIdx {
+			fsm.logger.Warningf("An older replicated log index was attempted to create a topic. "+
+				"Log Index: %d, Log Term: %d. Skipping this index as it has already been applied", log.Index, log.Term)
+			return nil
 		} else {
 			fsm.logger.Fatalf("Unable to add topic due to err: %s. Topic details: %s, "+
 				"Log Index: %d, Term: %d", err.Error(), cmd.AddTopicCommand.TopicConfig.ToString(),
@@ -128,6 +137,11 @@ func (fsm *FSM) removeTopic(cmd *Command, log *raft.Log) error {
 		if err == storage.ErrTopicNotFound {
 			fsm.logger.Warningf("Unable to remove topic: %d as topic does not exist. Log Index: %d, "+
 				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
+			return nil
+		} else if err == storage.ErrInvalidRLogIdx {
+			fsm.logger.Warningf("An older replicated log index was attempted to remove topic: %d. "+
+				"Log Index: %d, Log Term: %d. Skipping this log as it has already been applied",
+				cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
 			return nil
 		} else {
 			fsm.logger.Fatalf("Unable to remove topic: %d due to err: %s, Log Index: %d, Log Term: %d",
@@ -152,6 +166,13 @@ func (fsm *FSM) registerConsumer(cmd *Command, log *raft.Log) error {
 	err := cs.RegisterConsumer(cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
 		uint(cmd.RegisterConsumerCommand.PartitionID), int64(log.Index))
 	if err != nil {
+		if err == storage.ErrInvalidRLogIdx {
+			fsm.logger.Warningf("An older replicated log index was attempted to register consumer: %s, "+
+				"topic: %d, Partition: %d, Log Index: %d, Log Term: %d. Skipping this log as it has already "+
+				"been applied", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
+				cmd.RegisterConsumerCommand.PartitionID, log.Index, log.Term)
+			return nil
+		}
 		fsm.logger.Fatalf("Unable to register consumer: %s for topic: %d, partition: %d due to err: %s. "+
 			"Log Index: %d, Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
 			cmd.RegisterConsumerCommand.PartitionID, err.Error(), log.Index, log.Term)
@@ -176,10 +197,18 @@ func (fsm *FSM) commit(cmd *Command, log *raft.Log) error {
 				cmd.CommitCommand.ConsumerID, cmd.CommitCommand.PartitionID, cmd.CommitCommand.TopicID,
 				log.Index, log.Term)
 			return err
+		} else if err == storage.ErrInvalidRLogIdx {
+			fsm.logger.Warningf("An older replicated log index was attempted to commit consumer offset: "+
+				"Consumer ID: %s, Topic: %d, Partition: %d, Offset: %d, Log Index: %d, Log Term: %d. Skipping this "+
+				"log as it has already been applied",
+				cmd.CommitCommand.ConsumerID, cmd.CommitCommand.TopicID, cmd.CommitCommand.PartitionID,
+				cmd.CommitCommand.Offset, log.Index, log.Term)
+			return nil
+		} else {
+			fsm.logger.Fatalf("Unable to add consumer commit for subscriber: %s, partition: %d, topic: %d, "+
+				"Log Index: %d, Log Term: %d due to err: %s", cmd.CommitCommand.ConsumerID, cmd.CommitCommand.PartitionID,
+				cmd.CommitCommand.TopicID, log.Index, log.Term, err.Error())
 		}
-		fsm.logger.Fatalf("Unable to add consumer commit for subscriber: %s, partition: %d, topic: %d, "+
-			"Log Index: %d, Log Term: %d due to err: %s", cmd.CommitCommand.ConsumerID, cmd.CommitCommand.PartitionID,
-			cmd.CommitCommand.TopicID, log.Index, log.Term, err.Error())
 	}
 	return nil
 }

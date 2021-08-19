@@ -302,7 +302,11 @@ func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sb
 	segRet := seg.Append(ctx, &sarg)
 	if segRet.Error != nil {
 		p.logger.Errorf("Unable to append entries to partition due to err: %s", ret.Error.Error())
-		ret.Error = ErrPartitionAppend
+		if segRet.Error == segments.ErrSegmentInvalidRLogIdx {
+			ret.Error = ErrInvalidRLogIdx
+		} else {
+			ret.Error = ErrPartitionAppend
+		}
 		return &ret
 	}
 	return &ret
