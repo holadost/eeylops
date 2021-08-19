@@ -53,6 +53,27 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		allTopics = append(allTopics, topic)
 	}
 
+	// Add same topics again. We should get an error.
+	for ii := 0; ii < numTopics; ii++ {
+		var req comm.CreateTopicRequest
+		var topic comm.Topic
+		topic.PartitionIds = []int32{1, 2}
+		topic.TtlSeconds = 86400 * 5
+		topic.TopicName = generateTopicName(ii)
+		req.Topic = &topic
+		err := im.AddTopic(context.Background(), &req)
+		if err == nil {
+			glog.Fatalf("Expected an error but got: nil")
+		}
+		acErr, ok := err.(*hedwigError)
+		if !ok {
+			glog.Fatalf("Unable to cast received err: %v to hedwig error", err)
+		}
+		if acErr.errorCode != KErrTopicExists {
+			glog.Fatalf("Expected: %s got: %s", KErrTopicExists.ToString(), acErr.errorCode.ToString())
+		}
+	}
+
 	// Get all topics.
 	topics := im.GetAllTopics(context.Background())
 	if len(topics) != numTopics {

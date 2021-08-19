@@ -9,6 +9,7 @@ import (
 	sbase "eeylops/server/storage/base"
 	"eeylops/util"
 	"eeylops/util/logging"
+	"fmt"
 	"github.com/golang/glog"
 	"github.com/hashicorp/raft"
 	"path"
@@ -301,11 +302,16 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 	}
 	appErr := im.fsm.Apply(&log)
 	if appErr != nil {
-		retErr, err := appErr.(error)
-		if !err {
-			glog.Fatalf("Invalid return type for add topic command. Expected error, got something else: %v", appErr)
+		retErr, ok := appErr.(error)
+		if !ok {
+			glog.Fatalf("Invalid return type for add topic command. Expected error, got something else: %v",
+				appErr)
 		}
 		if retErr != nil {
+			if retErr == storage.ErrTopicExists {
+				return makeHedwigError(KErrTopicExists, nil, fmt.Sprintf("topic: %s already exists",
+					req.GetTopic().GetTopicName()))
+			}
 			// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
 			// This will require manual intervention.
 			glog.Fatalf("Unable to apply to FSM due to err: %s", retErr.Error())
