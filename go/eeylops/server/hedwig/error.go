@@ -1,14 +1,16 @@
 package hedwig
 
 import (
+	"eeylops/comm"
 	"github.com/golang/glog"
-	"strconv"
 )
 
 type ErrorCode int
 
 func (ec ErrorCode) ToString() string {
 	switch ec {
+	case KErrNoError:
+		return "NoError"
 	case KErrInvalidArg:
 		return "ErrInvalidArg"
 	case KErrNotLeader:
@@ -23,6 +25,8 @@ func (ec ErrorCode) ToString() string {
 		return "ErrSubscriberNotRegistered"
 	case KErrTopicExists:
 		return "ErrTopicExists"
+	case KErrPartitionNotFound:
+		return "ErrPartitionNotFound"
 	default:
 		glog.Fatalf("Invalid error code: %d", ec)
 		return "Invalid error code"
@@ -30,37 +34,30 @@ func (ec ErrorCode) ToString() string {
 }
 
 const (
+	KErrNoError                 ErrorCode = 0
 	KErrInvalidArg              ErrorCode = 1
 	KErrNotLeader               ErrorCode = 2
 	KErrBackendStorage          ErrorCode = 3
 	KErrReplication             ErrorCode = 4
 	KErrTopicNotFound           ErrorCode = 5
 	KErrTopicExists             ErrorCode = 6
-	KErrSubscriberNotRegistered ErrorCode = 7
+	KErrPartitionNotFound       ErrorCode = 7
+	KErrSubscriberNotRegistered ErrorCode = 8
 )
 
-type hedwigError struct {
-	errorCode ErrorCode
-	errorMsg  string
-}
-
-func (he *hedwigError) Error() string {
-	return he.errorMsg
-}
-
-func makeHedwigError(ec ErrorCode, err error, additionalMsg string) error {
-	var msg string
-	msg += ec.ToString()
-	msg += "[" + strconv.Itoa(int(ec)) + "]"
-	if err != nil {
-		msg += " " + err.Error()
+func makeErrorProto(code ErrorCode, err error, msg string) *comm.Error {
+	var ep comm.Error
+	ep.ErrorCode = int32(code)
+	var fullMsg string
+	if code != KErrNoError {
+		ep.ErrorMsg = ""
+	} else {
+		fullMsg += code.ToString()
+		fullMsg += ": " + msg
+		if err != nil {
+			fullMsg += " Error: " + msg
+		}
+		ep.ErrorMsg = fullMsg
 	}
-	if len(additionalMsg) != 0 {
-		msg += ". " + additionalMsg
-	}
-	retErr := &hedwigError{
-		errorCode: ec,
-		errorMsg:  msg,
-	}
-	return retErr
+	return &ep
 }

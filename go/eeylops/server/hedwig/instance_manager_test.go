@@ -146,9 +146,9 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 	time.Sleep(5 * time.Second)
 }
 
-func TestInstanceManager_Consumer(t *testing.T) {
-	util.LogTestMarker("TestInstanceManager_Consumer")
-	testDirName := util.CreateTestDir(t, "TestInstanceManager_Consumer")
+func TestInstanceManager_ConsumerCommit(t *testing.T) {
+	util.LogTestMarker("TestInstanceManager_ConsumerCommit")
+	testDirName := util.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
 	clusterID := "nikhil1nikhil1"
 	opts := InstanceManagerOpts{
 		DataDirectory: testDirName,
@@ -161,22 +161,50 @@ func TestInstanceManager_Consumer(t *testing.T) {
 	numConsumers := 15
 	commitOffset := base.Offset(100)
 	im := NewInstanceManager(&opts)
-	// Add topics.
+	// Register consumers for non-existent topics.
 	for ii := 0; ii < numConsumers; ii++ {
-		var req comm.RegisterSubscriberRequest
-		req.SubscriberId = generateConsumerName(ii)
+		var req comm.RegisterConsumerRequest
+		req.ConsumerId = generateConsumerName(ii)
 		req.TopicId = 1
 		req.PartitionId = 2
-		err := im.RegisterSubscriber(context.Background(), &req)
+		err := im.RegisterConsumer(context.Background(), &req)
+		he, ok := err.(*hedwigError)
+		if !ok {
+			glog.Fatalf("Unable to type cast error to hedwigError. Error: %v", err)
+		}
+		if he.errorCode != KErrTopicNotFound {
+			glog.Fatalf("Expected %s, got: %s", KErrTopicNotFound.ToString(), he.errorCode.ToString())
+		}
+	}
+
+	// Add a topic.
+	var req comm.CreateTopicRequest
+	var topic comm.Topic
+	topic.PartitionIds = []int32{1, 2, 3, 4}
+	topic.TtlSeconds = 86400 * 7
+	topic.TopicName = "hello_topic_1"
+	req.Topic = &topic
+	err := im.AddTopic(context.Background(), &req)
+	if err != nil {
+		glog.Fatalf("Expected no error but got: %s. Unable to add topic", err.Error())
+	}
+
+	// Register consumers for non-existent topics.
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.RegisterConsumerRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		err := im.RegisterConsumer(context.Background(), &req)
 		if err != nil {
-			glog.Fatalf("Expected no error but got: %s. Unable to add topic", err.Error())
+			glog.Fatalf("Unable to register consumer commit due to err: %s", err.Error())
 		}
 	}
 
 	// Get last committed offset for all consumers.
 	for ii := 0; ii < numConsumers; ii++ {
 		var req comm.LastCommittedRequest
-		req.SubscriberId = generateConsumerName(ii)
+		req.ConsumerId = generateConsumerName(ii)
 		req.TopicId = 1
 		req.PartitionId = 2
 		offset, err := im.GetLastCommitted(context.Background(), &req)
@@ -191,7 +219,7 @@ func TestInstanceManager_Consumer(t *testing.T) {
 	// Get last committed offset for non-existent consumers.
 	for ii := numConsumers; ii < 2*numConsumers; ii++ {
 		var req comm.LastCommittedRequest
-		req.SubscriberId = generateConsumerName(ii)
+		req.ConsumerId = generateConsumerName(ii)
 		req.TopicId = 1
 		req.PartitionId = 2
 		_, err := im.GetLastCommitted(context.Background(), &req)
@@ -211,7 +239,7 @@ func TestInstanceManager_Consumer(t *testing.T) {
 	glog.Infof("Committing offsets for registered consumers")
 	for ii := 0; ii < numConsumers; ii++ {
 		var req comm.CommitRequest
-		req.SubscriberId = generateConsumerName(ii)
+		req.ConsumerId = generateConsumerName(ii)
 		req.TopicId = 1
 		req.PartitionId = 2
 		req.Offset = int64(commitOffset)
@@ -225,7 +253,7 @@ func TestInstanceManager_Consumer(t *testing.T) {
 	glog.Infof("Checking committed offsets")
 	for ii := 0; ii < numConsumers; ii++ {
 		var req comm.LastCommittedRequest
-		req.SubscriberId = generateConsumerName(ii)
+		req.ConsumerId = generateConsumerName(ii)
 		req.TopicId = 1
 		req.PartitionId = 2
 		offset, err := im.GetLastCommitted(context.Background(), &req)
@@ -241,7 +269,7 @@ func TestInstanceManager_Consumer(t *testing.T) {
 	glog.Infof("Committing offsets for non-registered consumers")
 	for ii := numConsumers; ii < 2*numConsumers; ii++ {
 		var req comm.CommitRequest
-		req.SubscriberId = generateConsumerName(ii)
+		req.ConsumerId = generateConsumerName(ii)
 		req.TopicId = 1
 		req.PartitionId = 2
 		req.Offset = int64(commitOffset)
@@ -302,7 +330,7 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 				for jj := 0; jj < batchSize; jj++ {
 					values = append(values, []byte(fmt.Sprintf("value-%d", (ii*batchSize)+jj)))
 				}
-				var req comm.PublishRequest
+				var req comm.ProduceRequest
 				req.ClusterId = clusterID
 				req.TopicId = int32(topicCfg.ID)
 				req.PartitionId = prtID
@@ -328,12 +356,12 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 			glog.Infof("Starting consumer on partition: %d", prtID)
 			prevNextOffset := int64(0)
 			for ii := 0; ii < numIters+1; ii++ {
-				var req comm.SubscribeRequest
+				var req comm.ConsumeRequest
 				req.ClusterId = clusterID
 				req.TopicId = int32(topicCfg.ID)
 				req.PartitionId = prtID
 				req.StartOffset = prevNextOffset
-				req.SubscriberId = "nikhil"
+				req.ConsumerId = "nikhil"
 				req.BatchSize = int32(batchSize)
 				req.AutoCommit = false
 				req.ResumeFromLastCommittedOffset = false

@@ -2,7 +2,6 @@ package hedwig
 
 import (
 	"context"
-	"eeylops/server/base"
 	"eeylops/server/storage"
 	sbase "eeylops/server/storage/base"
 	"eeylops/util/logging"
@@ -16,7 +15,7 @@ type FSM struct {
 }
 
 type FSMResponse struct {
-	CommandType int
+	CommandType CmdType
 	Error       error
 	Response    interface{}
 }
@@ -190,7 +189,7 @@ func (fsm *FSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse {
 	resp.Error = nil
 
 	// Check if topic exists before registering consumer.
-	tpc, exists := fsm.doesTopicExist(cmd.RegisterConsumerCommand.TopicID)
+	tpc, exists := doesTopicExist(cmd.RegisterConsumerCommand.TopicID, fsm.storageController)
 	if !exists {
 		fsm.logger.Warningf("Unable to register consumer: %s as topic: %d does not exist. Log Index: %d, "+
 			"Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID, log.Index,
@@ -200,7 +199,7 @@ func (fsm *FSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse {
 	}
 
 	// Check if partition exists before registering consumer.
-	if !fsm.doesPartitionExist(tpc, cmd.RegisterConsumerCommand.PartitionID) {
+	if !doesPartitionExist(tpc, cmd.RegisterConsumerCommand.PartitionID) {
 		fsm.logger.Warningf("Unable to register consumer: %s as topic: %d, partition: %d does not exist. "+
 			"Log Index: %d, Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
 			cmd.RegisterConsumerCommand.PartitionID, log.Index, log.Term)
@@ -262,27 +261,4 @@ func (fsm *FSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 		}
 	}
 	return &resp
-}
-
-func (fsm *FSM) doesPartitionExist(topic *base.TopicConfig, partID int) bool {
-	found := false
-	for _, prtID := range topic.PartitionIDs {
-		if partID == prtID {
-			found = true
-			break
-		}
-	}
-	return found
-}
-
-func (fsm *FSM) doesTopicExist(topicID base.TopicIDType) (*base.TopicConfig, bool) {
-	tpc, err := fsm.storageController.GetTopicByID(topicID)
-	if err != nil {
-		if err == storage.ErrTopicNotFound {
-			return nil, false
-		}
-		fsm.logger.Fatalf("Unexpected error while attempting to check if topic: %d exists. Error: %s",
-			topicID, err.Error())
-	}
-	return &tpc, true
 }

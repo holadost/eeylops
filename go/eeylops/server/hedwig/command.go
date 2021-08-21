@@ -7,18 +7,40 @@ import (
 	"github.com/golang/glog"
 )
 
+type CmdType int
+
 const (
-	KNoOpCommand             = 1
-	KAppendCommand           = 2
-	KCommitCommand           = 3
-	KAddTopicCommand         = 4
-	KRemoveTopicCommand      = 5
-	KRegisterConsumerCommand = 6
+	KNoOpCommand             CmdType = 1
+	KAppendCommand           CmdType = 2
+	KCommitCommand           CmdType = 3
+	KAddTopicCommand         CmdType = 4
+	KRemoveTopicCommand      CmdType = 5
+	KRegisterConsumerCommand CmdType = 6
 )
+
+func (ct CmdType) ToString() string {
+	switch ct {
+	case KNoOpCommand:
+		return "NoOpCommand"
+	case KAppendCommand:
+		return "AppendCommand"
+	case KCommitCommand:
+		return "CommitCommand"
+	case KAddTopicCommand:
+		return "AddTopicCommand"
+	case KRemoveTopicCommand:
+		return "RemoveTopicCommand"
+	case KRegisterConsumerCommand:
+		return "RegisterConsumerCommand"
+	default:
+		glog.Fatalf("Invalid command type: %d", ct)
+		return "Invalid command type"
+	}
+}
 
 type Command struct {
 	// Command type as defined above.
-	CommandType int
+	CommandType CmdType
 	// Append command must be populated if CommandType is Append.
 	AppendCommand AppendMessage
 	// Commit command must be populated if CommandType is Commit.
