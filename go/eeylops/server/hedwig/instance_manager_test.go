@@ -95,6 +95,20 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		}
 	}
 
+	// Remove topics that don't exist.
+	glog.Infof("Removing non existent topics")
+	for ii := numTopics * 2; ii < numTopics*3; ii++ {
+		var req comm.RemoveTopicRequest
+		req.TopicId = int32(numTopics*10 + ii)
+		req.ClusterId = clusterID
+		resp := im.RemoveTopic(context.Background(), &req)
+		err := resp.GetError()
+		ec := ErrorCode(err.GetErrorCode())
+		if ec != KErrTopicNotFound {
+			glog.Fatalf("Failed while removing non-existent topic due to unexpected error: %s", ec.ToString())
+		}
+	}
+
 	// Get topics.
 	for ii := 0; ii < numTopics; ii++ {
 		var req comm.GetTopicRequest

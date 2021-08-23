@@ -464,6 +464,9 @@ func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopi
 		im.logger.Fatalf("Unable to cast to FSM response. Received: %v", tmpResp)
 	}
 	if fsmResp.Error != nil {
+		if fsmResp.Error == storage.ErrTopicNotFound {
+			return makeResponse(KErrTopicNotFound, nil, fmt.Sprintf("Topic: %d does not exist", topicID))
+		}
 		im.logger.Fatalf("Unexpected error from FSM while attempting to remove topic: %d. Error: %s",
 			req.GetTopicId(), fsmResp.Error.Error())
 	}

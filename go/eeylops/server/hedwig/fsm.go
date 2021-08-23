@@ -160,6 +160,7 @@ func (fsm *FSM) removeTopic(cmd *Command, log *raft.Log) *FSMResponse {
 		if err == storage.ErrTopicNotFound {
 			fsm.logger.Warningf("Unable to remove topic: %d as topic does not exist. Log Index: %d, "+
 				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
+			resp.Error = storage.ErrTopicNotFound
 			return &resp
 		} else if err == storage.ErrInvalidRLogIdx {
 			fsm.logger.Warningf("An older replicated log index was attempted to remove topic: %d. "+
