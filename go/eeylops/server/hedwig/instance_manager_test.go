@@ -3,6 +3,7 @@ package hedwig
 import (
 	"context"
 	"eeylops/comm"
+	"eeylops/server/base"
 	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
@@ -162,149 +163,200 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 	// TODO: Check that the removed topics have been deleted from the underlying file system.
 }
 
-//func TestInstanceManager_ConsumerCommit(t *testing.T) {
-//	util.LogTestMarker("TestInstanceManager_ConsumerCommit")
-//	testDirName := util.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
-//	clusterID := "nikhil1nikhil1"
-//	opts := InstanceManagerOpts{
-//		DataDirectory: testDirName,
-//		ClusterID:     clusterID,
-//		PeerAddresses: nil,
-//	}
-//	generateConsumerName := func(id int) string {
-//		return fmt.Sprintf("hello_consumer_%d", id)
-//	}
-//	numConsumers := 15
-//	commitOffset := base.Offset(100)
-//	im := NewInstanceManager(&opts)
-//	// Register consumers for non-existent topics.
-//	for ii := 0; ii < numConsumers; ii++ {
-//		var req comm.RegisterConsumerRequest
-//		req.ConsumerId = generateConsumerName(ii)
-//		req.TopicId = 1
-//		req.PartitionId = 2
-//		err := im.RegisterConsumer(context.Background(), &req)
-//		he, ok := err.(*hedwigError)
-//		if !ok {
-//			glog.Fatalf("Unable to type cast error to hedwigError. Error: %v", err)
-//		}
-//		if he.errorCode != KErrTopicNotFound {
-//			glog.Fatalf("Expected %s, got: %s", KErrTopicNotFound.ToString(), he.errorCode.ToString())
-//		}
-//	}
-//
-//	// Add a topic.
-//	var req comm.CreateTopicRequest
-//	var topic comm.Topic
-//	topic.PartitionIds = []int32{1, 2, 3, 4}
-//	topic.TtlSeconds = 86400 * 7
-//	topic.TopicName = "hello_topic_1"
-//	req.Topic = &topic
-//	err := im.AddTopic(context.Background(), &req)
-//	if err != nil {
-//		glog.Fatalf("Expected no error but got: %s. Unable to add topic", err.Error())
-//	}
-//
-//	// Register consumers for non-existent topics.
-//	for ii := 0; ii < numConsumers; ii++ {
-//		var req comm.RegisterConsumerRequest
-//		req.ConsumerId = generateConsumerName(ii)
-//		req.TopicId = 1
-//		req.PartitionId = 2
-//		err := im.RegisterConsumer(context.Background(), &req)
-//		if err != nil {
-//			glog.Fatalf("Unable to register consumer commit due to err: %s", err.Error())
-//		}
-//	}
-//
-//	// Get last committed offset for all consumers.
-//	for ii := 0; ii < numConsumers; ii++ {
-//		var req comm.LastCommittedRequest
-//		req.ConsumerId = generateConsumerName(ii)
-//		req.TopicId = 1
-//		req.PartitionId = 2
-//		offset, err := im.GetLastCommitted(context.Background(), &req)
-//		if err != nil {
-//			glog.Fatalf("Expected no error but got: %s. Unable to add topic", err.Error())
-//		}
-//		if offset != -1 {
-//			glog.Fatalf("Found an offset: %d even though no offsets were committed", offset)
-//		}
-//	}
-//
-//	// Get last committed offset for non-existent consumers.
-//	for ii := numConsumers; ii < 2*numConsumers; ii++ {
-//		var req comm.LastCommittedRequest
-//		req.ConsumerId = generateConsumerName(ii)
-//		req.TopicId = 1
-//		req.PartitionId = 2
-//		_, err := im.GetLastCommitted(context.Background(), &req)
-//		if err == nil {
-//			glog.Fatalf("Expected ErrConsumerNotRegistered, got: %v", err)
-//		}
-//		meraErr, ok := err.(*hedwigError)
-//		if !ok {
-//			glog.Fatalf("Expected hedwigError, got: %v", err)
-//		}
-//		if meraErr.errorCode != KErrBackendStorage {
-//			glog.Fatalf("Expected backend storage error. Got: %s", meraErr.errorCode.ToString())
-//		}
-//	}
-//
-//	// Commit offsets for consumer.
-//	glog.Infof("Committing offsets for registered consumers")
-//	for ii := 0; ii < numConsumers; ii++ {
-//		var req comm.CommitRequest
-//		req.ConsumerId = generateConsumerName(ii)
-//		req.TopicId = 1
-//		req.PartitionId = 2
-//		req.Offset = int64(commitOffset)
-//		err := im.Commit(context.Background(), &req)
-//		if err != nil {
-//			glog.Fatalf("Unable to commit offset due to err: %s", err.Error())
-//		}
-//	}
-//
-//	// Get last committed offset for all consumers.
-//	glog.Infof("Checking committed offsets")
-//	for ii := 0; ii < numConsumers; ii++ {
-//		var req comm.LastCommittedRequest
-//		req.ConsumerId = generateConsumerName(ii)
-//		req.TopicId = 1
-//		req.PartitionId = 2
-//		offset, err := im.GetLastCommitted(context.Background(), &req)
-//		if err != nil {
-//			glog.Fatalf("Expected no error but got: %s. Unable to add topic", err.Error())
-//		}
-//		if offset != commitOffset {
-//			glog.Fatalf("Found an offset: %d even though no offsets were committed", offset)
-//		}
-//	}
-//
-//	// Commit offsets for non-registered consumers and expect errors.
-//	glog.Infof("Committing offsets for non-registered consumers")
-//	for ii := numConsumers; ii < 2*numConsumers; ii++ {
-//		var req comm.CommitRequest
-//		req.ConsumerId = generateConsumerName(ii)
-//		req.TopicId = 1
-//		req.PartitionId = 2
-//		req.Offset = int64(commitOffset)
-//		err := im.Commit(context.Background(), &req)
-//		if err == nil {
-//			// We still expect no errors since FSM will just paper over it with a warning log!
-//			glog.Fatalf("Unable to commit offset due to err: %s", err.Error())
-//		}
-//		he, ok := err.(*hedwigError)
-//		if !ok {
-//			glog.Fatalf("Unable to type cast error to hedwigError. Error: %v", err)
-//		}
-//		if he.errorCode != KErrSubscriberNotRegistered {
-//			glog.Fatalf("Unexpected error code: %s, expected: %s",
-//				he.errorCode.ToString(), KErrSubscriberNotRegistered.ToString())
-//		}
-//	}
-//}
-//
+func TestInstanceManager_ConsumerCommit(t *testing.T) {
+	util.LogTestMarker("TestInstanceManager_ConsumerCommit")
+	testDirName := util.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
+	clusterID := "nikhil1nikhil1"
+	opts := InstanceManagerOpts{
+		DataDirectory: testDirName,
+		ClusterID:     clusterID,
+		PeerAddresses: nil,
+	}
+	generateConsumerName := func(id int) string {
+		return fmt.Sprintf("hello_consumer_%d", id)
+	}
+	numConsumers := 15
+	commitOffset := base.Offset(100)
+	im := NewInstanceManager(&opts)
+	// Register consumers for non-existent topics.
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.RegisterConsumerRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		resp := im.RegisterConsumer(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrTopicNotFound {
+			glog.Fatalf("Expected %s, got: %s", KErrTopicNotFound.ToString(), ec.ToString())
+		}
+	}
+
+	// Add a topic.
+	var req comm.CreateTopicRequest
+	var topic comm.Topic
+	topic.PartitionIds = []int32{1, 2, 3, 4}
+	topic.TtlSeconds = 86400 * 7
+	topic.TopicName = "hello_topic_1"
+	req.Topic = &topic
+	resp := im.AddTopic(context.Background(), &req)
+	ec := ErrorCode(resp.GetError().GetErrorCode())
+	if ec != KErrNoError {
+		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.ToString())
+	}
+
+	// Register consumers for topics.
+	glog.Infof("Registering consumers")
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.RegisterConsumerRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		resp := im.RegisterConsumer(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrNoError {
+			glog.Fatalf("Unable to register consumer commit due to err: %s", ec.ToString())
+		}
+	}
+
+	// Get last committed offset for all consumers.
+	glog.Infof("Fetching last committed offsets for all registered consumers")
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.LastCommittedRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		resp := im.GetLastCommitted(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrNoError {
+			glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.ToString())
+		}
+		if resp.GetOffset() != -1 {
+			glog.Fatalf("Found an offset: %d even though no offsets were committed", resp.GetOffset())
+		}
+	}
+
+	// Get last committed offset for non-existent topics.
+	glog.Infof("Fetching last committed offsets for non-existent topics")
+	for ii := numConsumers; ii < 2*numConsumers; ii++ {
+		var req comm.LastCommittedRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 2 // Topic does not exist.
+		req.PartitionId = 2
+		resp := im.GetLastCommitted(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrTopicNotFound {
+			glog.Fatalf("Expected %s, got: %v", KErrTopicNotFound.ToString(), ec.ToString())
+		}
+	}
+
+	// Get last committed offset for non-existent partitions.
+	glog.Infof("Fetching last committed offsets for non-existent partitions")
+	for ii := numConsumers; ii < 2*numConsumers; ii++ {
+		var req comm.LastCommittedRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 5 // Partition does not exist.
+		resp := im.GetLastCommitted(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if !(ec == KErrTopicNotFound || ec == KErrPartitionNotFound) {
+			glog.Fatalf("Expected %s or %s, got: %v",
+				KErrTopicNotFound.ToString(), KErrPartitionNotFound.ToString(), ec.ToString())
+		}
+	}
+
+	// Get last committed offset for non-existent consumers.
+	glog.Infof("Fetching last committed offsets for non-existent consumers")
+	for ii := numConsumers; ii < 2*numConsumers; ii++ {
+		var req comm.LastCommittedRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		resp := im.GetLastCommitted(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrSubscriberNotRegistered {
+			glog.Fatalf("Expected %s, got: %v", KErrSubscriberNotRegistered.ToString(), ec.ToString())
+		}
+	}
+
+	// Commit offsets for consumer.
+	glog.Infof("Committing offsets for registered consumers")
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.CommitRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		req.Offset = int64(commitOffset)
+		resp := im.Commit(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrNoError {
+			glog.Fatalf("Unable to commit offset due to err: %s", ec.ToString())
+		}
+	}
+
+	// Commit offsets for registered consumers but non-existent topics.
+	glog.Infof("Committing offsets for registered consumers but non existent topics")
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.CommitRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 2
+		req.PartitionId = 2
+		req.Offset = int64(commitOffset)
+		resp := im.Commit(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrTopicNotFound {
+			glog.Fatalf("Unable to commit offset due to err: %s", ec.ToString())
+		}
+	}
+
+	// Commit offsets for registered consumers but non-existent partitions.
+	glog.Infof("Committing offsets for registered consumers but non existent partitions")
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.CommitRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 5
+		req.Offset = int64(commitOffset)
+		resp := im.Commit(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if !(ec == KErrTopicNotFound || ec == KErrPartitionNotFound) {
+			glog.Fatalf("Unable to commit offset due to err: %s", ec.ToString())
+		}
+	}
+
+	// Get last committed offset for all consumers.
+	glog.Infof("Checking committed offsets")
+	for ii := 0; ii < numConsumers; ii++ {
+		var req comm.LastCommittedRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		resp := im.GetLastCommitted(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrNoError {
+			glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.ToString())
+		}
+		if base.Offset(resp.GetOffset()) != commitOffset {
+			glog.Fatalf("Found an offset: %d even though no offsets were committed", resp.GetOffset())
+		}
+	}
+
+	// Commit offsets for non-registered consumers and expect errors.
+	glog.Infof("Committing offsets for non-registered consumers")
+	for ii := numConsumers; ii < 2*numConsumers; ii++ {
+		var req comm.CommitRequest
+		req.ConsumerId = generateConsumerName(ii)
+		req.TopicId = 1
+		req.PartitionId = 2
+		req.Offset = int64(commitOffset)
+		resp := im.Commit(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrSubscriberNotRegistered {
+			glog.Fatalf("Unexpected error code: %s, expected: %s",
+				ec.ToString(), KErrSubscriberNotRegistered.ToString())
+		}
+	}
+}
+
 //func TestInstanceManager_ProduceConsume(t *testing.T) {
 //	util.LogTestMarker("TestInstanceManager_ProduceConsume")
 //	testDirName := util.CreateTestDir(t, "TestInstanceManager_ProduceConsume")

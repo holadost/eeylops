@@ -10,6 +10,7 @@ import (
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
+	"github.com/golang/glog"
 	"github.com/hashicorp/raft"
 	"path"
 	"time"
@@ -283,21 +284,25 @@ func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) 
 		AppendedAt: time.Time{},
 	}
 	tmpResp := im.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(FSMResponse)
+	if tmpResp == nil {
+		glog.Fatalf("Fatal")
+	}
+	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
 		im.logger.Fatalf("Unable to cast response from FSM to FSMResponse. Received: %v", tmpResp)
 	}
-	if fsmResp.Error == storage.ErrConsumerNotRegistered {
-		return makeResponse(KErrSubscriberNotRegistered, fsmResp.Error,
-			fmt.Sprintf("Given consumer: %s is not registered for topic: %d, partition: %d",
-				req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId()))
-	} else if fsmResp.Error == storage.ErrPartitionNotFound || fsmResp.Error == storage.ErrTopicNotFound {
-		return makeResponse(KErrTopicNotFound, fsmResp.Error,
-			fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetTopicId(), req.GetPartitionId()))
-	} else {
-		im.logger.Fatalf("Unexpected error while committing offset from consumer: %s, topic: %d, "+
-			"partition: %d due to err: %s", req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId(),
-			fsmResp.Error.Error())
+	if fsmResp.Error != nil {
+		if fsmResp.Error == storage.ErrConsumerNotRegistered {
+			return makeResponse(KErrSubscriberNotRegistered, fsmResp.Error,
+				fmt.Sprintf("Given consumer: %s is not registered for topic: %d, partition: %d",
+					req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId()))
+		} else if fsmResp.Error == storage.ErrPartitionNotFound || fsmResp.Error == storage.ErrTopicNotFound {
+			return makeResponse(KErrTopicNotFound, fsmResp.Error,
+				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetTopicId(), req.GetPartitionId()))
+		} else {
+			im.logger.Fatalf("Unexpected error while committing offset from consumer: %s, topic: %d, "+
+				"partition: %d, %v", req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId(), fsmResp.Error)
+		}
 	}
 	return makeResponse(KErrNoError, nil, "")
 }
@@ -583,7 +588,7 @@ func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 	if !ok {
 		im.logger.Fatalf("Unable to cast response to FSM response. Received: %v", tmpResp)
 	}
-	if fsmResp != nil {
+	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicNotFound {
 			return makeResponse(KErrTopicNotFound, nil,
 				fmt.Sprintf("Topic: %d was not found", req.GetTopicId()))
@@ -592,7 +597,8 @@ func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetTopicId(), req.GetPartitionId()))
 		} else {
 			im.logger.Fatalf("Unexpected error from FSM when attempting to register consumer: %s for "+
-				"topic: %d, partition: %d", req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId())
+				"topic: %d, partition: %d. Error: %v", req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId(),
+				fsmResp.Error)
 		}
 	}
 	return makeResponse(KErrNoError, nil, "")

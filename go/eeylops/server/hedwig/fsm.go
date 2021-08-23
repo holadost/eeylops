@@ -237,12 +237,25 @@ func (fsm *FSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 	var resp FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
-
+	tpc, exists := doesTopicExist(cmd.CommitCommand.TopicID, fsm.storageController)
+	if !exists {
+		fsm.logger.VInfof(1, "Topic: %d does not exist. Skipping this command. "+
+			"Log Index: %d, Log Term: %d", cmd.CommitCommand.TopicID, log.Index, log.Term)
+		resp.Error = storage.ErrTopicNotFound
+		return &resp
+	}
+	if !doesPartitionExist(tpc, cmd.CommitCommand.PartitionID) {
+		fsm.logger.VInfof(1, "Topic: %d, Partition: %d does not exist. Skipping this command. "+
+			"Log Index: %d, Log Term: %d", cmd.CommitCommand.TopicID, cmd.CommitCommand.PartitionID,
+			log.Index, log.Term)
+		resp.Error = storage.ErrPartitionNotFound
+		return &resp
+	}
 	cs := fsm.storageController.GetConsumerStore()
 	if err := cs.Commit(cmd.CommitCommand.ConsumerID, cmd.CommitCommand.TopicID,
 		uint(cmd.CommitCommand.PartitionID), cmd.CommitCommand.Offset, int64(log.Index)); err != nil {
 		if err == storage.ErrConsumerNotRegistered {
-			fsm.logger.Warningf("Consumer: %s is not registered for partition: %d, topic: %d. "+
+			fsm.logger.VInfof(1, "Consumer: %s is not registered for partition: %d, topic: %d. "+
 				"Skipping this command. Log Index: %d, Log Term: %d",
 				cmd.CommitCommand.ConsumerID, cmd.CommitCommand.PartitionID, cmd.CommitCommand.TopicID,
 				log.Index, log.Term)
