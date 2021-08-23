@@ -81,17 +81,17 @@ func (im *InstanceManager) initialize(opts *InstanceManagerOpts) {
 func (im *InstanceManager) Produce(ctx context.Context, req *comm.ProduceRequest) *comm.ProduceResponse {
 	makeResponse := func(ec ErrorCode, err error, msg string) *comm.ProduceResponse {
 		var resp comm.ProduceResponse
-		resp.Error = makeErrorProto(KErrInvalidArg, nil, "Invalid topic name")
+		resp.Error = makeErrorProto(ec, err, msg)
 		return &resp
 	}
 
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
-		im.logger.VInfof(1, "Invalid topic ID. Req: %v", topicID)
+		im.logger.VInfof(0, "Invalid topic ID. Req: %v", topicID)
 		return makeResponse(KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if req.GetPartitionId() < 0 {
-		im.logger.VInfof(1, "Invalid partition ID: %d. Req: %v", req.GetPartitionId(), req)
+		im.logger.VInfof(0, "Invalid partition ID: %d. Req: %v", req.GetPartitionId(), req)
 		return makeResponse(KErrInvalidArg, nil, "Invalid partition ID")
 	}
 	// TODO: Go through replication controller.
@@ -123,16 +123,18 @@ func (im *InstanceManager) Produce(ctx context.Context, req *comm.ProduceRequest
 		im.logger.Fatalf("Got an unexpected command type for produce. Expected: %s(%d), Got: %s(%d)",
 			KAppendCommand.ToString(), KAppendCommand, fsmResp.CommandType.ToString(), fsmResp.CommandType)
 	}
-	if fsmResp.Error == storage.ErrPartitionClosed {
-		return makeResponse(KErrTopicNotFound, fsmResp.Error,
-			fmt.Sprintf("Partition: %d is closed. Has topic: %d been deleted?", req.GetPartitionId(),
-				req.GetTopicId()))
-	} else if fsmResp.Error == storage.ErrTopicNotFound || fsmResp.Error == storage.ErrPartitionNotFound {
-		return makeResponse(KErrTopicNotFound, fsmResp.Error,
-			fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetPartitionId(), req.GetTopicId()))
-	} else {
-		im.logger.Fatalf("Hit an unexpected error: %s while attempting to produce entries to "+
-			"topic: %d, partition: %d", fsmResp.Error.Error(), req.GetTopicId(), req.GetPartitionId())
+	if fsmResp.Error != nil {
+		if fsmResp.Error == storage.ErrPartitionClosed {
+			return makeResponse(KErrTopicNotFound, fsmResp.Error,
+				fmt.Sprintf("Partition: %d is closed. Has topic: %d been deleted?", req.GetPartitionId(),
+					req.GetTopicId()))
+		} else if fsmResp.Error == storage.ErrTopicNotFound || fsmResp.Error == storage.ErrPartitionNotFound {
+			return makeResponse(KErrTopicNotFound, fsmResp.Error,
+				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetPartitionId(), req.GetTopicId()))
+		} else {
+			im.logger.Fatalf("Hit an unexpected error: %s while attempting to produce entries to "+
+				"topic: %d, partition: %d", fsmResp.Error.Error(), req.GetTopicId(), req.GetPartitionId())
+		}
 	}
 	return makeResponse(KErrNoError, nil, "")
 }
