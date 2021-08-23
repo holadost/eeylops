@@ -474,14 +474,16 @@ func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicReque
 	makeResponse := func(tpc *base.TopicConfig, ec ErrorCode, err error, msg string) *comm.GetTopicResponse {
 		var resp comm.GetTopicResponse
 		resp.Error = makeErrorProto(ec, err, msg)
-		var topicProto comm.Topic
-		topicProto.TopicId = int32(tpc.ID)
-		topicProto.TopicName = tpc.Name
-		for _, prtID := range tpc.PartitionIDs {
-			topicProto.PartitionIds = append(topicProto.PartitionIds, int32(prtID))
+		if tpc != nil {
+			var topicProto comm.Topic
+			topicProto.TopicId = int32(tpc.ID)
+			topicProto.TopicName = tpc.Name
+			for _, prtID := range tpc.PartitionIDs {
+				topicProto.PartitionIds = append(topicProto.PartitionIds, int32(prtID))
+			}
+			topicProto.TtlSeconds = int32(tpc.TTLSeconds)
+			resp.Topic = &topicProto
 		}
-		topicProto.TtlSeconds = int32(tpc.TTLSeconds)
-		resp.Topic = &topicProto
 		return &resp
 	}
 	// Sanity checks.
