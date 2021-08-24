@@ -48,7 +48,7 @@ func (srv *RPCServer) Run() {
 		glog.Fatalf("Unable to listen on (%s:%d) due to err: %s", *FlagRpcServerHost, *FlagRpcServerPort,
 			err.Error())
 	}
-	glog.Infof("Starting RPC server on host: %s, port: %d", *FlagRpcServerPort, *FlagRpcServerHost)
+	glog.Infof("Starting RPC server on host: %s, port: %d", *FlagRpcServerHost, *FlagRpcServerPort)
 	if err := s.Serve(lis); err != nil {
 		glog.Fatalf("Unable to serve due to err: %s", err.Error())
 	}
