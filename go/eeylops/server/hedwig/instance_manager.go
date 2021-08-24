@@ -248,7 +248,18 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest
 			req.GetConsumerId(), topicID, req.GetPartitionId(), ret.Error.Error())
 		return makeResponse(nil, KErrBackendStorage, err, "Unable to consume messages")
 	}
-	return makeResponse(ret, KErrNoError, nil, "")
+	if !req.GetAutoCommit() || req.GetStartOffset() == 0 {
+		return makeResponse(ret, KErrNoError, nil, "")
+	}
+	// Autocommit the start offset -1 as we can now be sure that the prev message was delivered.
+	cm := CommitMessage{
+		TopicID:     base.TopicIDType(req.GetTopicId()),
+		PartitionID: int(req.GetPartitionId()),
+		Offset:      base.Offset(req.GetStartOffset() - 1), // Commit the offset before the requested one.
+		ConsumerID:  req.GetConsumerId(),
+	}
+	resp := im.internalCommit(ctx, cm)
+	return makeResponse(ret, ErrorCode(resp.GetError().GetErrorCode()), nil, resp.GetError().GetErrorMsg())
 }
 
 func (im *InstanceManager) Publish() {
@@ -260,30 +271,35 @@ func (im *InstanceManager) Subscribe() {
 }
 
 func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) *comm.CommitResponse {
+	// TODO: This must go through the replication controller and we must be the leader.
+	commitCmd := CommitMessage{
+		TopicID:     base.TopicIDType(req.GetTopicId()),
+		PartitionID: int(req.GetPartitionId()),
+		Offset:      base.Offset(req.GetOffset()),
+		ConsumerID:  req.GetConsumerId(),
+	}
+	return im.internalCommit(ctx, commitCmd)
+}
+
+func (im *InstanceManager) internalCommit(ctx context.Context, cm CommitMessage) *comm.CommitResponse {
 	makeResponse := func(ec ErrorCode, err error, msg string) *comm.CommitResponse {
 		var resp comm.CommitResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		return &resp
 	}
-	topicID := base.TopicIDType(req.GetTopicId())
+	topicID := cm.TopicID
 	if topicID == 0 {
-		im.logger.VInfof(1, "Invalid topic name. Req: %v", req)
+		im.logger.VInfof(1, "Invalid topic name. Req: %v", cm)
 		return makeResponse(KErrInvalidArg, nil, "Invalid topic ID")
 	}
-	if req.GetPartitionId() < 0 {
-		im.logger.VInfof(1, "Invalid partition ID: %d. Req: %v", req.GetPartitionId(), req)
+	if cm.PartitionID < 0 {
+		im.logger.VInfof(1, "Invalid partition ID: %d. Req: %v", cm.PartitionID, cm)
 		return makeResponse(KErrInvalidArg, nil, "Invalid partition ID")
 	}
 	// TODO: This must go through the replication controller and we must be the leader.
-	commitCmd := CommitMessage{
-		TopicID:     topicID,
-		PartitionID: int(req.GetPartitionId()),
-		Offset:      base.Offset(req.GetOffset()),
-		ConsumerID:  req.GetConsumerId(),
-	}
 	cmd := Command{
 		CommandType:   KCommitCommand,
-		CommitCommand: commitCmd,
+		CommitCommand: cm,
 	}
 	data := Serialize(&cmd)
 	log := raft.Log{
@@ -306,13 +322,13 @@ func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) 
 		if fsmResp.Error == storage.ErrConsumerNotRegistered {
 			return makeResponse(KErrSubscriberNotRegistered, fsmResp.Error,
 				fmt.Sprintf("Given consumer: %s is not registered for topic: %d, partition: %d",
-					req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId()))
+					cm.ConsumerID, cm.TopicID, cm.PartitionID))
 		} else if fsmResp.Error == storage.ErrPartitionNotFound || fsmResp.Error == storage.ErrTopicNotFound {
 			return makeResponse(KErrTopicNotFound, fsmResp.Error,
-				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetTopicId(), req.GetPartitionId()))
+				fmt.Sprintf("Topic: %d, partition: %d was not found", cm.TopicID, cm.PartitionID))
 		} else {
 			im.logger.Fatalf("Unexpected error while committing offset from consumer: %s, topic: %d, "+
-				"partition: %d, %v", req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId(), fsmResp.Error)
+				"partition: %d, %v", cm.ConsumerID, cm.TopicID, cm.PartitionID, fsmResp.Error)
 		}
 	}
 	return makeResponse(KErrNoError, nil, "")

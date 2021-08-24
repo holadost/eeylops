@@ -431,6 +431,7 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	}
 	consumeNonExistentTopic()
 
+	// Produce and consume from non-existent partitions.
 	produceNonExistentPartition := func() {
 		var values [][]byte
 		for jj := 0; jj < batchSize; jj++ {
