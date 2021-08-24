@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	FLAGrpcServerHost = flag.String("rpc_server_host", "0.0.0.0", "RPC server host name/IP")
-	FLAGrpcServerPort = flag.Int("rpc_server_port", 50051, "RPC server port number")
+	FlagRpcServerHost = flag.String("rpc_server_host", "0.0.0.0", "RPC server host name/IP")
+	FlagRpcServerPort = flag.Int("rpc_server_port", 50051, "RPC server port number")
 )
 
 type RPCServer struct {
@@ -25,16 +25,16 @@ type RPCServer struct {
 func NewRPCServer(host string, port int, instanceMgrMap map[string]*InstanceManager) *RPCServer {
 	rpcServer := new(RPCServer)
 	if len(host) == 0 {
-		if len(*FLAGrpcServerHost) == 0 {
+		if len(*FlagRpcServerHost) == 0 {
 			glog.Fatalf("No host provided for RPC server")
 		}
-		host = *FLAGrpcServerHost
+		host = *FlagRpcServerHost
 	}
 	if port == 0 {
-		if *FLAGrpcServerPort == 0 {
+		if *FlagRpcServerPort == 0 {
 			glog.Fatalf("No port provided for RPC server")
 		}
-		port = *FLAGrpcServerPort
+		port = *FlagRpcServerPort
 	}
 	rpcServer.instanceMgrMap = instanceMgrMap
 	return rpcServer
@@ -43,11 +43,12 @@ func NewRPCServer(host string, port int, instanceMgrMap map[string]*InstanceMana
 func (srv *RPCServer) Run() {
 	s := grpc.NewServer()
 	comm.RegisterEeylopsServiceServer(s, &RPCServer{})
-	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *FLAGrpcServerHost, *FLAGrpcServerPort))
+	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *FlagRpcServerHost, *FlagRpcServerPort))
 	if err != nil {
-		glog.Fatalf("Unable to listen due to err: %s", err.Error())
+		glog.Fatalf("Unable to listen on (%s:%d) due to err: %s", *FlagRpcServerHost, *FlagRpcServerPort,
+			err.Error())
 	}
-	glog.Infof("Starting server")
+	glog.Infof("Starting RPC server on host: %s, port: %d", *FlagRpcServerPort, *FlagRpcServerHost)
 	if err := s.Serve(lis); err != nil {
 		glog.Fatalf("Unable to serve due to err: %s", err.Error())
 	}
@@ -56,8 +57,7 @@ func (srv *RPCServer) Run() {
 func (srv *RPCServer) CreateTopic(ctx context.Context, req *comm.CreateTopicRequest) (*comm.CreateTopicResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.CreateTopicResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.CreateTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.AddTopic(ctx, req)
 	return resp, nil
@@ -66,8 +66,7 @@ func (srv *RPCServer) CreateTopic(ctx context.Context, req *comm.CreateTopicRequ
 func (srv *RPCServer) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) (*comm.RemoveTopicResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.RemoveTopicResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.RemoveTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.RemoveTopic(ctx, req)
 	return resp, nil
@@ -76,8 +75,7 @@ func (srv *RPCServer) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 func (srv *RPCServer) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*comm.GetTopicResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.GetTopicResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.GetTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.GetTopic(ctx, req)
 	return resp, nil
@@ -86,8 +84,7 @@ func (srv *RPCServer) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (
 func (srv *RPCServer) GetAllTopics(ctx context.Context, req *comm.GetAllTopicsRequest) (*comm.GetAllTopicsResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.GetAllTopicsResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.GetAllTopicsResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.GetAllTopics(ctx)
 	return resp, nil
@@ -96,8 +93,7 @@ func (srv *RPCServer) GetAllTopics(ctx context.Context, req *comm.GetAllTopicsRe
 func (srv *RPCServer) Produce(ctx context.Context, req *comm.ProduceRequest) (*comm.ProduceResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.ProduceResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.ProduceResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.Produce(ctx, req)
 	return resp, nil
@@ -106,8 +102,7 @@ func (srv *RPCServer) Produce(ctx context.Context, req *comm.ProduceRequest) (*c
 func (srv *RPCServer) Consume(ctx context.Context, req *comm.ConsumeRequest) (*comm.ConsumeResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.ConsumeResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.ConsumeResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.Consume(ctx, req)
 	return resp, nil
@@ -116,8 +111,7 @@ func (srv *RPCServer) Consume(ctx context.Context, req *comm.ConsumeRequest) (*c
 func (srv *RPCServer) Commit(ctx context.Context, req *comm.CommitRequest) (*comm.CommitResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.CommitResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.CommitResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.Commit(ctx, req)
 	return resp, nil
@@ -126,8 +120,7 @@ func (srv *RPCServer) Commit(ctx context.Context, req *comm.CommitRequest) (*com
 func (srv *RPCServer) GetLastCommitted(ctx context.Context, req *comm.LastCommittedRequest) (*comm.LastCommittedResponse, error) {
 	im, exists := srv.instanceMgrMap[req.GetClusterId()]
 	if !exists {
-		resp := comm.LastCommittedResponse{Error: srv.createInvalidClusterErrorProto()}
-		return &resp, nil
+		return &comm.LastCommittedResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.GetLastCommitted(ctx, req)
 	return resp, nil

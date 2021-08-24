@@ -43,7 +43,8 @@ func (nm *NodeManager) initialize() {
 }
 
 func (nm *NodeManager) Run() {
-	glog.Infof("Starting node manager")
-	nm.rpcServer.Run()
+	// Start RPC server.
+	go nm.rpcServer.Run()
+	// Block indefinitely.
 	select {}
 }
