@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	FLAGclusterID = flag.String("cluster_id", "", "Cluster ID")
+	FlagClusterID = flag.String("cluster_id", "", "Cluster ID")
 )
 
 type NodeManager struct {
@@ -31,10 +31,10 @@ func (nm *NodeManager) initialize() {
 	// For now, we are going to have only one instance.
 	var iopts InstanceManagerOpts
 	iopts.DataDirectory = dataDir
-	if len(*FLAGclusterID) == 0 {
+	if len(*FlagClusterID) == 0 {
 		glog.Fatalf("Cluster ID has not been provided")
 	}
-	iopts.ClusterID = *FLAGclusterID
+	iopts.ClusterID = *FlagClusterID
 	iopts.PeerAddresses = nil
 	im := NewInstanceManager(&iopts)
 	nm.instanceMgrMap = make(map[string]*InstanceManager)
