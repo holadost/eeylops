@@ -42,7 +42,7 @@ func NewRPCServer(host string, port int, instanceMgrMap map[string]*InstanceMana
 
 func (srv *RPCServer) Run() {
 	s := grpc.NewServer()
-	comm.RegisterEeylopsServiceServer(s, &RPCServer{})
+	comm.RegisterEeylopsServiceServer(s, srv)
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", *FlagRpcServerHost, *FlagRpcServerPort))
 	if err != nil {
 		glog.Fatalf("Unable to listen on (%s:%d) due to err: %s", *FlagRpcServerHost, *FlagRpcServerPort,
@@ -52,6 +52,7 @@ func (srv *RPCServer) Run() {
 	if err := s.Serve(lis); err != nil {
 		glog.Fatalf("Unable to serve due to err: %s", err.Error())
 	}
+	glog.Infof("RPC server has finished!")
 }
 
 func (srv *RPCServer) CreateTopic(ctx context.Context, req *comm.CreateTopicRequest) (*comm.CreateTopicResponse, error) {
