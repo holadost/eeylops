@@ -392,6 +392,83 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 		glog.Fatalf("Error while fetching topic: %s. Error: %s", topicName, ec.ToString())
 	}
 	glog.Infof("Received topic: %s, ID: %d", gresp.GetTopic().GetTopicName(), gresp.GetTopic().GetTopicId())
+
+	// Produce and consume from non-existent topics and partitions.
+	produceNonExistentTopic := func() {
+		var values [][]byte
+		for jj := 0; jj < batchSize; jj++ {
+			values = append(values, []byte(fmt.Sprintf("value-%d", (jj*batchSize)+jj)))
+		}
+		var req comm.ProduceRequest
+		req.ClusterId = clusterID
+		req.TopicId = 100
+		req.PartitionId = 2
+		req.Values = values
+		resp := im.Produce(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrTopicNotFound {
+			glog.Fatalf("Got error while producing. Expected: %s, Got: %s. Msg: %s",
+				KErrTopicNotFound.ToString(), ec.ToString(), resp.GetError().GetErrorMsg())
+		}
+	}
+	produceNonExistentTopic()
+	consumeNonExistentTopic := func() {
+		var req comm.ConsumeRequest
+		req.ClusterId = clusterID
+		req.TopicId = gresp.GetTopic().GetTopicId() + 1000
+		req.PartitionId = 1
+		req.StartOffset = 0
+		req.ConsumerId = "nikhil"
+		req.BatchSize = int32(batchSize)
+		req.AutoCommit = false
+		req.ResumeFromLastCommittedOffset = false
+		resp := im.Consume(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrTopicNotFound {
+			glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
+				KErrTopicNotFound.ToString(), ec.ToString())
+		}
+	}
+	consumeNonExistentTopic()
+
+	produceNonExistentPartition := func() {
+		var values [][]byte
+		for jj := 0; jj < batchSize; jj++ {
+			values = append(values, []byte(fmt.Sprintf("value-%d", (jj*batchSize)+jj)))
+		}
+		var req comm.ProduceRequest
+		req.ClusterId = clusterID
+		req.TopicId = gresp.GetTopic().GetTopicId()
+		req.PartitionId = 100
+		req.Values = values
+		resp := im.Produce(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrPartitionNotFound {
+			glog.Fatalf("Got unexpected error while producing. Expected: %s, Got: %s. Msg: %s",
+				KErrPartitionNotFound.ToString(), ec.ToString(), resp.GetError().GetErrorMsg())
+		}
+	}
+	produceNonExistentPartition()
+	consumeNonExistentPartition := func() {
+		var req comm.ConsumeRequest
+		req.ClusterId = clusterID
+		req.TopicId = gresp.GetTopic().GetTopicId()
+		req.PartitionId = 100
+		req.StartOffset = 0
+		req.ConsumerId = "nikhil"
+		req.BatchSize = int32(batchSize)
+		req.AutoCommit = false
+		req.ResumeFromLastCommittedOffset = false
+		resp := im.Consume(context.Background(), &req)
+		ec := ErrorCode(resp.GetError().GetErrorCode())
+		if ec != KErrPartitionNotFound {
+			glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
+				KErrPartitionNotFound.ToString(), ec.ToString())
+		}
+	}
+	consumeNonExistentPartition()
+
+	// Produce and consume values.
 	producersDone := make(chan struct{}, len(topic.PartitionIds))
 	for _, pid := range partIDs {
 		go func(prtID int32) {

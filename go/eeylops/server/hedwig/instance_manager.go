@@ -124,12 +124,16 @@ func (im *InstanceManager) Produce(ctx context.Context, req *comm.ProduceRequest
 			KAppendCommand.ToString(), KAppendCommand, fsmResp.CommandType.ToString(), fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
+		im.logger.Infof("Got error: %s", fsmResp.Error.Error())
 		if fsmResp.Error == storage.ErrPartitionClosed {
 			return makeResponse(KErrTopicNotFound, fsmResp.Error,
 				fmt.Sprintf("Partition: %d is closed. Has topic: %d been deleted?", req.GetPartitionId(),
 					req.GetTopicId()))
-		} else if fsmResp.Error == storage.ErrTopicNotFound || fsmResp.Error == storage.ErrPartitionNotFound {
+		} else if fsmResp.Error == storage.ErrTopicNotFound {
 			return makeResponse(KErrTopicNotFound, fsmResp.Error,
+				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetPartitionId(), req.GetTopicId()))
+		} else if fsmResp.Error == storage.ErrPartitionNotFound {
+			return makeResponse(KErrPartitionNotFound, fsmResp.Error,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetPartitionId(), req.GetTopicId()))
 		} else {
 			im.logger.Fatalf("Hit an unexpected error: %s while attempting to produce entries to "+
@@ -182,10 +186,15 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest
 	// Fetch partition.
 	prt, err := im.storageController.GetPartition(topicID, int(req.GetPartitionId()))
 	if err != nil {
-		if err == storage.ErrPartitionNotFound || err == storage.ErrTopicNotFound {
+		if err == storage.ErrTopicNotFound {
 			im.logger.VInfof(1, "Received request for topic: %d, partition: %d which does not exist",
 				req.GetTopicId(), req.GetPartitionId())
 			return makeResponse(nil, KErrTopicNotFound, err,
+				fmt.Sprintf("Unable to find topic:partition: %d: %d", req.GetTopicId(), req.GetPartitionId()))
+		} else if err == storage.ErrPartitionNotFound {
+			im.logger.VInfof(1, "Received request for topic: %d, partition: %d which does not exist",
+				req.GetTopicId(), req.GetPartitionId())
+			return makeResponse(nil, KErrPartitionNotFound, err,
 				fmt.Sprintf("Unable to find topic:partition: %d: %d", req.GetTopicId(), req.GetPartitionId()))
 		}
 		im.logger.Errorf("Unable to get partition: %d, topic: %d due to err: %s",

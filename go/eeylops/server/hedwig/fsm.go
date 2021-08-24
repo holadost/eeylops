@@ -78,6 +78,9 @@ func (fsm *FSM) append(cmd *Command, log *raft.Log) *FSMResponse {
 		if err == storage.ErrPartitionNotFound {
 			resp.Error = err
 			return &resp
+		} else if err == storage.ErrTopicNotFound {
+			resp.Error = err
+			return &resp
 		} else {
 			fsm.logger.Fatalf("Unable to get partition: %d, topic ID: %d due to err: %s",
 				cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, err.Error())
