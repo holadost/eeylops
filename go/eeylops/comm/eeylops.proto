@@ -1,11 +1,21 @@
-
 syntax = "proto3";
 
 package comm;
 
 // Base error returned with every RPC response.
 message Error {
-  int32 error_code = 1;
+  enum ErrorCodes {
+    KNoError = 0;
+    KErrInvalidArg = 1;
+    KErrNotLeader = 2;
+    KErrBackend = 3;
+    KErrReplication = 4;
+    KErrTopicNotFound = 5;
+    KErrTopicExists = 6;
+    KErrPartitionNotFound = 7;
+    KErrConsumerNotRegistered = 8;
+  }
+  ErrorCodes error_code = 1;
   string error_msg = 2;
   int32 leader_id = 3;
 }

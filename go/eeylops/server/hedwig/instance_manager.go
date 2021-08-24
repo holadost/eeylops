@@ -79,7 +79,7 @@ func (im *InstanceManager) initialize(opts *InstanceManagerOpts) {
 }
 
 func (im *InstanceManager) Produce(ctx context.Context, req *comm.ProduceRequest) *comm.ProduceResponse {
-	makeResponse := func(ec ErrorCode, err error, msg string) *comm.ProduceResponse {
+	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.ProduceResponse {
 		var resp comm.ProduceResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		return &resp
@@ -88,11 +88,11 @@ func (im *InstanceManager) Produce(ctx context.Context, req *comm.ProduceRequest
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
 		im.logger.VInfof(0, "Invalid topic ID. Req: %v", topicID)
-		return makeResponse(KErrInvalidArg, nil, "Invalid topic name")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if req.GetPartitionId() < 0 {
 		im.logger.VInfof(0, "Invalid partition ID: %d. Req: %v", req.GetPartitionId(), req)
-		return makeResponse(KErrInvalidArg, nil, "Invalid partition ID")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid partition ID")
 	}
 	// TODO: Go through replication controller.
 	appendCmd := AppendMessage{
@@ -126,25 +126,25 @@ func (im *InstanceManager) Produce(ctx context.Context, req *comm.ProduceRequest
 	if fsmResp.Error != nil {
 		im.logger.Infof("Got error: %s", fsmResp.Error.Error())
 		if fsmResp.Error == storage.ErrPartitionClosed {
-			return makeResponse(KErrTopicNotFound, fsmResp.Error,
+			return makeResponse(comm.Error_KErrTopicNotFound, fsmResp.Error,
 				fmt.Sprintf("Partition: %d is closed. Has topic: %d been deleted?", req.GetPartitionId(),
 					req.GetTopicId()))
 		} else if fsmResp.Error == storage.ErrTopicNotFound {
-			return makeResponse(KErrTopicNotFound, fsmResp.Error,
+			return makeResponse(comm.Error_KErrTopicNotFound, fsmResp.Error,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetPartitionId(), req.GetTopicId()))
 		} else if fsmResp.Error == storage.ErrPartitionNotFound {
-			return makeResponse(KErrPartitionNotFound, fsmResp.Error,
+			return makeResponse(comm.Error_KErrPartitionNotFound, fsmResp.Error,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetPartitionId(), req.GetTopicId()))
 		} else {
 			im.logger.Fatalf("Hit an unexpected error: %s while attempting to produce entries to "+
 				"topic: %d, partition: %d", fsmResp.Error.Error(), req.GetTopicId(), req.GetPartitionId())
 		}
 	}
-	return makeResponse(KErrNoError, nil, "")
+	return makeResponse(comm.Error_KNoError, nil, "")
 }
 
 func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest) *comm.ConsumeResponse {
-	makeResponse := func(ret *sbase.ScanEntriesRet, ec ErrorCode, err error, msg string) *comm.ConsumeResponse {
+	makeResponse := func(ret *sbase.ScanEntriesRet, ec comm.Error_ErrorCodes, err error, msg string) *comm.ConsumeResponse {
 		var resp comm.ConsumeResponse
 		ep := makeErrorProto(ec, err, msg)
 		resp.Error = ep
@@ -164,22 +164,22 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest
 	// Sanity checks.
 	if len(req.GetConsumerId()) == 0 {
 		im.logger.VInfof(1, "Invalid argument. Subscriber id is not provided")
-		return makeResponse(nil, KErrInvalidArg, nil, "Subscriber ID is invalid")
+		return makeResponse(nil, comm.Error_KErrInvalidArg, nil, "Subscriber ID is invalid")
 	}
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
 		im.logger.VInfof(1, "Invalid argument. Topic name is not provided")
-		return makeResponse(nil, KErrInvalidArg, nil, "Topic name is invalid")
+		return makeResponse(nil, comm.Error_KErrInvalidArg, nil, "Topic name is invalid")
 	}
 	if req.GetPartitionId() < 0 {
 		im.logger.VInfof(1, "Invalid argument. Partition ID must be >= 0. Got: %d", req.GetPartitionId())
-		return makeResponse(nil, KErrInvalidArg, nil, "Partition ID is invalid")
+		return makeResponse(nil, comm.Error_KErrInvalidArg, nil, "Partition ID is invalid")
 	}
 	// Either start offset, start timestamp or resume from last committed offset must be provided.
 	if req.GetStartOffset() < 0 && req.GetStartTimestamp() <= 0 && !req.GetResumeFromLastCommittedOffset() {
 		im.logger.VInfof(1,
 			"Either StartOffset, StartTimestamp or ResumeFromLastCommittedOffset must be provided")
-		return makeResponse(nil, KErrInvalidArg, nil,
+		return makeResponse(nil, comm.Error_KErrInvalidArg, nil,
 			"Either StartOffset, StartTimestamp or ResumeFromLastCommittedOffset must be provided")
 	}
 
@@ -189,17 +189,17 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest
 		if err == storage.ErrTopicNotFound {
 			im.logger.VInfof(1, "Received request for topic: %d, partition: %d which does not exist",
 				req.GetTopicId(), req.GetPartitionId())
-			return makeResponse(nil, KErrTopicNotFound, err,
+			return makeResponse(nil, comm.Error_KErrTopicNotFound, err,
 				fmt.Sprintf("Unable to find topic:partition: %d: %d", req.GetTopicId(), req.GetPartitionId()))
 		} else if err == storage.ErrPartitionNotFound {
 			im.logger.VInfof(1, "Received request for topic: %d, partition: %d which does not exist",
 				req.GetTopicId(), req.GetPartitionId())
-			return makeResponse(nil, KErrPartitionNotFound, err,
+			return makeResponse(nil, comm.Error_KErrPartitionNotFound, err,
 				fmt.Sprintf("Unable to find topic:partition: %d: %d", req.GetTopicId(), req.GetPartitionId()))
 		}
 		im.logger.Errorf("Unable to get partition: %d, topic: %d due to err: %s",
 			req.GetPartitionId(), topicID, err.Error())
-		return makeResponse(nil, KErrBackendStorage, err, "Unable to find partition")
+		return makeResponse(nil, comm.Error_KErrBackend, err, "Unable to find partition")
 	}
 	batchSize := uint64(1)
 	if req.GetBatchSize() > 0 {
@@ -226,18 +226,18 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest
 				im.logger.Warningf("Received request to resume from last committed offset but did not find "+
 					"the subscriber: %s registered for topic ID: %d, Partition ID: %d due to err: %s",
 					req.GetConsumerId(), topicID, req.GetPartitionId(), err.Error())
-				return makeResponse(nil, KErrInvalidArg, err, "Unable to determine last committed offset")
+				return makeResponse(nil, comm.Error_KErrInvalidArg, err, "Unable to determine last committed offset")
 			}
 			im.logger.Errorf("Unable to determine last committed offset for subscriber: %s, topic: %d, "+
 				"partition: %d due to err: %s", req.GetConsumerId(), topicID, req.GetPartitionId(), err.Error())
-			return makeResponse(nil, KErrBackendStorage, err, "Unable to determine last committed offset")
+			return makeResponse(nil, comm.Error_KErrBackend, err, "Unable to determine last committed offset")
 		}
 		scanArg.StartOffset = off
 	} else {
 		im.logger.VInfof(1, "Received request that does not specify startOffset, start timestamp or resume "+
 			"from last committed for topic: %d, partition: %d, consumer: %s", req.GetTopicId(), req.GetPartitionId(),
 			req.GetConsumerId())
-		return makeResponse(nil, KErrInvalidArg, nil,
+		return makeResponse(nil, comm.Error_KErrInvalidArg, nil,
 			"Either start offset, start timestamp or resume from last committed must be set")
 	}
 
@@ -246,10 +246,10 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest
 	if ret.Error != nil {
 		im.logger.Errorf("Scan failed for subscriber: %s, topic: %d, partition: %d due to err: %s",
 			req.GetConsumerId(), topicID, req.GetPartitionId(), ret.Error.Error())
-		return makeResponse(nil, KErrBackendStorage, err, "Unable to consume messages")
+		return makeResponse(nil, comm.Error_KErrBackend, err, "Unable to consume messages")
 	}
 	if !req.GetAutoCommit() || req.GetStartOffset() == 0 {
-		return makeResponse(ret, KErrNoError, nil, "")
+		return makeResponse(ret, comm.Error_KNoError, nil, "")
 	}
 	// Autocommit the start offset -1 as we can now be sure that the prev message was delivered.
 	cm := CommitMessage{
@@ -259,7 +259,7 @@ func (im *InstanceManager) Consume(ctx context.Context, req *comm.ConsumeRequest
 		ConsumerID:  req.GetConsumerId(),
 	}
 	resp := im.internalCommit(ctx, cm)
-	return makeResponse(ret, ErrorCode(resp.GetError().GetErrorCode()), nil, resp.GetError().GetErrorMsg())
+	return makeResponse(ret, resp.GetError().GetErrorCode(), nil, resp.GetError().GetErrorMsg())
 }
 
 func (im *InstanceManager) Publish() {
@@ -282,7 +282,7 @@ func (im *InstanceManager) Commit(ctx context.Context, req *comm.CommitRequest) 
 }
 
 func (im *InstanceManager) internalCommit(ctx context.Context, cm CommitMessage) *comm.CommitResponse {
-	makeResponse := func(ec ErrorCode, err error, msg string) *comm.CommitResponse {
+	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.CommitResponse {
 		var resp comm.CommitResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		return &resp
@@ -290,11 +290,11 @@ func (im *InstanceManager) internalCommit(ctx context.Context, cm CommitMessage)
 	topicID := cm.TopicID
 	if topicID == 0 {
 		im.logger.VInfof(1, "Invalid topic name. Req: %v", cm)
-		return makeResponse(KErrInvalidArg, nil, "Invalid topic ID")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic ID")
 	}
 	if cm.PartitionID < 0 {
 		im.logger.VInfof(1, "Invalid partition ID: %d. Req: %v", cm.PartitionID, cm)
-		return makeResponse(KErrInvalidArg, nil, "Invalid partition ID")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid partition ID")
 	}
 	// TODO: This must go through the replication controller and we must be the leader.
 	cmd := Command{
@@ -320,23 +320,23 @@ func (im *InstanceManager) internalCommit(ctx context.Context, cm CommitMessage)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrConsumerNotRegistered {
-			return makeResponse(KErrSubscriberNotRegistered, fsmResp.Error,
+			return makeResponse(comm.Error_KErrConsumerNotRegistered, fsmResp.Error,
 				fmt.Sprintf("Given consumer: %s is not registered for topic: %d, partition: %d",
 					cm.ConsumerID, cm.TopicID, cm.PartitionID))
 		} else if fsmResp.Error == storage.ErrPartitionNotFound || fsmResp.Error == storage.ErrTopicNotFound {
-			return makeResponse(KErrTopicNotFound, fsmResp.Error,
+			return makeResponse(comm.Error_KErrTopicNotFound, fsmResp.Error,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", cm.TopicID, cm.PartitionID))
 		} else {
 			im.logger.Fatalf("Unexpected error while committing offset from consumer: %s, topic: %d, "+
 				"partition: %d, %v", cm.ConsumerID, cm.TopicID, cm.PartitionID, fsmResp.Error)
 		}
 	}
-	return makeResponse(KErrNoError, nil, "")
+	return makeResponse(comm.Error_KNoError, nil, "")
 }
 
 func (im *InstanceManager) GetLastCommitted(ctx context.Context,
 	req *comm.LastCommittedRequest) *comm.LastCommittedResponse {
-	makeResponse := func(offset base.Offset, ec ErrorCode, err error, msg string) *comm.LastCommittedResponse {
+	makeResponse := func(offset base.Offset, ec comm.Error_ErrorCodes, err error, msg string) *comm.LastCommittedResponse {
 		var resp comm.LastCommittedResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		resp.Offset = int64(offset)
@@ -345,16 +345,16 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context,
 	// Sanity checks.
 	if len(req.GetConsumerId()) == 0 {
 		im.logger.VInfof(1, "Invalid argument. Subscriber ID has not been defined")
-		return makeResponse(-1, KErrInvalidArg, nil, "Invalid subscriber ID")
+		return makeResponse(-1, comm.Error_KErrInvalidArg, nil, "Invalid subscriber ID")
 	}
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
 		im.logger.VInfof(1, "Invalid argument. Topic name is not defined")
-		return makeResponse(-1, KErrInvalidArg, nil, "Invalid topic")
+		return makeResponse(-1, comm.Error_KErrInvalidArg, nil, "Invalid topic")
 	}
 	if req.GetPartitionId() < 0 {
 		im.logger.VInfof(1, "Invalid partition ID: %d. Expected >= 0", req.GetPartitionId())
-		return makeResponse(-1, KErrInvalidArg, nil, "Invalid partition")
+		return makeResponse(-1, comm.Error_KErrInvalidArg, nil, "Invalid partition")
 	}
 
 	// Sync if required.
@@ -364,7 +364,7 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context,
 			im.logger.Errorf("Unable to doSyncOp before get last committed for consumer: %s, topic ID: %d, "+
 				"partition ID: %d due to err: %s", req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId(),
 				err.Error())
-			return makeResponse(-1, KErrReplication, err,
+			return makeResponse(-1, comm.Error_KErrReplication, err,
 				"Unable to sync before getting last committed offset")
 		}
 	}
@@ -372,11 +372,11 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context,
 	// Check if topic and partition exist.
 	tpc, ok := doesTopicExist(topicID, im.storageController)
 	if !ok {
-		return makeResponse(-1, KErrTopicNotFound, nil,
+		return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
 			fmt.Sprintf("Topic: %d does not found", topicID))
 	}
 	if !doesPartitionExist(tpc, int(req.GetPartitionId())) {
-		return makeResponse(-1, KErrTopicNotFound, nil,
+		return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
 			fmt.Sprintf("Topic: %d, Partition: %d not found", topicID, req.GetPartitionId()))
 	}
 
@@ -387,20 +387,20 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context,
 		if err == storage.ErrConsumerNotRegistered {
 			im.logger.VInfof(1, "Unable to fetch last committed offset for subscriber: %s, topic: %d, "+
 				"partition: %d due to err: %s", req.GetConsumerId(), topicID, req.GetPartitionId(), err.Error())
-			return makeResponse(-1, KErrSubscriberNotRegistered, nil,
+			return makeResponse(-1, comm.Error_KErrConsumerNotRegistered, nil,
 				fmt.Sprintf("Consumer: %s is not registered for topic: %d, partition: %d",
 					req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId()))
 		} else {
 			im.logger.Errorf("Unable to fetch last committed offset for subscriber: %s, topic: %d, "+
 				"partition: %d due to err: %s", req.GetConsumerId(), topicID, req.GetPartitionId(), err.Error())
-			return makeResponse(-1, KErrBackendStorage, err, "Backend storage error")
+			return makeResponse(-1, comm.Error_KErrBackend, err, "Backend storage error")
 		}
 	}
-	return makeResponse(offset, KErrNoError, nil, "")
+	return makeResponse(offset, comm.Error_KNoError, nil, "")
 }
 
 func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {
-	makeResponse := func(ec ErrorCode, err error, msg string) *comm.CreateTopicResponse {
+	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.CreateTopicResponse {
 		var resp comm.CreateTopicResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		return &resp
@@ -409,11 +409,11 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 	topic := req.GetTopic()
 	if len(topic.GetTopicName()) == 0 {
 		im.logger.Errorf("Invalid topic name. Req: %v", req)
-		return makeResponse(KErrInvalidArg, nil, "Invalid topic name")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if len(topic.GetPartitionIds()) == 0 {
 		im.logger.Errorf("No partitions provided while creating topic")
-		return makeResponse(KErrInvalidArg, nil, "Invalid partition ID")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid partition ID")
 	}
 	// TODO: This must go through the replication controller and we must be the leader.
 	// Populate arg, command and log.
@@ -451,18 +451,18 @@ func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRe
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicExists {
-			return makeResponse(KErrTopicExists, nil,
+			return makeResponse(comm.Error_KErrTopicExists, nil,
 				fmt.Sprintf("Topic: %s already exists", req.GetTopic().GetTopicName()))
 		}
 		im.logger.Fatalf("Unexpected error while creating topic: %s", fsmResp.Error.Error())
 	}
 	im.lastTopicIDAssigned++
-	return makeResponse(KErrNoError, nil, "")
+	return makeResponse(comm.Error_KNoError, nil, "")
 }
 
 func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) *comm.RemoveTopicResponse {
 	// Sanity checks.
-	makeResponse := func(ec ErrorCode, err error, msg string) *comm.RemoveTopicResponse {
+	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RemoveTopicResponse {
 		var resp comm.RemoveTopicResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		return &resp
@@ -470,7 +470,7 @@ func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopi
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
 		im.logger.VInfof(1, "Invalid topic name. Req: %v", req)
-		return makeResponse(KErrInvalidArg, nil, "Invalid topic name")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
 	}
 
 	// TODO: This must go through the replication controller and we must be the leader.
@@ -497,16 +497,16 @@ func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopi
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicNotFound {
-			return makeResponse(KErrTopicNotFound, nil, fmt.Sprintf("Topic: %d does not exist", topicID))
+			return makeResponse(comm.Error_KErrTopicNotFound, nil, fmt.Sprintf("Topic: %d does not exist", topicID))
 		}
 		im.logger.Fatalf("Unexpected error from FSM while attempting to remove topic: %d. Error: %s",
 			req.GetTopicId(), fsmResp.Error.Error())
 	}
-	return makeResponse(KErrNoError, nil, "")
+	return makeResponse(comm.Error_KNoError, nil, "")
 }
 
 func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicRequest) *comm.GetTopicResponse {
-	makeResponse := func(tpc *base.TopicConfig, ec ErrorCode, err error, msg string) *comm.GetTopicResponse {
+	makeResponse := func(tpc *base.TopicConfig, ec comm.Error_ErrorCodes, err error, msg string) *comm.GetTopicResponse {
 		var resp comm.GetTopicResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		if tpc != nil {
@@ -524,7 +524,7 @@ func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicReque
 	// Sanity checks.
 	if len(req.GetTopicName()) == 0 {
 		im.logger.Errorf("Invalid argument. Topic name not provided")
-		return makeResponse(nil, KErrInvalidArg, nil, "Invalid topic name")
+		return makeResponse(nil, comm.Error_KErrInvalidArg, nil, "Invalid topic name")
 	}
 
 	// Sync if required. Do this only if we are the leader!!
@@ -532,7 +532,7 @@ func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicReque
 		err := im.doSyncOp()
 		if err != nil {
 			im.logger.Errorf("Unable to doSyncOp before get topic: %s due to err: %s", req.GetTopicName(), err.Error())
-			return makeResponse(nil, KErrReplication, err, "Unable to doSyncOp before getting topic")
+			return makeResponse(nil, comm.Error_KErrReplication, err, "Unable to doSyncOp before getting topic")
 		}
 	}
 
@@ -540,20 +540,20 @@ func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicReque
 	topic, err := im.storageController.GetTopicByName(req.GetTopicName())
 	if err != nil {
 		if err == storage.ErrTopicNotFound {
-			return makeResponse(nil, KErrTopicNotFound, err,
+			return makeResponse(nil, comm.Error_KErrTopicNotFound, err,
 				fmt.Sprintf("Topic: %s does not exist", req.GetTopicName()))
 		}
 		im.logger.Errorf("Unable to get topic: %s due to err: %s", req.GetTopicName(), err.Error())
-		return makeResponse(nil, KErrBackendStorage, err, "Unable to fetch topic")
+		return makeResponse(nil, comm.Error_KErrBackend, err, "Unable to fetch topic")
 	}
-	return makeResponse(&topic, KErrNoError, nil, "")
+	return makeResponse(&topic, comm.Error_KNoError, nil, "")
 }
 
 func (im *InstanceManager) GetAllTopics(ctx context.Context) *comm.GetAllTopicsResponse {
 	// TODO: Only if we are the leader.
 	topics := im.storageController.GetAllTopics()
 	var resp comm.GetAllTopicsResponse
-	resp.Error = makeErrorProto(KErrNoError, nil, "")
+	resp.Error = makeErrorProto(comm.Error_KNoError, nil, "")
 	for _, tpc := range topics {
 		var topicProto comm.Topic
 		topicProto.TopicId = int32(tpc.ID)
@@ -569,7 +569,7 @@ func (im *InstanceManager) GetAllTopics(ctx context.Context) *comm.GetAllTopicsR
 
 func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 	req *comm.RegisterConsumerRequest) *comm.RegisterConsumerResponse {
-	makeResponse := func(ec ErrorCode, err error, msg string) *comm.RegisterConsumerResponse {
+	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RegisterConsumerResponse {
 		var resp comm.RegisterConsumerResponse
 		resp.Error = makeErrorProto(ec, err, msg)
 		return &resp
@@ -577,16 +577,16 @@ func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 	// Sanity checks.
 	if len(req.GetConsumerId()) == 0 {
 		im.logger.VInfof(1, "Invalid argument. Subscriber ID must be provided")
-		return makeResponse(KErrInvalidArg, nil, "Invalid subscriber ID")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid subscriber ID")
 	}
 	topicID := base.TopicIDType(req.GetTopicId())
 	if topicID == 0 {
 		im.logger.VInfof(1, "Invalid argument. Topic name must be provided")
-		return makeResponse(KErrInvalidArg, nil, "Invalid topic name")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
 	}
 	if req.GetPartitionId() <= 0 {
 		im.logger.VInfof(1, "Invalid argument. Subscriber ID must be provided")
-		return makeResponse(KErrInvalidArg, nil, "Invalid partition ID")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid partition ID")
 	}
 
 	// Populate command and log.
@@ -617,10 +617,10 @@ func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicNotFound {
-			return makeResponse(KErrTopicNotFound, nil,
+			return makeResponse(comm.Error_KErrTopicNotFound, nil,
 				fmt.Sprintf("Topic: %d was not found", req.GetTopicId()))
 		} else if fsmResp.Error == storage.ErrPartitionNotFound {
-			return makeResponse(KErrTopicNotFound, nil,
+			return makeResponse(comm.Error_KErrTopicNotFound, nil,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetTopicId(), req.GetPartitionId()))
 		} else {
 			im.logger.Fatalf("Unexpected error from FSM when attempting to register consumer: %s for "+
@@ -628,7 +628,7 @@ func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 				fsmResp.Error)
 		}
 	}
-	return makeResponse(KErrNoError, nil, "")
+	return makeResponse(comm.Error_KNoError, nil, "")
 }
 
 func (im *InstanceManager) doSyncOp() error {

@@ -36,7 +36,7 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		req.Topic = &topic
 		resp := im.AddTopic(context.Background(), &req)
 		err := resp.GetError()
-		if ErrorCode(err.GetErrorCode()) != KErrNoError {
+		if err.GetErrorCode() != comm.Error_KNoError {
 			glog.Fatalf("Expected no error but got: %v. Unable to add topic", err)
 		}
 	}
@@ -49,7 +49,7 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		req.TopicName = generateTopicName(ii)
 		resp := im.GetTopic(context.Background(), &req)
 		err := resp.GetError()
-		if ErrorCode(err.GetErrorCode()) != KErrNoError {
+		if err.GetErrorCode() != comm.Error_KNoError {
 			glog.Fatalf("Error while fetching topic: %s", generateTopicName(ii))
 		}
 		topic := resp.GetTopic()
@@ -67,7 +67,7 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		req.Topic = &topic
 		resp := im.AddTopic(context.Background(), &req)
 		err := resp.GetError()
-		if ErrorCode(err.GetErrorCode()) != KErrTopicExists {
+		if err.GetErrorCode() != comm.Error_KErrTopicExists {
 			glog.Fatalf("Unexpected error while adding same topic: %s, %v", generateTopicName(ii), err)
 		}
 	}
@@ -75,7 +75,7 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 	// Get all topics.
 	resp := im.GetAllTopics(context.Background())
 	allTopicsErr := resp.GetError()
-	if ErrorCode(allTopicsErr.GetErrorCode()) != KErrNoError {
+	if allTopicsErr.GetErrorCode() != comm.Error_KNoError {
 		glog.Fatalf("Unexpected error while getting all topics: %v", allTopicsErr)
 	}
 	if len(resp.GetTopics()) != numTopics {
@@ -91,7 +91,7 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		req.ClusterId = clusterID
 		resp := im.RemoveTopic(context.Background(), &req)
 		err := resp.GetError()
-		if ErrorCode(err.GetErrorCode()) != KErrNoError {
+		if err.GetErrorCode() != comm.Error_KNoError {
 			glog.Fatalf("Unable to remove topic: %s(%d) due to err: %v",
 				allTopics[ii].GetTopicName(), allTopics[ii].GetTopicId(), err)
 		}
@@ -105,9 +105,9 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		req.ClusterId = clusterID
 		resp := im.RemoveTopic(context.Background(), &req)
 		err := resp.GetError()
-		ec := ErrorCode(err.GetErrorCode())
-		if ec != KErrTopicNotFound {
-			glog.Fatalf("Failed while removing non-existent topic due to unexpected error: %s", ec.ToString())
+		ec := comm.Error_ErrorCodes(err.GetErrorCode())
+		if ec != comm.Error_KErrTopicNotFound {
+			glog.Fatalf("Failed while removing non-existent topic due to unexpected error: %s", ec.String())
 		}
 	}
 
@@ -120,14 +120,14 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		err := resp.GetError()
 		if ii%2 == 1 {
 			// This topic must exist.
-			if ErrorCode(err.GetErrorCode()) != KErrNoError {
+			if err.GetErrorCode() != comm.Error_KNoError {
 				glog.Fatalf("Error while fetching topic: %s", generateTopicName(ii))
 			}
 		} else {
 			// This topic must not exist.
-			if ErrorCode(err.GetErrorCode()) != KErrTopicNotFound {
+			if err.GetErrorCode() != comm.Error_KErrTopicNotFound {
 				glog.Fatalf("Expected ErrTopicNotFound but got %s instead",
-					ErrorCode(err.GetErrorCode()).ToString())
+					err.GetErrorCode().String())
 			}
 		}
 	}
@@ -142,9 +142,9 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		req.Topic = &topic
 		resp := im.AddTopic(context.Background(), &req)
 		err := resp.GetError()
-		if ErrorCode(err.GetErrorCode()) != KErrNoError {
+		if err.GetErrorCode() != comm.Error_KNoError {
 			glog.Fatalf("Expected no error but got: %s. Unable to add topic",
-				ErrorCode(err.GetErrorCode()).ToString())
+				err.GetErrorCode().String())
 		}
 	}
 
@@ -155,9 +155,9 @@ func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
 		req.TopicName = generateTopicName(ii)
 		resp := im.GetTopic(context.Background(), &req)
 		err := resp.GetError()
-		ec := ErrorCode(err.GetErrorCode())
-		if ec != KErrNoError {
-			glog.Fatalf("Error while fetching topic: %s. Error: %s", generateTopicName(ii), ec.ToString())
+		ec := err.GetErrorCode()
+		if ec != comm.Error_KNoError {
+			glog.Fatalf("Error while fetching topic: %s. Error: %s", generateTopicName(ii), ec.String())
 		}
 	}
 	time.Sleep(2 * time.Second)
@@ -186,9 +186,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.TopicId = 1
 		req.PartitionId = 2
 		resp := im.RegisterConsumer(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrTopicNotFound {
-			glog.Fatalf("Expected %s, got: %s", KErrTopicNotFound.ToString(), ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrTopicNotFound {
+			glog.Fatalf("Expected %s, got: %s", comm.Error_KErrTopicNotFound.String(), ec.String())
 		}
 	}
 
@@ -200,9 +200,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	topic.TopicName = "hello_topic_1"
 	req.Topic = &topic
 	resp := im.AddTopic(context.Background(), &req)
-	ec := ErrorCode(resp.GetError().GetErrorCode())
-	if ec != KErrNoError {
-		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.ToString())
+	ec := resp.GetError().GetErrorCode()
+	if ec != comm.Error_KNoError {
+		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
 	}
 
 	// Register consumers for topics.
@@ -213,9 +213,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.TopicId = 1
 		req.PartitionId = 2
 		resp := im.RegisterConsumer(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrNoError {
-			glog.Fatalf("Unable to register consumer commit due to err: %s", ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KNoError {
+			glog.Fatalf("Unable to register consumer commit due to err: %s", ec.String())
 		}
 	}
 
@@ -227,9 +227,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.TopicId = 1
 		req.PartitionId = 2
 		resp := im.GetLastCommitted(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrNoError {
-			glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KNoError {
+			glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
 		}
 		if resp.GetOffset() != -1 {
 			glog.Fatalf("Found an offset: %d even though no offsets were committed", resp.GetOffset())
@@ -244,9 +244,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.TopicId = 2 // Topic does not exist.
 		req.PartitionId = 2
 		resp := im.GetLastCommitted(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrTopicNotFound {
-			glog.Fatalf("Expected %s, got: %v", KErrTopicNotFound.ToString(), ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrTopicNotFound {
+			glog.Fatalf("Expected %s, got: %v", comm.Error_KErrTopicNotFound.String(), ec.String())
 		}
 	}
 
@@ -258,10 +258,10 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.TopicId = 1
 		req.PartitionId = 5 // Partition does not exist.
 		resp := im.GetLastCommitted(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if !(ec == KErrTopicNotFound || ec == KErrPartitionNotFound) {
+		ec := resp.GetError().GetErrorCode()
+		if !(ec == comm.Error_KErrTopicNotFound || ec == comm.Error_KErrPartitionNotFound) {
 			glog.Fatalf("Expected %s or %s, got: %v",
-				KErrTopicNotFound.ToString(), KErrPartitionNotFound.ToString(), ec.ToString())
+				comm.Error_KErrTopicNotFound.String(), comm.Error_KErrPartitionNotFound.String(), ec.String())
 		}
 	}
 
@@ -273,9 +273,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.TopicId = 1
 		req.PartitionId = 2
 		resp := im.GetLastCommitted(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrSubscriberNotRegistered {
-			glog.Fatalf("Expected %s, got: %v", KErrSubscriberNotRegistered.ToString(), ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrConsumerNotRegistered {
+			glog.Fatalf("Expected %s, got: %v", comm.Error_KErrConsumerNotRegistered.String(), ec.String())
 		}
 	}
 
@@ -288,9 +288,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.PartitionId = 2
 		req.Offset = int64(commitOffset)
 		resp := im.Commit(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrNoError {
-			glog.Fatalf("Unable to commit offset due to err: %s", ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KNoError {
+			glog.Fatalf("Unable to commit offset due to err: %s", ec.String())
 		}
 	}
 
@@ -303,9 +303,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.PartitionId = 2
 		req.Offset = int64(commitOffset)
 		resp := im.Commit(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrTopicNotFound {
-			glog.Fatalf("Unable to commit offset due to err: %s", ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrTopicNotFound {
+			glog.Fatalf("Unable to commit offset due to err: %s", ec.String())
 		}
 	}
 
@@ -318,9 +318,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.PartitionId = 5
 		req.Offset = int64(commitOffset)
 		resp := im.Commit(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if !(ec == KErrTopicNotFound || ec == KErrPartitionNotFound) {
-			glog.Fatalf("Unable to commit offset due to err: %s", ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if !(ec == comm.Error_KErrTopicNotFound || ec == comm.Error_KErrPartitionNotFound) {
+			glog.Fatalf("Unable to commit offset due to err: %s", ec.String())
 		}
 	}
 
@@ -332,9 +332,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.TopicId = 1
 		req.PartitionId = 2
 		resp := im.GetLastCommitted(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrNoError {
-			glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.ToString())
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KNoError {
+			glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
 		}
 		if base.Offset(resp.GetOffset()) != commitOffset {
 			glog.Fatalf("Found an offset: %d even though no offsets were committed", resp.GetOffset())
@@ -350,10 +350,10 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		req.PartitionId = 2
 		req.Offset = int64(commitOffset)
 		resp := im.Commit(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrSubscriberNotRegistered {
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrConsumerNotRegistered {
 			glog.Fatalf("Unexpected error code: %s, expected: %s",
-				ec.ToString(), KErrSubscriberNotRegistered.ToString())
+				ec.String(), comm.Error_KErrConsumerNotRegistered.String())
 		}
 	}
 }
@@ -379,17 +379,17 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	topic.TopicName = topicName
 	req.Topic = &topic
 	resp := im.AddTopic(context.Background(), &req)
-	ec := ErrorCode(resp.GetError().GetErrorCode())
-	if ec != KErrNoError {
-		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.ToString())
+	ec := resp.GetError().GetErrorCode()
+	if ec != comm.Error_KNoError {
+		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
 	}
 	var greq comm.GetTopicRequest
 	greq.ClusterId = clusterID
 	greq.TopicName = topicName
 	gresp := im.GetTopic(context.Background(), &greq)
-	ec = ErrorCode(gresp.GetError().GetErrorCode())
-	if ec != KErrNoError {
-		glog.Fatalf("Error while fetching topic: %s. Error: %s", topicName, ec.ToString())
+	ec = gresp.GetError().GetErrorCode()
+	if ec != comm.Error_KNoError {
+		glog.Fatalf("Error while fetching topic: %s. Error: %s", topicName, ec.String())
 	}
 	glog.Infof("Received topic: %s, ID: %d", gresp.GetTopic().GetTopicName(), gresp.GetTopic().GetTopicId())
 
@@ -405,10 +405,10 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 		req.PartitionId = 2
 		req.Values = values
 		resp := im.Produce(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrTopicNotFound {
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrTopicNotFound {
 			glog.Fatalf("Got error while producing. Expected: %s, Got: %s. Msg: %s",
-				KErrTopicNotFound.ToString(), ec.ToString(), resp.GetError().GetErrorMsg())
+				comm.Error_KErrTopicNotFound.String(), ec.String(), resp.GetError().GetErrorMsg())
 		}
 	}
 	produceNonExistentTopic()
@@ -423,10 +423,10 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 		req.AutoCommit = false
 		req.ResumeFromLastCommittedOffset = false
 		resp := im.Consume(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrTopicNotFound {
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrTopicNotFound {
 			glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
-				KErrTopicNotFound.ToString(), ec.ToString())
+				comm.Error_KErrTopicNotFound.String(), ec.String())
 		}
 	}
 	consumeNonExistentTopic()
@@ -443,10 +443,10 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 		req.PartitionId = 100
 		req.Values = values
 		resp := im.Produce(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrPartitionNotFound {
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrPartitionNotFound {
 			glog.Fatalf("Got unexpected error while producing. Expected: %s, Got: %s. Msg: %s",
-				KErrPartitionNotFound.ToString(), ec.ToString(), resp.GetError().GetErrorMsg())
+				comm.Error_KErrPartitionNotFound.String(), ec.String(), resp.GetError().GetErrorMsg())
 		}
 	}
 	produceNonExistentPartition()
@@ -461,10 +461,10 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 		req.AutoCommit = false
 		req.ResumeFromLastCommittedOffset = false
 		resp := im.Consume(context.Background(), &req)
-		ec := ErrorCode(resp.GetError().GetErrorCode())
-		if ec != KErrPartitionNotFound {
+		ec := resp.GetError().GetErrorCode()
+		if ec != comm.Error_KErrPartitionNotFound {
 			glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
-				KErrPartitionNotFound.ToString(), ec.ToString())
+				comm.Error_KErrPartitionNotFound.String(), ec.String())
 		}
 	}
 	consumeNonExistentPartition()
@@ -485,9 +485,9 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 				req.PartitionId = prtID
 				req.Values = values
 				resp := im.Produce(context.Background(), &req)
-				ec := ErrorCode(resp.GetError().GetErrorCode())
-				if ec != KErrNoError {
-					glog.Fatalf("Got error while producing. Err: %s. Msg: %s", ec.ToString(),
+				ec := resp.GetError().GetErrorCode()
+				if ec != comm.Error_KNoError {
+					glog.Fatalf("Got error while producing. Err: %s. Msg: %s", ec.String(),
 						resp.GetError().GetErrorMsg())
 				}
 			}
@@ -517,10 +517,10 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 				req.AutoCommit = false
 				req.ResumeFromLastCommittedOffset = false
 				resp := im.Consume(context.Background(), &req)
-				ec := ErrorCode(resp.GetError().GetErrorCode())
-				if ec != KErrNoError {
+				ec := resp.GetError().GetErrorCode()
+				if ec != comm.Error_KNoError {
 					glog.Fatalf("Got an unexpected error while scanning values: %s from partition: %d",
-						ec.ToString(), prtID)
+						ec.String(), prtID)
 				}
 				expectedNextOffset := base.Offset((ii + 1) * batchSize)
 				gotNextOffset := base.Offset(resp.GetNextOffset())
