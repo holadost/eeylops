@@ -16,8 +16,18 @@ func NewPrefixLogger(prefix string) *PrefixLogger {
 	return &logger
 }
 
+// NewMultiPrefixLogger returns a new instance of the prefix logger.
+func NewMultiPrefixLogger(prefixes []string) *PrefixLogger {
+	fullPrefix := ""
+	for _, prefix := range prefixes {
+		fullPrefix += createPrefixStr(prefix)
+	}
+	logger := PrefixLogger{prefix: fullPrefix}
+	return &logger
+}
+
 // NewPrefixLoggerWithParent returns a new instance of the prefix logger. It uses the prefix of the parent as well
-// as the given prefix in every log statement. Makes traceability from logs a whole lot easier.
+// as the given prefix in every log statement.
 func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *PrefixLogger {
 	actualPrefix := prefix
 	if parentLogger != nil {
