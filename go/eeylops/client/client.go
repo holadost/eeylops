@@ -40,10 +40,10 @@ func NewClient(clusterId string, addr NodeAddress) *Client {
 	return &client
 }
 
-func (client *Client) NewProducer() {
-
+func (client *Client) NewProducer(topicName string, partitionId int) *Producer {
+	return nil
 }
 
-func (client *Client) NewConsumer() {
-
+func (client *Client) NewConsumer(consumerId string, topicName string, partitionId int) *Consumer {
+	return nil
 }
