@@ -135,6 +135,15 @@ func (srv *RPCServer) GetClusterConfig(ctx context.Context, req *comm.GetCluster
 	return &comm.GetClusterConfigResponse{}, nil
 }
 
+func (srv *RPCServer) RegisterConsumer(ctx context.Context, req *comm.RegisterConsumerRequest) (*comm.RegisterConsumerResponse, error) {
+	im, exists := srv.instanceMgrMap[req.GetClusterId()]
+	if !exists {
+		return &comm.RegisterConsumerResponse{Error: srv.createInvalidClusterErrorProto()}, nil
+	}
+	resp := im.RegisterConsumer(ctx, req)
+	return resp, nil
+}
+
 func (srv *RPCServer) createInvalidClusterErrorProto() *comm.Error {
 	return &comm.Error{
 		ErrorCode: comm.Error_KErrInvalidClusterId,
