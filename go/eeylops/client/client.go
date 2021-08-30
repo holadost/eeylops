@@ -4,9 +4,12 @@ import (
 	"context"
 	"eeylops/comm"
 	"eeylops/server/base"
+	"eeylops/util"
 	"fmt"
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
+	"math/rand"
+	"time"
 )
 
 type NodeAddress struct {
@@ -87,17 +90,33 @@ func (client *Client) CreateTopic(topicName string, partitionIDs []int, ttlSecon
 	}
 	req.Topic = topic
 	req.ClusterId = client.clusterID
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
+	defer cancel()
 	// TODO: Perform RPC on leader
-	resp, err := client.rpcClient.CreateTopic(context.Background(), &req)
-	if err != nil {
-		return newError(comm.Error_KErrTransport, err.Error())
+	fn := func(attempt int) (bool, error) {
+		resp, err := client.rpcClient.CreateTopic(ctx, &req)
+		if err != nil {
+			return true, newError(comm.Error_KErrTransport, err.Error())
+		}
+		errProto := resp.GetError()
+		// TODO: Handle not leader errors by switching to the leader.
+		if errProto.GetErrorCode() != comm.Error_KNoError {
+			switch errProto.GetErrorCode() {
+			case comm.Error_KErrNotLeader:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrNotLeader, "unable to determine leader")
+			case comm.Error_KErrBackend:
+				return true, newError(comm.Error_KErrBackend, "backend error")
+			default:
+				return false, newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
+			}
+		}
+		return false, nil
 	}
-	errProto := resp.GetError()
-	// TODO: Handle not leader errors by switching to the leader.
-	if errProto.GetErrorCode() != comm.Error_KNoError {
-		return newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
+	bfn := func(attempt int) {
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return nil
+	return util.DoRetryWithContext(ctx, fn, bfn)
 }
 
 func (client *Client) RemoveTopic(topicName string) error {
@@ -110,16 +129,31 @@ func (client *Client) RemoveTopic(topicName string) error {
 	var req comm.RemoveTopicRequest
 	req.ClusterId = client.clusterID
 	req.TopicId = int32(topicConfig.ID)
-	// TODO: Perform RPC on leader
-	resp, err := client.rpcClient.RemoveTopic(context.Background(), &req)
-	if err != nil {
-		return newError(comm.Error_KErrTransport, err.Error())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
+	defer cancel()
+	fn := func(attempt int) (bool, error) {
+		resp, err := client.rpcClient.RemoveTopic(ctx, &req)
+		if err != nil {
+			return true, newError(comm.Error_KErrTransport, err.Error())
+		}
+		if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+			errProto := resp.GetError()
+			switch errProto.GetErrorCode() {
+			case comm.Error_KErrNotLeader:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrNotLeader, "unable to determine leader")
+			case comm.Error_KErrBackend:
+				return true, newError(comm.Error_KErrBackend, "backend error")
+			default:
+				return false, newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
+			}
+		}
+		return false, nil
 	}
-	// TODO: Retry on KErrNotLeader.
-	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
-		return newError(resp.GetError().GetErrorCode(), resp.GetError().GetErrorMsg())
+	bfn := func(attempt int) {
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return nil
+	return util.DoRetryWithContext(ctx, fn, bfn)
 }
 
 func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDType, partitionId int) error {
@@ -129,40 +163,76 @@ func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDTy
 	req.TopicId = int32(topicId)
 	req.PartitionId = int32(partitionId)
 	// TODO: Perform RPC on leader
-	resp, err := client.rpcClient.RegisterConsumer(context.Background(), &req)
-	if err != nil {
-		return newError(comm.Error_KErrTransport, err.Error())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
+	defer cancel()
+	fn := func(attempt int) (bool, error) {
+		resp, err := client.rpcClient.RegisterConsumer(ctx, &req)
+		if err != nil {
+			return true, newError(comm.Error_KErrTransport, err.Error())
+		}
+		if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+			errProto := resp.GetError()
+			switch errProto.GetErrorCode() {
+			case comm.Error_KErrNotLeader:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrNotLeader, "unable to determine leader")
+			case comm.Error_KErrBackend:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrBackend, "backend error")
+			default:
+				return false, newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
+			}
+		}
+		return false, nil
 	}
-	// TODO: Retry on KErrNotLeader.
-	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
-		return newError(resp.GetError().GetErrorCode(), resp.GetError().GetErrorMsg())
+	bfn := func(attempt int) {
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return nil
+	return util.DoRetryWithContext(ctx, fn, bfn)
 }
 
 func (client *Client) getTopic(topicName string) (base.TopicConfig, error) {
 	var req comm.GetTopicRequest
 	req.TopicName = topicName
-	// TODO: Perform RPC on leader
-	resp, err := client.rpcClient.GetTopic(context.Background(), &req)
-	if err != nil {
-		return base.TopicConfig{}, newError(comm.Error_KErrTransport, err.Error())
-	}
-	// TODO: Retry on KErrNotLeader.
-	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
-		return base.TopicConfig{}, newError(resp.GetError().GetErrorCode(), resp.GetError().GetErrorMsg())
-	}
-	topicProto := resp.GetTopic()
 	var topicConfig base.TopicConfig
-	topicConfig.Name = topicProto.GetTopicName()
-	topicConfig.ID = base.TopicIDType(topicProto.GetTopicId())
-	topicConfig.TTLSeconds = int(topicProto.GetTtlSeconds())
-	var prtIDs []int
-	for _, pid := range topicProto.GetPartitionIds() {
-		prtIDs = append(prtIDs, int(pid))
+	// TODO: Perform RPC on leader
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
+	defer cancel()
+	fn := func(attempt int) (bool, error) {
+		resp, err := client.rpcClient.GetTopic(ctx, &req)
+		if err != nil {
+			return true, newError(comm.Error_KErrTransport, err.Error())
+		}
+		// TODO: Retry on KErrNotLeader.
+		if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+			errProto := resp.GetError()
+			switch errProto.GetErrorCode() {
+			case comm.Error_KErrNotLeader:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrNotLeader, "unable to determine leader")
+			case comm.Error_KErrBackend:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrBackend, "backend error")
+			default:
+				return false, newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
+			}
+		}
+		topicProto := resp.GetTopic()
+		topicConfig.Name = topicProto.GetTopicName()
+		topicConfig.ID = base.TopicIDType(topicProto.GetTopicId())
+		topicConfig.TTLSeconds = int(topicProto.GetTtlSeconds())
+		var prtIDs []int
+		for _, pid := range topicProto.GetPartitionIds() {
+			prtIDs = append(prtIDs, int(pid))
+		}
+		topicConfig.PartitionIDs = prtIDs
+		return false, nil
 	}
-	topicConfig.PartitionIDs = prtIDs
-	return topicConfig, nil
+	bfn := func(attempt int) {
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
+	}
+	retErr := util.DoRetryWithContext(ctx, fn, bfn)
+	return topicConfig, retErr
 }
 
 func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDType, partitionID int) (base.Offset, error) {
@@ -172,16 +242,37 @@ func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDTy
 	req.TopicId = int32(topicID)
 	req.PartitionId = int32(partitionID)
 	req.Sync = true
+	var myOffset base.Offset
 	// TODO: Perform RPC on leader
-	resp, err := client.rpcClient.GetLastCommitted(context.Background(), &req)
-	if err != nil {
-		return -1, newError(comm.Error_KErrTransport, err.Error())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
+	defer cancel()
+	fn := func(attempt int) (bool, error) {
+		resp, err := client.rpcClient.GetLastCommitted(context.Background(), &req)
+		if err != nil {
+			return true, newError(comm.Error_KErrTransport, err.Error())
+		}
+		// TODO: Retry on KErrNotLeader.
+		if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+			errProto := resp.GetError()
+			switch errProto.GetErrorCode() {
+			case comm.Error_KErrNotLeader:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrNotLeader, "unable to determine leader")
+			case comm.Error_KErrBackend:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrBackend, "backend error")
+			default:
+				return false, newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
+			}
+		}
+		myOffset = base.Offset(resp.GetOffset())
+		return false, nil
 	}
-	// TODO: Retry on KErrNotLeader.
-	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
-		return -1, newError(resp.GetError().GetErrorCode(), resp.GetError().GetErrorMsg())
+	bfn := func(attempt int) {
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return base.Offset(resp.GetOffset()), nil
+	retErr := util.DoRetryWithContext(ctx, fn, bfn)
+	return myOffset, retErr
 }
 
 func isPartitionPresentInTopicConfig(topicCfg base.TopicConfig, partitionID int) (found bool) {
