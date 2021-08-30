@@ -92,8 +92,10 @@ func DefaultConsumerConfig(consumerID string, topicName string, partitionID int)
 }
 
 // ErrConsumerDone is returned by consumer when there is nothing more to scan.
-var ErrConsumerDone = errors.New("consumer has finished")
-var ErrInvalidCommit = errors.New("invalid commit")
+var (
+	ErrConsumerDone               = errors.New("consumer has finished")
+	ErrInvalidCommitBeforeConsume = errors.New("invalid commit before consume")
+)
 
 type Consumer struct {
 	topicID                 base.TopicIDType
@@ -212,7 +214,7 @@ func (consumer *Consumer) Commit() error {
 	} else {
 		if !consumer.firstConsumeDone {
 			// Cannot commit when nothing has been consumed.
-			return ErrInvalidCommit
+			return ErrInvalidCommitBeforeConsume
 		}
 		glog.Fatalf("Commit with nextOffset = -1 must not have been called")
 	}
