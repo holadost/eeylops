@@ -25,22 +25,3 @@ func CreateDir(dirName string) {
 		glog.Fatalf("Unable to create test dir: %s", dirName)
 	}
 }
-
-type MutexInterface interface {
-	Lock()
-	Unlock()
-	RLock()
-	RUnlock()
-}
-
-func ScopedLockExecutor(mutex MutexInterface, f func()) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	f()
-}
-
-func ScopedRLockWrapper(mutex MutexInterface, f func()) {
-	mutex.RLock()
-	defer mutex.RUnlock()
-	f()
-}

@@ -9,14 +9,14 @@ import (
 	"google.golang.org/grpc"
 )
 
-type Client struct {
-	rpcClient comm.EeylopsServiceClient
-	clusterID string
-}
-
 type NodeAddress struct {
 	Host string
 	Port int
+}
+
+type Client struct {
+	rpcClient comm.EeylopsServiceClient
+	clusterID string
 }
 
 func NewClient(clusterID string, addr NodeAddress) *Client {
@@ -44,8 +44,34 @@ func (client *Client) NewProducer(topicName string, partitionID int) (*Producer,
 	return newProducer(topicConfig.ID, partitionID, client.clusterID, client.rpcClient), nil
 }
 
-func (client *Client) NewConsumer(consumerID string, topicName string, partitionID int) *Consumer {
-	return nil
+func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
+	if cfg.ResumeFromLastCommitted {
+		// Confirm that StartEpochNs is not specified.
+		if cfg.StartEpochNs > 0 {
+			glog.Fatalf("Cannot specify both StartEpochNs and ResumeFromLastCommitted. Only one must be set")
+		}
+	} else {
+		if cfg.StartEpochNs <= 0 {
+			glog.Fatalf("Either StartEpochNs or ResumeFromLastCommitted must be set")
+		}
+	}
+	topicConfig, err := client.getTopic(cfg.TopicName)
+	if err != nil {
+		return nil, err
+	}
+	if !isPartitionPresentInTopicConfig(topicConfig, cfg.PartitionID) {
+		return nil, newError(comm.Error_KErrPartitionNotFound,
+			fmt.Sprintf("Partition: %d is not present in topic partitions: %v",
+				cfg.PartitionID, topicConfig.PartitionIDs))
+	}
+	err = client.registerConsumer(cfg.ConsumerID, topicConfig.ID, cfg.PartitionID)
+	if err != nil {
+		return nil, err
+	}
+	cfg.rpcClient = client.rpcClient
+	cfg.topicID = topicConfig.ID
+	cfg.clusterID = client.clusterID
+	return newConsumer(&cfg), nil
 }
 
 func (client *Client) CreateTopic(topicName string, partitionIDs []int, ttlSeconds int64) error {
@@ -137,6 +163,25 @@ func (client *Client) getTopic(topicName string) (base.TopicConfig, error) {
 	}
 	topicConfig.PartitionIDs = prtIDs
 	return topicConfig, nil
+}
+
+func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDType, partitionID int) (base.Offset, error) {
+	var req comm.LastCommittedRequest
+	req.ConsumerId = consumerID
+	req.ClusterId = client.clusterID
+	req.TopicId = int32(topicID)
+	req.PartitionId = int32(partitionID)
+	req.Sync = true
+	// TODO: Perform RPC on leader
+	resp, err := client.rpcClient.GetLastCommitted(context.Background(), &req)
+	if err != nil {
+		return -1, newError(comm.Error_KErrTransport, err.Error())
+	}
+	// TODO: Retry on KErrNotLeader.
+	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+		return -1, newError(resp.GetError().GetErrorCode(), resp.GetError().GetErrorMsg())
+	}
+	return base.Offset(resp.GetOffset()), nil
 }
 
 func isPartitionPresentInTopicConfig(topicCfg base.TopicConfig, partitionID int) (found bool) {

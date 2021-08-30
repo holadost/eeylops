@@ -9,7 +9,6 @@ require (
 	github.com/golang/snappy v0.0.3 // indirect
 	github.com/hashicorp/raft v1.3.1
 	github.com/jinzhu/gorm v1.9.16
-	github.com/kr/pretty v0.2.0 // indirect
 	github.com/lib/pq v1.10.1
 	github.com/mattn/go-sqlite3 v1.14.7 // indirect
 	github.com/stretchr/testify v1.6.1 // indirect

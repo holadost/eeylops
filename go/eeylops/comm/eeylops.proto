@@ -16,6 +16,7 @@ message Error {
     KErrConsumerNotRegistered = 8;
     KErrInvalidClusterId = 9;
     KErrTransport = 10;
+    KErrTimeout = 11;
   }
   ErrorCodes error_code = 1;
   string error_msg = 2;
@@ -164,7 +165,8 @@ message ConsumeRequest {
   int64 end_timestamp = 8;
   // If True, start_offset - 1 is committed before sending out the response. Defaults to false.
   bool auto_commit = 9;
-  // If true, consume resumes from the last committed offset. Defaults to false.
+  // If true, consume resumes from the last committed offset. Defaults to false. If true, start_offset must not be
+  // specified.
   bool resume_from_last_committed_offset = 10;
 }
 

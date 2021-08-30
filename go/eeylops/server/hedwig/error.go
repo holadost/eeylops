@@ -11,10 +11,9 @@ func makeErrorProto(code comm.Error_ErrorCodes, err error, msg string) *comm.Err
 	if code == comm.Error_KNoError {
 		ep.ErrorMsg = ""
 	} else {
-		fullMsg += code.String()
-		fullMsg += ": " + msg
+		fullMsg += "message: " + msg
 		if err != nil {
-			fullMsg += " Error: " + msg
+			fullMsg += " error: " + msg
 		}
 		ep.ErrorMsg = fullMsg
 	}
