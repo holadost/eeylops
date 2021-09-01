@@ -164,6 +164,27 @@ func (sc *StorageController) GetAllTopics() []base.TopicConfig {
 	return topics
 }
 
+func (sc *StorageController) getTopicByName(topicName string) (base.TopicConfig, error) {
+	sc.topicMapLock.RLock()
+	sc.topicMapLock.RUnlock()
+	for _, entry := range sc.topicMap {
+		if entry.topic.Name == topicName {
+			return *entry.topic, nil
+		}
+	}
+	return base.TopicConfig{}, ErrTopicNotFound
+}
+
+func (sc *StorageController) getTopicByID(id base.TopicIDType) (base.TopicConfig, error) {
+	sc.topicMapLock.RLock()
+	sc.topicMapLock.RUnlock()
+	entry, exists := sc.topicMap[id]
+	if !exists {
+		return base.TopicConfig{}, ErrTopicNotFound
+	}
+	return *entry.topic, nil
+}
+
 func (sc *StorageController) GetPartition(topicID base.TopicIDType, partitionID int) (*Partition, error) {
 	sc.topicMapLock.RLock()
 	defer sc.topicMapLock.RUnlock()
