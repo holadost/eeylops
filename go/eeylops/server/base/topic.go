@@ -16,8 +16,9 @@ type TopicConfig struct {
 	ID TopicIDType `json:"id"`
 	// Time when the topic was created.
 	CreatedAt time.Time `json:"created_at"`
-	// If the topic creation was confirmed by the various brokers.
-	ConfirmedByBrokers []bool `json:"confirmed_by_brokers"`
+	// If the topic creation was confirmed by all the broker leaders. Till this becomes true,
+	// the topic cannot be considered created!
+	CreationConfirmed bool `json:"creation_confirmed"`
 }
 
 func (tc *TopicConfig) ToString() string {
