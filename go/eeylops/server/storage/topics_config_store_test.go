@@ -25,7 +25,7 @@ func createTopicStoreTestDir(t *testing.T, testName string) string {
 
 func TestTopicConfigStore(t *testing.T) {
 	util.LogTestMarker("TestTopicConfigStore")
-	testDir := createTopicStoreTestDir(t, "TestTopicConfigStore")
+	testDir := util.CreateTestDir(t, "TestTopicConfigStore")
 	numTopics := 100
 	closeReopenIterNum := 5
 	readVerifyIterNum := 5
@@ -33,7 +33,9 @@ func TestTopicConfigStore(t *testing.T) {
 	topicNameGen := func(val int) string {
 		return fmt.Sprintf("topic-%d", val)
 	}
+	glog.Infof("Topic store initialized!")
 	for ii := 0; ii < numTopics; ii++ {
+		glog.Infof("Adding topic: %d", ii)
 		// Add a new topic.
 		var topic base.TopicConfig
 		topic.Name = topicNameGen(ii)
