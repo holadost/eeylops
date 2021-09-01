@@ -7,59 +7,49 @@ import (
 )
 
 type PrefixLogger struct {
-	prefix string // The prefix string that is attached to every log statement.
-	depth  int
+	prefixes     []string
+	logPrefixStr string // The logPrefixStr string that is attached to every log statement.
+	depth        int
 }
 
-// NewPrefixLogger returns a new instance of the prefix logger.
+// NewPrefixLogger returns a new instance of the logPrefixStr logger.
 func NewPrefixLogger(prefix string) *PrefixLogger {
-	logger := PrefixLogger{prefix: createPrefixStr(prefix)}
-	return &logger
+	return newPrefixLogger([]string{prefix}, 0)
 }
 
-// NewMultiPrefixLogger returns a new instance of the prefix logger.
+// NewMultiPrefixLogger returns a new instance of the logPrefixStr logger.
 func NewMultiPrefixLogger(prefixes []string) *PrefixLogger {
-	fullPrefix := ""
-	for _, prefix := range prefixes {
-		fullPrefix += createPrefixStr(prefix)
-	}
-	logger := PrefixLogger{prefix: fullPrefix}
-	return &logger
+	return newPrefixLogger(prefixes, 0)
 }
 
-// NewPrefixLoggerWithParent returns a new instance of the prefix logger. It uses the prefix of the parent as well
-// as the given prefix in every log statement.
+// NewPrefixLoggerWithParent returns a new instance of the logPrefixStr logger. It uses the logPrefixStr of the parent as well
+// as the given logPrefixStr in every log statement.
 func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *PrefixLogger {
-	actualPrefix := prefix
 	if parentLogger != nil {
-		actualPrefix = parentLogger.GetPrefix() + " " + createPrefixStr(prefix)
+		return newPrefixLogger(append(parentLogger.GetPrefixes(), prefix), 0)
 	}
-	logger := PrefixLogger{prefix: actualPrefix}
-	return &logger
+	return newPrefixLogger([]string{prefix}, 0)
 }
 
 func NewPrefixLoggerWithParentAndDepth(prefix string, parentLogger *PrefixLogger, depth int) *PrefixLogger {
-	actualPrefix := prefix
 	if parentLogger != nil {
-		actualPrefix = parentLogger.GetPrefix() + " " + createPrefixStr(prefix)
+		return newPrefixLogger(append(parentLogger.GetPrefixes(), prefix), depth)
 	}
-	logger := PrefixLogger{prefix: actualPrefix, depth: depth}
-	return &logger
+	return newPrefixLogger([]string{prefix}, depth)
 }
 
-// NewPrefixLoggerWithDepth returns a new instance of the prefix logger.
+// NewPrefixLoggerWithDepth returns a new instance of the logPrefixStr logger.
 func NewPrefixLoggerWithDepth(prefix string, depth int) *PrefixLogger {
-	logger := PrefixLogger{prefix: createPrefixStr(prefix), depth: depth}
-	return &logger
+	return newPrefixLogger([]string{prefix}, depth)
 }
 
-// NewMultiPrefixLoggerWithDepth returns a new instance of the prefix logger.
+// NewMultiPrefixLoggerWithDepth returns a new instance of the logPrefixStr logger.
 func NewMultiPrefixLoggerWithDepth(prefixes []string, depth int) *PrefixLogger {
-	fullPrefix := ""
-	for _, prefix := range prefixes {
-		fullPrefix += createPrefixStr(prefix) + " "
-	}
-	logger := PrefixLogger{prefix: fullPrefix, depth: depth}
+	return newPrefixLogger(prefixes, depth)
+}
+
+func newPrefixLogger(prefixes []string, depth int) *PrefixLogger {
+	logger := PrefixLogger{logPrefixStr: createPrefixStr(prefixes), prefixes: prefixes, depth: depth}
 	return &logger
 }
 
@@ -73,47 +63,60 @@ func DefaultLogger() *PrefixLogger {
 	return defaultLogger
 }
 
-func (logger *PrefixLogger) GetPrefix() string {
-	return logger.prefix
+func (logger *PrefixLogger) GetLogPrefix() string {
+	return logger.logPrefixStr
+}
+
+func (logger *PrefixLogger) GetPrefixes() []string {
+	var prefixes []string
+	prefixes = append(prefixes, logger.prefixes...)
+	return prefixes
 }
 
 func (logger *PrefixLogger) Infof(format string, args ...interface{}) {
 	logStr := fmt.Sprintf(format, args...)
-	glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.prefix, logStr))
+	glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
 }
 
 func (logger *PrefixLogger) Errorf(format string, args ...interface{}) {
 	logStr := fmt.Sprintf(format, args...)
-	glog.ErrorDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.prefix, logStr))
+	glog.ErrorDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
 }
 
 func (logger *PrefixLogger) Warningf(format string, args ...interface{}) {
 	logStr := fmt.Sprintf(format, args...)
-	glog.WarningDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.prefix, logStr))
+	glog.WarningDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
 }
 
 func (logger *PrefixLogger) Fatalf(format string, args ...interface{}) {
 	logStr := fmt.Sprintf(format, args...)
-	glog.FatalDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.prefix, logStr))
+	glog.FatalDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
 }
 
 func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
 	if glog.V(glog.Level(v)) {
 		logStr := fmt.Sprintf(format, args...)
-		glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.prefix, logStr))
+		glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
 	}
 }
 
 func (logger *PrefixLogger) Debugf(format string, args ...interface{}) {
 	if glog.V(glog.Level(1)) {
 		logStr := fmt.Sprintf(format, args...)
-		glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.prefix, logStr))
+		glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
 	}
 }
 
-func createPrefixStr(prefix string) string {
-	if len(prefix) == 0 {
-		return ""
+func createPrefixStr(prefixes []string) string {
+	fullPrefixStr := ""
+	for ii, prefix := range prefixes {
+		if len(prefix) == 0 {
+			continue
+		}
+		fullPrefixStr += "{" + prefix + "}"
+		if ii != len(prefixes)-1 {
+			fullPrefixStr += " "
+		}
 	}
-	return "{" + prefix + "}"
+	return fullPrefixStr
 }
