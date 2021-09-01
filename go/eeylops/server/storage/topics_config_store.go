@@ -57,7 +57,6 @@ func (tcs *TopicsConfigStore) initialize() {
 	opts.Compression = 0
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
-	opts.Logger = logging.NewMultiPrefixLoggerWithDepth([]string{"topics_config_store", "kv_store"}, 1)
 	tcs.kvStore = kv_store.NewBadgerKVStore(tcs.tsDir, opts)
 
 	// Initialize internal maps.

@@ -38,6 +38,15 @@ func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *Prefi
 	return &logger
 }
 
+func NewPrefixLoggerWithParentAndDepth(prefix string, parentLogger *PrefixLogger, depth int) *PrefixLogger {
+	actualPrefix := prefix
+	if parentLogger != nil {
+		actualPrefix = parentLogger.GetPrefix() + " " + createPrefixStr(prefix)
+	}
+	logger := PrefixLogger{prefix: actualPrefix, depth: depth}
+	return &logger
+}
+
 // NewPrefixLoggerWithDepth returns a new instance of the prefix logger.
 func NewPrefixLoggerWithDepth(prefix string, depth int) *PrefixLogger {
 	logger := PrefixLogger{prefix: createPrefixStr(prefix), depth: depth}

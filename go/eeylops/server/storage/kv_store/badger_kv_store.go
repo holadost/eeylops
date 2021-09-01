@@ -1,8 +1,8 @@
 package kv_store
 
 import (
+	"eeylops/util/logging"
 	badger "github.com/dgraph-io/badger/v2"
-	"github.com/golang/glog"
 	"os"
 )
 
@@ -11,15 +11,27 @@ type BadgerKVStore struct {
 	db      *badger.DB
 	rootDir string
 	closed  bool
+	logger  *logging.PrefixLogger
 }
 
 func NewBadgerKVStore(rootDir string, opts badger.Options) *BadgerKVStore {
+	logger := logging.NewPrefixLogger("badger_kv_store")
+	return newBadgerKVStore(rootDir, logger, opts)
+}
+
+func NewBadgerKVStoreWithLogger(rootDir string, logger *logging.PrefixLogger, opts badger.Options) *BadgerKVStore {
+	return newBadgerKVStore(rootDir, logger, opts)
+}
+
+func newBadgerKVStore(rootDir string, logger *logging.PrefixLogger, opts badger.Options) *BadgerKVStore {
 	kvStore := new(BadgerKVStore)
 	kvStore.rootDir = rootDir
+	kvStore.logger = logger
 	if err := os.MkdirAll(kvStore.rootDir, 0774); err != nil {
-		glog.Fatalf("Unable to create directory for consumer store due to err: %v", err)
+		kvStore.logger.Fatalf("Unable to create directory for consumer store due to err: %v", err)
 		return nil
 	}
+	opts.Logger = logging.NewPrefixLoggerWithParentAndDepth("", logger, 1)
 	kvStore.initialize(opts)
 	return kvStore
 }
@@ -32,12 +44,12 @@ func NewBadgerKVStoreWithDB(rootDir string, db *badger.DB) *BadgerKVStore {
 }
 
 func (kvStore *BadgerKVStore) initialize(opts badger.Options) {
-	glog.Infof("Initializing badger KV store located at: %s", kvStore.rootDir)
+	kvStore.logger.Infof("Initializing badger KV store located at: %s", kvStore.rootDir)
 	var err error
 	kvStore.db, err = badger.Open(opts)
 	kvStore.closed = false
 	if err != nil {
-		glog.Fatalf("Unable to open consumer store due to err: %s", err.Error())
+		kvStore.logger.Fatalf("Unable to open consumer store due to err: %s", err.Error())
 	}
 }
 
@@ -90,7 +102,7 @@ func (kvStore *BadgerKVStore) GetS(key string) (string, error) {
 // Put puts a key value pair in the DB. If the key already exists, it would be updated.
 func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
 	if kvStore.closed {
-		glog.Errorf("KV store is closed")
+		kvStore.logger.Errorf("KV store is closed")
 		return ErrKVStoreClosed
 	}
 	err := kvStore.db.Update(func(txn *badger.Txn) error {
@@ -98,7 +110,7 @@ func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
 		return err
 	})
 	if err != nil {
-		glog.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
+		kvStore.logger.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
 		return ErrKVStoreBackend
 	}
 	return nil
@@ -112,7 +124,7 @@ func (kvStore *BadgerKVStore) PutS(key string, value string) error {
 // Delete deletes a key value pair from the DB.
 func (kvStore *BadgerKVStore) Delete(key []byte) error {
 	if kvStore.closed {
-		glog.Errorf("KV store is closed")
+		kvStore.logger.Errorf("KV store is closed")
 		return ErrKVStoreClosed
 	}
 	err := kvStore.db.Update(func(txn *badger.Txn) error {
@@ -120,7 +132,7 @@ func (kvStore *BadgerKVStore) Delete(key []byte) error {
 		return err
 	})
 	if err != nil {
-		glog.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
+		kvStore.logger.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
 		return ErrKVStoreBackend
 	}
 	return nil
@@ -156,7 +168,7 @@ func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int, scanSizeBytes
 		key := item.KeyCopy(nil)
 		val, err := item.ValueCopy(nil)
 		if err != nil {
-			glog.Errorf("Unable to scan KV store due to err: %s", err)
+			kvStore.logger.Errorf("Unable to scan KV store due to err: %s", err)
 			return nil, nil, nil, err
 		}
 		if numValues >= 0 && len(keys) == numValues {
@@ -190,7 +202,7 @@ func (kvStore *BadgerKVStore) ScanS(startKey string, numValues int, scanSizeByte
 // MultiGet gets the values associated with multiple keys.
 func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []error) {
 	if kvStore.closed {
-		glog.Errorf("KV store is closed")
+		kvStore.logger.Errorf("KV store is closed")
 		for ii := 0; ii < len(keys); ii++ {
 			values = append(values, []byte{})
 			errs = append(errs, ErrKVStoreClosed)
@@ -204,7 +216,7 @@ func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []e
 				if err == badger.ErrKeyNotFound {
 					errs = append(errs, ErrKVStoreKeyNotFound)
 				} else {
-					glog.Errorf("Unable to get key: %v due to err: %s", key, err.Error())
+					kvStore.logger.Errorf("Unable to get key: %v due to err: %s", key, err.Error())
 					errs = append(errs, ErrKVStoreGeneric)
 				}
 				errs = append(errs, err)
@@ -213,7 +225,7 @@ func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []e
 			}
 			tmpValue, err := item.ValueCopy(nil)
 			if err != nil {
-				glog.Errorf("Unable to parse value for key: %v due to err: %s", key, err.Error())
+				kvStore.logger.Errorf("Unable to parse value for key: %v due to err: %s", key, err.Error())
 				errs = append(errs, ErrKVStoreGeneric)
 				values = append(values, nil)
 				continue
@@ -253,18 +265,18 @@ func (kvStore *BadgerKVStore) MultiGetS(keys []string) ([]string, []error) {
 // BatchPut sets/updates multiple key value pairs in the DB.
 func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
 	if kvStore.closed {
-		glog.Errorf("KV store is already closed")
+		kvStore.logger.Errorf("KV store is already closed")
 		return ErrKVStoreBackend
 	}
 	wb := kvStore.db.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
-			glog.Errorf("Unable to perform batch put due to err: %s", err.Error())
+			kvStore.logger.Errorf("Unable to perform batch put due to err: %s", err.Error())
 			return ErrKVStoreBackend
 		}
 	}
 	if err := wb.Flush(); err != nil {
-		glog.Errorf("Unable to perform flush after batch put due to err: %s", err.Error())
+		kvStore.logger.Errorf("Unable to perform flush after batch put due to err: %s", err.Error())
 		return ErrKVStoreBackend
 	}
 	return nil
@@ -284,7 +296,7 @@ func (kvStore *BadgerKVStore) BatchPutS(keys []string, values []string) error {
 // BatchDelete deletes multiple key value pairs from the DB.
 func (kvStore *BadgerKVStore) BatchDelete(keys [][]byte) error {
 	if kvStore.closed {
-		glog.Errorf("KV store is closed")
+		kvStore.logger.Errorf("KV store is closed")
 		return ErrKVStoreClosed
 	}
 	err := kvStore.db.Update(func(txn *badger.Txn) error {
@@ -297,7 +309,7 @@ func (kvStore *BadgerKVStore) BatchDelete(keys [][]byte) error {
 		return nil
 	})
 	if err != nil {
-		glog.Errorf("Unable to batch delete keys: %v due to err: %s", keys, err.Error())
+		kvStore.logger.Errorf("Unable to batch delete keys: %v due to err: %s", keys, err.Error())
 		return ErrKVStoreBackend
 	}
 	return nil
@@ -315,7 +327,7 @@ func (kvStore *BadgerKVStore) BatchDeleteS(keys []string) error {
 // Close implements the Segment interface. It closes the connection to the underlying
 // BadgerDB database as well as invoking the context's cancel function.
 func (kvStore *BadgerKVStore) Close() error {
-	glog.Infof("Closing KV store located at: %s", kvStore.rootDir)
+	kvStore.logger.Infof("Closing KV store located at: %s", kvStore.rootDir)
 	if kvStore.closed {
 		return nil
 	}
