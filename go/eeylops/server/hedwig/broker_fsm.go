@@ -9,20 +9,20 @@ import (
 	"io"
 )
 
-type InstanceFSM struct {
+type BrokerFSM struct {
 	storageController *storage.StorageController
 	logger            *logging.PrefixLogger
 }
 
-func NewFSM(controller *storage.StorageController, logger *logging.PrefixLogger) *InstanceFSM {
-	fsm := InstanceFSM{
+func NewBrokerFSM(controller *storage.StorageController, logger *logging.PrefixLogger) *BrokerFSM {
+	fsm := BrokerFSM{
 		storageController: controller,
 		logger:            logger,
 	}
 	return &fsm
 }
 
-func (fsm *InstanceFSM) Apply(log *raft.Log) interface{} {
+func (fsm *BrokerFSM) Apply(log *raft.Log) interface{} {
 	if log.Data == nil || len(log.Data) == 0 {
 		fsm.logger.Fatalf("Failed to apply log message as no data was found")
 	}
@@ -47,15 +47,15 @@ func (fsm *InstanceFSM) Apply(log *raft.Log) interface{} {
 	}
 }
 
-func (fsm *InstanceFSM) Snapshot() (raft.FSMSnapshot, error) {
+func (fsm *BrokerFSM) Snapshot() (raft.FSMSnapshot, error) {
 	return nil, nil
 }
 
-func (fsm *InstanceFSM) Restore(closer io.ReadCloser) error {
+func (fsm *BrokerFSM) Restore(closer io.ReadCloser) error {
 	return nil
 }
 
-func (fsm *InstanceFSM) append(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) append(cmd *Command, log *raft.Log) *FSMResponse {
 	if len(cmd.AppendCommand.Data) == 0 {
 		fsm.logger.Fatalf("Received an append command with nothing to append. Log Index: %d, Log Term: %d",
 			log.Index, log.Term)
@@ -103,7 +103,7 @@ func (fsm *InstanceFSM) append(cmd *Command, log *raft.Log) *FSMResponse {
 	return &resp
 }
 
-func (fsm *InstanceFSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse {
 	if len(cmd.RegisterConsumerCommand.ConsumerID) == 0 {
 		fsm.logger.Fatalf("Invalid consumer ID, Log Index: %d, Log Term: %d", log.Index, log.Term)
 	}
@@ -154,7 +154,7 @@ func (fsm *InstanceFSM) registerConsumer(cmd *Command, log *raft.Log) *FSMRespon
 	return &resp
 }
 
-func (fsm *InstanceFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 	if cmd.CommitCommand.TopicID == 0 {
 		fsm.logger.Fatalf("No topic name provided when for commit command")
 	}
@@ -198,8 +198,8 @@ func (fsm *InstanceFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 			return &resp
 		} else {
 			fsm.logger.Fatalf("Unable to add consumer commit for subscriber: %s, partition: %d, topic: %d, "+
-				"Log Index: %d, Log Term: %d due to err: %s", cmd.CommitCommand.ConsumerID, cmd.CommitCommand.PartitionID,
-				cmd.CommitCommand.TopicID, log.Index, log.Term, err.Error())
+				"Log Index: %d, Log Term: %d due to err: %s", cmd.CommitCommand.ConsumerID,
+				cmd.CommitCommand.PartitionID, cmd.CommitCommand.TopicID, log.Index, log.Term, err.Error())
 		}
 	}
 	return &resp

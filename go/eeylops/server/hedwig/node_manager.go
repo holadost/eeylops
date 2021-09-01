@@ -12,7 +12,7 @@ var (
 
 type NodeManager struct {
 	rpcServer      *RPCServer
-	instanceMgrMap map[string]*InstanceManager
+	instanceMgrMap map[string]*Broker
 	observers      []chan *NodeManagerEvent
 }
 
@@ -29,15 +29,15 @@ type NodeManagerEvent struct {
 func (nm *NodeManager) initialize() {
 	dataDir := base.GetDataDirectory()
 	// For now, we are going to have only one instance.
-	var iopts InstanceManagerOpts
+	var iopts BrokerOpts
 	iopts.DataDirectory = dataDir
 	if len(*FlagClusterID) == 0 {
 		glog.Fatalf("Cluster ID has not been provided")
 	}
 	iopts.ClusterID = *FlagClusterID
 	iopts.PeerAddresses = nil
-	im := NewInstanceManager(&iopts)
-	nm.instanceMgrMap = make(map[string]*InstanceManager)
+	im := NewBroker(&iopts)
+	nm.instanceMgrMap = make(map[string]*Broker)
 	nm.instanceMgrMap[iopts.ClusterID] = im
 	nm.rpcServer = NewRPCServer("", 0, nm.instanceMgrMap)
 }

@@ -75,10 +75,7 @@ func (sc *StorageController) initialize() {
 	// Read all the topics from the topic topicsConfigStore and check if the topic directories
 	// exist under the given directory.
 	glog.Infof("Initializing topic controller. Controller ID: %s", sc.controllerID)
-	allTopics, err := sc.topicsConfigStore.GetAllTopics()
-	if err != nil {
-		glog.Fatalf("Unable to get all topics in the topic topicsConfigStore due to err: %s", err.Error())
-	}
+	allTopics := sc.topicsConfigStore.GetAllTopics()
 	if len(allTopics) == 0 {
 		util.CreateDir(sc.getTopicsRootDirectory())
 	} else {

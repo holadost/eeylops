@@ -15,7 +15,7 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	util.LogTestMarker("TestInstanceManager_ConsumerCommit")
 	testDirName := util.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
 	clusterID := "nikhil1nikhil1"
-	opts := InstanceManagerOpts{
+	opts := BrokerOpts{
 		DataDirectory: testDirName,
 		ClusterID:     clusterID,
 		PeerAddresses: nil,
@@ -25,7 +25,7 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	}
 	numConsumers := 15
 	commitOffset := base.Offset(100)
-	im := NewInstanceManager(&opts)
+	im := NewBroker(&opts)
 	ms := NewMotherShip()
 	// Register consumers for non-existent topics.
 	for ii := 0; ii < numConsumers; ii++ {
@@ -211,14 +211,14 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	testDirName := util.CreateTestDir(t, "TestInstanceManager_ProduceConsume")
 	clusterID := "nikhil1nikhil1"
 	topicName := "produce_consume_topic"
-	opts := InstanceManagerOpts{
+	opts := BrokerOpts{
 		DataDirectory: testDirName,
 		ClusterID:     clusterID,
 		PeerAddresses: nil,
 	}
 	numIters := 500
 	batchSize := 10
-	im := NewInstanceManager(&opts)
+	im := NewBroker(&opts)
 	ms := NewMotherShip()
 	partIDs := []int32{1, 2, 3, 4}
 	var req comm.CreateTopicRequest

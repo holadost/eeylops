@@ -20,7 +20,7 @@ type RPCServer struct {
 	comm.UnimplementedEeylopsServiceServer
 	host             string
 	port             int
-	instanceSelector *InstanceSelector
+	instanceSelector *BrokerSelector
 	motherShip       *MotherShip
 }
 

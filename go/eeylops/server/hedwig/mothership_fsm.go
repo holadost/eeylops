@@ -12,8 +12,8 @@ type MotherShipFSM struct {
 	logger            *logging.PrefixLogger
 }
 
-func NewMotherShipFSM(controller *storage.StorageController, logger *logging.PrefixLogger) *InstanceFSM {
-	fsm := InstanceFSM{
+func NewMotherShipFSM(controller *storage.StorageController, logger *logging.PrefixLogger) *BrokerFSM {
+	fsm := BrokerFSM{
 		storageController: controller,
 		logger:            logger,
 	}

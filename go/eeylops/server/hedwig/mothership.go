@@ -71,11 +71,11 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 		AppendedAt: time.Time{},
 	}
 
-	// Apply to InstanceFSM, wait for response and handle errors.
+	// Apply to BrokerFSM, wait for response and handle errors.
 	tmpResp := ms.fsm.Apply(&log)
 	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
-		ms.logger.Fatalf("Invalid response from InstanceFSM. Received: %v", tmpResp)
+		ms.logger.Fatalf("Invalid response from BrokerFSM. Received: %v", tmpResp)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicExists {
@@ -117,18 +117,18 @@ func (ms *MotherShip) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 		AppendedAt: time.Time{},
 	}
 
-	// Apply to InstanceFSM, wait for response and handle errors.
+	// Apply to BrokerFSM, wait for response and handle errors.
 	tmpResp := ms.fsm.Apply(&log)
 	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
-		ms.logger.Fatalf("Unable to cast to InstanceFSM response. Received: %v", tmpResp)
+		ms.logger.Fatalf("Unable to cast to BrokerFSM response. Received: %v", tmpResp)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicNotFound {
 			return makeResponse(comm.Error_KErrTopicNotFound, nil,
 				fmt.Sprintf("Topic: %d does not exist", topicID))
 		}
-		ms.logger.Fatalf("Unexpected error from InstanceFSM while attempting to remove topic: %d. Error: %s",
+		ms.logger.Fatalf("Unexpected error from BrokerFSM while attempting to remove topic: %d. Error: %s",
 			req.GetTopicId(), fsmResp.Error.Error())
 	}
 	return makeResponse(comm.Error_KNoError, nil, "")
