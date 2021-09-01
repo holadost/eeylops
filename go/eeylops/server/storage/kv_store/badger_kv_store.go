@@ -3,6 +3,7 @@ package kv_store
 import (
 	"eeylops/util/logging"
 	badger "github.com/dgraph-io/badger/v2"
+	"github.com/golang/glog"
 	"os"
 )
 
@@ -65,29 +66,12 @@ func (kvStore *BadgerKVStore) Size() int64 {
 
 // Get gets the value associated with the key.
 func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
-	var val []byte
 	if kvStore.closed {
-		return val, ErrKVStoreClosed
+		return nil, ErrKVStoreClosed
 	}
-	err := kvStore.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(key)
-		if err != nil {
-			return err
-		}
-		val, err = item.ValueCopy(nil)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		if err == badger.ErrKeyNotFound {
-			return val, ErrKVStoreKeyNotFound
-		} else {
-			return val, ErrKVStoreBackend
-		}
-	}
-	return val, err
+	txn := kvStore.db.NewTransaction(false)
+	defer txn.Discard()
+	return kvStore.internalGet(txn, key)
 }
 
 // GetS gets the value associated with the key.
@@ -99,26 +83,50 @@ func (kvStore *BadgerKVStore) GetS(key string) (string, error) {
 	return string(val), nil
 }
 
+func (kvStore *BadgerKVStore) internalGet(txn *badger.Txn, key []byte) ([]byte, error) {
+	var val []byte
+	item, err := txn.Get(key)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return val, ErrKVStoreKeyNotFound
+		} else {
+			return val, ErrKVStoreBackend
+		}
+	}
+	val, err = item.ValueCopy(nil)
+	if err != nil {
+		return nil, ErrKVStoreClosed
+	}
+	return val, nil
+}
+
 // Put puts a key value pair in the DB. If the key already exists, it would be updated.
 func (kvStore *BadgerKVStore) Put(key []byte, value []byte) error {
 	if kvStore.closed {
 		kvStore.logger.Errorf("KV store is closed")
 		return ErrKVStoreClosed
 	}
-	err := kvStore.db.Update(func(txn *badger.Txn) error {
-		err := txn.Set(key, value)
-		return err
-	})
+	txn := kvStore.db.NewTransaction(true)
+	defer txn.Discard()
+	err := kvStore.internalPut(txn, key, value)
 	if err != nil {
-		kvStore.logger.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
+		return err
+	}
+	err = txn.Commit()
+	if err != nil {
+		kvStore.logger.Errorf("Unable to commit transaction due to err: %s", err.Error())
 		return ErrKVStoreBackend
 	}
 	return nil
 }
 
-// PutS puts a key value pair in the DB. If the key already exists, it would be updated.
-func (kvStore *BadgerKVStore) PutS(key string, value string) error {
-	return kvStore.Put([]byte(key), []byte(value))
+func (kvStore *BadgerKVStore) internalPut(txn *badger.Txn, key []byte, value []byte) error {
+	err := txn.Set(key, value)
+	if err != nil {
+		kvStore.logger.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
+		return ErrKVStoreBackend
+	}
+	return nil
 }
 
 // Delete deletes a key value pair from the DB.
@@ -127,20 +135,27 @@ func (kvStore *BadgerKVStore) Delete(key []byte) error {
 		kvStore.logger.Errorf("KV store is closed")
 		return ErrKVStoreClosed
 	}
-	err := kvStore.db.Update(func(txn *badger.Txn) error {
-		err := txn.Delete(key)
-		return err
-	})
+	txn := kvStore.db.NewTransaction(true)
+	defer txn.Discard()
+	err := kvStore.internalDelete(txn, key)
 	if err != nil {
-		kvStore.logger.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
+		return err
+	}
+	err = txn.Commit()
+	if err != nil {
+		kvStore.logger.Errorf("Unable to commit transaction due to err: %s", err.Error())
 		return ErrKVStoreBackend
 	}
 	return nil
 }
 
-// DeleteS deletes a key value pair from the DB.
-func (kvStore *BadgerKVStore) DeleteS(key string) error {
-	return kvStore.Put([]byte(key), []byte(""))
+func (kvStore *BadgerKVStore) internalDelete(txn *badger.Txn, key []byte) error {
+	err := txn.Delete(key)
+	if err != nil {
+		kvStore.logger.Errorf("Unable to delete key: %v due to err: %s", key, err.Error())
+		return ErrKVStoreBackend
+	}
+	return nil
 }
 
 // Scan scans the DB in ascending order from the given start key. if numValues is < 0, the entire DB is scanned.
@@ -148,6 +163,11 @@ func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int, scanSizeBytes
 	keys [][]byte, values [][]byte, nextKey []byte, retErr error) {
 	txn := kvStore.db.NewTransaction(false)
 	defer txn.Discard()
+	return kvStore.internalScan(txn, startKey, numValues, scanSizeBytes, reverse)
+}
+
+func (kvStore *BadgerKVStore) internalScan(txn *badger.Txn, startKey []byte, numValues int, scanSizeBytes int,
+	reverse bool) (keys [][]byte, values [][]byte, nextKey []byte, retErr error) {
 	itr := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer itr.Close()
 
@@ -157,11 +177,11 @@ func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int, scanSizeBytes
 	} else {
 		itr.Seek(startKey)
 	}
-	currSizeBytes := 0
+	currSizeBytes := int64(0)
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
-		valSize := int(item.ValueSize())
-		if (scanSizeBytes > 0) && (currSizeBytes+valSize > scanSizeBytes) {
+		valSize := item.ValueSize()
+		if (scanSizeBytes > 0) && (currSizeBytes+valSize > int64(scanSizeBytes)) {
 			break
 		}
 		currSizeBytes += valSize
@@ -181,24 +201,6 @@ func (kvStore *BadgerKVStore) Scan(startKey []byte, numValues int, scanSizeBytes
 	return keys, values, nil, nil
 }
 
-// ScanS scans the DB in ascending order from the given start key.
-func (kvStore *BadgerKVStore) ScanS(startKey string, numValues int, scanSizeBytes int, reverse bool) (
-	keys []string, values []string, nextKey string, retErr error) {
-	keysByte, valuesByte, nextKeyByte, retErrByte := kvStore.Scan([]byte(startKey), numValues, scanSizeBytes, reverse)
-	if retErrByte != nil {
-		return nil, nil, "", retErrByte
-	}
-	for ii := 0; ii < len(keysByte); ii++ {
-		keys = append(keys, string(keysByte[ii]))
-		values = append(values, string(valuesByte[ii]))
-	}
-	nextKey = ""
-	if nextKeyByte != nil {
-		nextKey = string(nextKeyByte)
-	}
-	return keys, values, nextKey, nil
-}
-
 // MultiGet gets the values associated with multiple keys.
 func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []error) {
 	if kvStore.closed {
@@ -209,57 +211,36 @@ func (kvStore *BadgerKVStore) MultiGet(keys [][]byte) (values [][]byte, errs []e
 		}
 		return
 	}
-	kvStore.db.View(func(txn *badger.Txn) error {
-		for _, key := range keys {
-			item, err := txn.Get(key)
-			if err != nil {
-				if err == badger.ErrKeyNotFound {
-					errs = append(errs, ErrKVStoreKeyNotFound)
-				} else {
-					kvStore.logger.Errorf("Unable to get key: %v due to err: %s", key, err.Error())
-					errs = append(errs, ErrKVStoreGeneric)
-				}
-				errs = append(errs, err)
-				values = append(values, nil)
-				continue
-			}
-			tmpValue, err := item.ValueCopy(nil)
-			if err != nil {
-				kvStore.logger.Errorf("Unable to parse value for key: %v due to err: %s", key, err.Error())
-				errs = append(errs, ErrKVStoreGeneric)
-				values = append(values, nil)
-				continue
-			}
-			errs = append(errs, nil)
-			values = append(values, tmpValue)
-		}
-		return nil
-	})
-	return
+	txn := kvStore.db.NewTransaction(false)
+	defer txn.Discard()
+	return kvStore.internalMultiGet(txn, keys)
 }
 
-// MultiGetS gets the values associated with multiple keys.
-func (kvStore *BadgerKVStore) MultiGetS(keys []string) ([]string, []error) {
-	var values []string
-
-	// Convert keys to byte slice.
-	var bkeys [][]byte
-	for ii := 0; ii < len(keys); ii++ {
-		bkeys = append(bkeys, []byte(keys[ii]))
-	}
-
-	// Fetch data from DB.
-	bvals, berrs := kvStore.MultiGet(bkeys)
-
-	// Convert values to byte slice.
-	for ii := 0; ii < len(berrs); ii++ {
-		if berrs[ii] != nil {
-			values = append(values, "")
-		} else {
-			values = append(values, string(bvals[ii]))
+func (kvStore *BadgerKVStore) internalMultiGet(txn *badger.Txn, keys [][]byte) (values [][]byte, errs []error) {
+	for _, key := range keys {
+		item, err := txn.Get(key)
+		if err != nil {
+			if err == badger.ErrKeyNotFound {
+				errs = append(errs, ErrKVStoreKeyNotFound)
+			} else {
+				kvStore.logger.Errorf("Unable to get key: %v due to err: %s", key, err.Error())
+				errs = append(errs, ErrKVStoreGeneric)
+			}
+			errs = append(errs, err)
+			values = append(values, nil)
+			continue
 		}
+		tmpValue, err := item.ValueCopy(nil)
+		if err != nil {
+			kvStore.logger.Errorf("Unable to parse value for key: %v due to err: %s", key, err.Error())
+			errs = append(errs, ErrKVStoreGeneric)
+			values = append(values, nil)
+			continue
+		}
+		errs = append(errs, nil)
+		values = append(values, tmpValue)
 	}
-	return values, berrs
+	return
 }
 
 // BatchPut sets/updates multiple key value pairs in the DB.
@@ -268,6 +249,21 @@ func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
 		kvStore.logger.Errorf("KV store is already closed")
 		return ErrKVStoreBackend
 	}
+	txn := kvStore.db.NewTransaction(true)
+	defer txn.Discard()
+	err := kvStore.internalBatchPut(txn, keys, values)
+	if err == nil {
+		cerr := txn.Commit()
+		if cerr != nil {
+			kvStore.logger.Errorf("Unable to commit transaction due to err: %s", cerr.Error())
+			return ErrKVStoreBackend
+		}
+		return nil
+	}
+	return err
+}
+
+func (kvStore *BadgerKVStore) internalBatchPut(txn *badger.Txn, keys [][]byte, values [][]byte) error {
 	wb := kvStore.db.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
 		if err := wb.Set(keys[ii], values[ii]); err != nil {
@@ -282,46 +278,40 @@ func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
 	return nil
 }
 
-// BatchPutS sets/updates multiple key value pairs in the DB.
-func (kvStore *BadgerKVStore) BatchPutS(keys []string, values []string) error {
-	var bkeys [][]byte
-	var bvalues [][]byte
-	for ii := 0; ii < len(keys); ii++ {
-		bkeys = append(bkeys, []byte(keys[ii]))
-		bvalues = append(bvalues, []byte(values[ii]))
-	}
-	return kvStore.BatchPut(bkeys, bvalues)
-}
-
 // BatchDelete deletes multiple key value pairs from the DB.
 func (kvStore *BadgerKVStore) BatchDelete(keys [][]byte) error {
 	if kvStore.closed {
 		kvStore.logger.Errorf("KV store is closed")
 		return ErrKVStoreClosed
 	}
-	err := kvStore.db.Update(func(txn *badger.Txn) error {
-		for _, key := range keys {
-			err := txn.Delete(key)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	txn := kvStore.db.NewTransaction(true)
+	defer txn.Discard()
+	err := kvStore.internalBatchDelete(txn, keys)
 	if err != nil {
-		kvStore.logger.Errorf("Unable to batch delete keys: %v due to err: %s", keys, err.Error())
+		return err
+	}
+	cerr := txn.Commit()
+	if cerr != nil {
+		kvStore.logger.Errorf("Unable to commit batch delete transaction due to err: %s", cerr.Error())
 		return ErrKVStoreBackend
 	}
 	return nil
 }
 
-// BatchDeleteS deletes multiple key value pairs from the DB.
-func (kvStore *BadgerKVStore) BatchDeleteS(keys []string) error {
-	var bkeys [][]byte
-	for ii := 0; ii < len(keys); ii++ {
-		bkeys = append(bkeys, []byte(keys[ii]))
+// BatchDelete deletes multiple key value pairs from the DB.
+func (kvStore *BadgerKVStore) internalBatchDelete(txn *badger.Txn, keys [][]byte) error {
+	var err error
+	for _, key := range keys {
+		err := txn.Delete(key)
+		if err != nil {
+			break
+		}
 	}
-	return kvStore.BatchDelete(bkeys)
+	if err != nil {
+		kvStore.logger.Errorf("Unable to batch delete keys: %v due to err: %s", keys, err.Error())
+		return ErrKVStoreBackend
+	}
+	return nil
 }
 
 // Close implements the Segment interface. It closes the connection to the underlying
@@ -338,25 +328,40 @@ func (kvStore *BadgerKVStore) Close() error {
 }
 
 func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte, reverse bool) Scanner {
-	return newBadgerScanner(kvStore.db, prefix, startKey, reverse)
+	return newBadgerScannerWithDb(kvStore.db, prefix, startKey, reverse)
 }
 
-func generatePrefixKey(key []byte, prefix string) []byte {
-	return []byte{}
+func (kvStore *BadgerKVStore) NewTransaction(prefix []byte, startKey []byte, reverse bool) Transaction {
+	return newBadgerTransaction(kvStore)
 }
 
 type BadgerScanner struct {
 	db       *badger.DB
 	iter     *badger.Iterator
 	txn      *badger.Txn
+	localTxn bool
 	startKey []byte
 	prefix   []byte
 	reverse  bool
 }
 
-func newBadgerScanner(db *badger.DB, prefix []byte, startKey []byte, reverse bool) *BadgerScanner {
+func newBadgerScannerWithDb(db *badger.DB, prefix []byte, startKey []byte, reverse bool) *BadgerScanner {
 	scanner := new(BadgerScanner)
 	scanner.db = db
+	scanner.txn = nil
+	scanner.iter = nil
+	scanner.startKey = startKey
+	scanner.reverse = reverse
+	scanner.prefix = prefix
+	scanner.initialize()
+	return scanner
+}
+
+func newBadgerScannerWithTxn(txn *badger.Txn, prefix []byte, startKey []byte, reverse bool) *BadgerScanner {
+	scanner := new(BadgerScanner)
+	scanner.txn = txn
+	scanner.localTxn = false
+	scanner.db = nil
 	scanner.iter = nil
 	scanner.startKey = startKey
 	scanner.reverse = reverse
@@ -366,7 +371,13 @@ func newBadgerScanner(db *badger.DB, prefix []byte, startKey []byte, reverse boo
 }
 
 func (scanner *BadgerScanner) initialize() {
-	scanner.txn = scanner.db.NewTransaction(false)
+	if scanner.txn == nil {
+		if scanner.db == nil {
+			glog.Fatalf("Either db or txn must have been provided")
+		}
+		scanner.localTxn = true
+		scanner.txn = scanner.db.NewTransaction(false)
+	}
 	opts := badger.DefaultIteratorOptions
 	opts.Reverse = scanner.reverse
 	scanner.iter = scanner.txn.NewIterator(opts)
@@ -404,5 +415,88 @@ func (scanner *BadgerScanner) Seek(key []byte) {
 
 func (scanner *BadgerScanner) Close() {
 	scanner.iter.Close()
-	scanner.txn.Discard()
+	if scanner.localTxn {
+		// Discard the transaction iff we created it. If it was passed from outside, skip discarding.
+		scanner.txn.Discard()
+	}
+}
+
+type BadgerKVStoreTxn struct {
+	store *BadgerKVStore
+	txn   *badger.Txn
+}
+
+func newBadgerTransaction(store *BadgerKVStore) *BadgerKVStoreTxn {
+	btxn := &BadgerKVStoreTxn{
+		store: store,
+		txn:   store.db.NewTransaction(true),
+	}
+	return btxn
+}
+
+// Get gets the value associated with the key.
+func (badgerKVTxn *BadgerKVStoreTxn) Get(key []byte) ([]byte, error) {
+	if badgerKVTxn.store.closed {
+		return nil, ErrKVStoreClosed
+	}
+	return badgerKVTxn.store.internalGet(badgerKVTxn.txn, key)
+}
+
+// Put puts a key value pair in the DB. If the key already exists, it would be updated.
+func (badgerKVTxn *BadgerKVStoreTxn) Put(key []byte, value []byte) error {
+	if badgerKVTxn.store.closed {
+		badgerKVTxn.store.logger.Errorf("KV store is closed")
+		return ErrKVStoreClosed
+	}
+	return badgerKVTxn.store.internalPut(badgerKVTxn.txn, key, value)
+}
+
+// Delete deletes a key value pair from the DB.
+func (badgerKVTxn *BadgerKVStoreTxn) Delete(key []byte) error {
+	if badgerKVTxn.store.closed {
+		badgerKVTxn.store.logger.Errorf("KV store is closed")
+		return ErrKVStoreClosed
+	}
+	return badgerKVTxn.store.internalDelete(badgerKVTxn.txn, key)
+}
+
+// Scan scans values from the DB starting from the given startKey.
+func (badgerKVTxn *BadgerKVStoreTxn) Scan(startKey []byte, numMessages int, scanSizeBytes int,
+	reverse bool) (keys [][]byte, values [][]byte, nextKey []byte, err error) {
+	return badgerKVTxn.store.internalScan(badgerKVTxn.txn, startKey, numMessages, scanSizeBytes, reverse)
+}
+
+// MultiGet performs batch gets.
+func (badgerKVTxn *BadgerKVStoreTxn) MultiGet(keys [][]byte) ([][]byte, []error) {
+	return badgerKVTxn.store.internalMultiGet(badgerKVTxn.txn, keys)
+}
+
+// BatchPut does batch Put i.e. combines all the updates into a single write.
+func (badgerKVTxn *BadgerKVStoreTxn) BatchPut(keys [][]byte, values [][]byte) error {
+	return badgerKVTxn.store.internalBatchPut(badgerKVTxn.txn, keys, values)
+}
+
+// BatchDelete performs a batch delete operation.
+func (badgerKVTxn *BadgerKVStoreTxn) BatchDelete(keys [][]byte) error {
+	return badgerKVTxn.store.internalBatchDelete(badgerKVTxn.txn, keys)
+}
+
+func (badgerKVTxn *BadgerKVStoreTxn) Commit() error {
+	err := badgerKVTxn.txn.Commit()
+	if err != nil {
+		badgerKVTxn.store.logger.Errorf("Unable to commit transaction due to err: %s", err.Error())
+		if err == badger.ErrConflict {
+			return ErrKVStoreConflict
+		}
+		return ErrKVStoreBackend
+	}
+	return nil
+}
+
+func (badgerKVTxn *BadgerKVStoreTxn) Discard() {
+	badgerKVTxn.txn.Discard()
+}
+
+func (badgerKVTxn *BadgerKVStoreTxn) CreateScanner(prefix []byte, startKey []byte, reverse bool) Scanner {
+	return newBadgerScannerWithTxn(badgerKVTxn.txn, prefix, startKey, reverse)
 }

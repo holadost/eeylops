@@ -15,7 +15,7 @@ type MotherShip struct {
 	logger              *logging.PrefixLogger
 	lastTopicIDAssigned base.TopicIDType
 	fsm                 *MotherShipFSM
-	storageController   *storage.StorageController
+	topicsConfigStore   *storage.TopicsConfigStore
 }
 
 func NewMotherShip() *MotherShip {
@@ -163,7 +163,7 @@ func (ms *MotherShip) GetTopic(ctx context.Context, req *comm.GetTopicRequest) *
 	}
 
 	// Fetch topic.
-	topic, err := ms.storageController.GetTopicByName(req.GetTopicName())
+	topic, err := ms.topicsConfigStore.GetTopicByName(req.GetTopicName())
 	if err != nil {
 		if err == storage.ErrTopicNotFound {
 			return makeResponse(nil, comm.Error_KErrTopicNotFound, err,
@@ -177,7 +177,7 @@ func (ms *MotherShip) GetTopic(ctx context.Context, req *comm.GetTopicRequest) *
 
 func (ms *MotherShip) GetAllTopics(ctx context.Context) *comm.GetAllTopicsResponse {
 	// TODO: Only if we are the leader.
-	topics := ms.storageController.GetAllTopics()
+	topics := ms.topicsConfigStore.GetAllTopics()
 	var resp comm.GetAllTopicsResponse
 	resp.Error = makeErrorProto(comm.Error_KNoError, nil, "")
 	for _, tpc := range topics {

@@ -16,8 +16,10 @@ import (
 
 const kTopicsConfigStoreDirectory = "topics_config_store"
 const kLastTopicIDKey = "last::::topic::::id"
+const kLastRLogIdx = "last::::rlog::::idx"
 
 var kLastTopicIDBytes = []byte(kLastTopicIDKey)
+var kLastRLogIdxBytes = []byte(kLastRLogIdx)
 
 // TopicsConfigStore holds all the topics for eeylops.
 type TopicsConfigStore struct {
@@ -73,7 +75,7 @@ func (tcs *TopicsConfigStore) Close() error {
 	return tcs.kvStore.Close()
 }
 
-func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig) error {
+func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) error {
 	tcs.logger.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
 	tcs.topicMapLock.Lock()
 	defer tcs.topicMapLock.Unlock()
@@ -85,8 +87,9 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig) error {
 	topic.ID = tcs.nextTopicID
 	var keys [][]byte
 	var values [][]byte
-	keys = append(keys, []byte(topic.Name), kLastTopicIDBytes)
-	values = append(values, tcs.marshalTopic(&topic), util.UintToBytes(uint64(topic.ID)))
+	keys = append(keys, []byte(topic.Name), kLastTopicIDBytes, kLastRLogIdxBytes)
+	values = append(values, tcs.marshalTopic(&topic), util.UintToBytes(uint64(topic.ID)),
+		util.UintToBytes(uint64(rLogIdx)))
 	err := tcs.kvStore.BatchPut(keys, values)
 	if err != nil {
 		tcs.logger.Errorf("Unable to add topic: %s due to err: %s", topic.Name, err.Error())
@@ -97,22 +100,22 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig) error {
 	return nil
 }
 
-func (tcs *TopicsConfigStore) RemoveTopic(topicName string) error {
-	tcs.logger.Infof("Removing topic: %s from topic store", topicName)
+func (tcs *TopicsConfigStore) RemoveTopic(topicId base.TopicIDType, rLogIdx int64) error {
+	tcs.logger.Infof("Removing topic: %d from topic store", topicId)
 	tcs.topicMapLock.Lock()
 	defer tcs.topicMapLock.Unlock()
-	tpc, exists := tcs.topicNameMap[topicName]
+	tpc, exists := tcs.topicIDMap[topicId]
 	if !exists {
 		return ErrTopicNotFound
 	}
-	_, exists = tcs.topicIDMap[tpc.ID]
+	topicConfig, exists := tcs.topicIDMap[tpc.ID]
 	if !exists {
 		tcs.logger.Fatalf("Found topic named: %s in name map but not in ID map. Topic ID: %d", tpc.Name, tpc.ID)
 	}
-	key := []byte(topicName)
+	key := []byte(topicConfig.Name)
 	err := tcs.kvStore.Delete(key)
 	if err != nil {
-		tcs.logger.Errorf("Unable to delete topic: %s due to err: %s", topicName, err.Error())
+		tcs.logger.Errorf("Unable to delete topic: %s due to err: %s", topicConfig.Name, err.Error())
 		return ErrTopicStore
 	}
 	tcs.removeTopicFromMaps(tpc)
@@ -172,7 +175,7 @@ func (tcs *TopicsConfigStore) getTopicsFromKVStore() []*base.TopicConfig {
 		return topics
 	}
 	for ii := 0; ii < len(values); ii++ {
-		if bytes.Compare(keys[ii], kLastTopicIDBytes) == 0 {
+		if bytes.Compare(keys[ii], kLastTopicIDBytes) == 0 || bytes.Compare(keys[ii], kLastRLogIdxBytes) == 0 {
 			continue
 		}
 		topics = append(topics, tcs.unmarshalTopic(values[ii]))

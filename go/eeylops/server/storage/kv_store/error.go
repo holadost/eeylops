@@ -14,4 +14,8 @@ var (
 
 	// ErrKVStoreGeneric is returned when there is some generic kv store error.
 	ErrKVStoreGeneric = errors.New("ErrKVStoreGeneric: kv store generic error")
+
+	// ErrKVStoreConflict is returned when there is a conflict error. This can happen when there are simultaneous
+	// transactions.
+	ErrKVStoreConflict = errors.New("ErrKVStoreConflict: kv store conflict error")
 )

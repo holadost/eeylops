@@ -23,14 +23,13 @@ type PeerAddress struct {
 
 type BrokerOpts struct {
 	DataDirectory string        // Data directory for this Broker.
-	ClusterID     string        // Cluster ID.
 	PeerAddresses []PeerAddress // List of peer addresses. The first address must be the current host's address.
 }
 
 // Broker manages the replication and storage controller for the node.
 type Broker struct {
 	instanceDir           string
-	clusterID             string
+	brokerID              string
 	peerAddresses         []PeerAddress
 	replicationController *replication.RaftController
 	storageController     *storage.StorageController
@@ -46,19 +45,18 @@ func NewBroker(opts *BrokerOpts) *Broker {
 }
 
 func (broker *Broker) initialize(opts *BrokerOpts) {
-	broker.clusterID = opts.ClusterID
-	broker.logger = logging.NewPrefixLogger(broker.clusterID)
+	broker.logger = logging.NewPrefixLogger(broker.brokerID)
 	broker.peerAddresses = opts.PeerAddresses
 
 	// Create a root directory for this instance.
-	clusterRootDir := path.Join(opts.DataDirectory, broker.clusterID)
+	clusterRootDir := path.Join(opts.DataDirectory, broker.brokerID)
 	util.CreateDir(clusterRootDir)
 
 	// Initialize storage controller.
 	var stopts storage.StorageControllerOpts
 	stopts.StoreGCScanIntervalSecs = 300
 	stopts.RootDirectory = path.Join(clusterRootDir, "storage")
-	stopts.ControllerID = broker.clusterID
+	stopts.ControllerID = broker.brokerID
 	broker.storageController = storage.NewStorageController(stopts)
 	allTopics := broker.getAllTopics()
 	max := base.TopicIDType(-1)
@@ -73,7 +71,7 @@ func (broker *Broker) initialize(opts *BrokerOpts) {
 	}
 
 	// Initialize BrokerFSM.
-	fsm := NewBrokerFSM(broker.storageController, logging.NewPrefixLogger(broker.clusterID))
+	fsm := NewBrokerFSM(broker.storageController, logging.NewPrefixLogger(broker.brokerID))
 	broker.fsm = fsm
 	// TODO: Initialize replication controller.
 }

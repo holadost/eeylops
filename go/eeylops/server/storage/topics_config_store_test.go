@@ -43,7 +43,7 @@ func TestTopicConfigStore(t *testing.T) {
 		topic.TTLSeconds = 86400
 		topic.ID = base.TopicIDType(ii)
 		topic.CreatedAt = time.Now()
-		if err := ts.AddTopic(topic); err != nil {
+		if err := ts.AddTopic(topic, int64(100+ii)); err != nil {
 			glog.Fatalf("Unable to add topic due to err: %s", err.Error())
 			return
 		}
@@ -79,7 +79,7 @@ func TestTopicConfigStore(t *testing.T) {
 
 	// Remove topics.
 	for ii := 0; ii < numTopics; ii++ {
-		err := ts.RemoveTopic(topicNameGen(ii))
+		err := ts.RemoveTopic(topicNameGen(ii), int64(10000+ii))
 		if err != nil {
 			glog.Fatalf("Unable to remove topic due to err: %s", err.Error())
 		}

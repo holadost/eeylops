@@ -8,13 +8,13 @@ import (
 )
 
 type MotherShipFSM struct {
-	storageController *storage.StorageController
+	topicsConfigStore *storage.TopicsConfigStore
 	logger            *logging.PrefixLogger
 }
 
-func NewMotherShipFSM(controller *storage.StorageController, logger *logging.PrefixLogger) *BrokerFSM {
-	fsm := BrokerFSM{
-		storageController: controller,
+func NewMotherShipFSM(tcs *storage.TopicsConfigStore, logger *logging.PrefixLogger) *MotherShipFSM {
+	fsm := MotherShipFSM{
+		topicsConfigStore: tcs,
 		logger:            logger,
 	}
 	return &fsm
@@ -67,7 +67,7 @@ func (fsm *MotherShipFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 	// Add topic.
-	if err := fsm.storageController.AddTopic(cmd.AddTopicCommand.TopicConfig, int64(log.Index)); err != nil {
+	if err := fsm.topicsConfigStore.AddTopic(cmd.AddTopicCommand.TopicConfig, int64(log.Index)); err != nil {
 		if err == storage.ErrTopicExists {
 			fsm.logger.Warningf("Unable to add topic as it already exists. Topic Details: %s, "+
 				"Log Index: %d, Log Term: %d", cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
@@ -97,7 +97,7 @@ func (fsm *MotherShipFSM) removeTopic(cmd *Command, log *raft.Log) *FSMResponse 
 	resp.Error = nil
 
 	// Remove topic.
-	if err := fsm.storageController.RemoveTopic(cmd.RemoveTopicCommand.TopicID, int64(log.Index)); err != nil {
+	if err := fsm.topicsConfigStore.RemoveTopic(cmd.RemoveTopicCommand.TopicID, int64(log.Index)); err != nil {
 		if err == storage.ErrTopicNotFound {
 			fsm.logger.Warningf("Unable to remove topic: %d as topic does not exist. Log Index: %d, "+
 				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
