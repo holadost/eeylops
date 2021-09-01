@@ -3,6 +3,7 @@ package hedwig
 import (
 	"context"
 	"eeylops/comm"
+	"eeylops/server/base"
 	"flag"
 	"fmt"
 	"github.com/golang/glog"
@@ -17,12 +18,13 @@ var (
 
 type RPCServer struct {
 	comm.UnimplementedEeylopsServiceServer
-	host           string
-	port           int
-	instanceMgrMap map[string]*InstanceManager
+	host             string
+	port             int
+	instanceSelector *InstanceSelector
+	motherShip       *MotherShip
 }
 
-func NewRPCServer(host string, port int, instanceMgrMap map[string]*InstanceManager) *RPCServer {
+func NewRPCServer(host string, port int) *RPCServer {
 	rpcServer := new(RPCServer)
 	if len(host) == 0 {
 		if len(*FlagRpcServerHost) == 0 {
@@ -36,7 +38,6 @@ func NewRPCServer(host string, port int, instanceMgrMap map[string]*InstanceMana
 		}
 		port = *FlagRpcServerPort
 	}
-	rpcServer.instanceMgrMap = instanceMgrMap
 	return rpcServer
 }
 
@@ -92,8 +93,8 @@ func (srv *RPCServer) GetAllTopics(ctx context.Context, req *comm.GetAllTopicsRe
 }
 
 func (srv *RPCServer) Produce(ctx context.Context, req *comm.ProduceRequest) (*comm.ProduceResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
+	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
+	if err != nil {
 		return &comm.ProduceResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.Produce(ctx, req)
@@ -101,8 +102,8 @@ func (srv *RPCServer) Produce(ctx context.Context, req *comm.ProduceRequest) (*c
 }
 
 func (srv *RPCServer) Consume(ctx context.Context, req *comm.ConsumeRequest) (*comm.ConsumeResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
+	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
+	if err != nil {
 		return &comm.ConsumeResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.Consume(ctx, req)
@@ -110,8 +111,8 @@ func (srv *RPCServer) Consume(ctx context.Context, req *comm.ConsumeRequest) (*c
 }
 
 func (srv *RPCServer) Commit(ctx context.Context, req *comm.CommitRequest) (*comm.CommitResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
+	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
+	if err != nil {
 		return &comm.CommitResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.Commit(ctx, req)
@@ -119,16 +120,16 @@ func (srv *RPCServer) Commit(ctx context.Context, req *comm.CommitRequest) (*com
 }
 
 func (srv *RPCServer) GetLastCommitted(ctx context.Context, req *comm.LastCommittedRequest) (*comm.LastCommittedResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
+	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
+	if err != nil {
 		return &comm.LastCommittedResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.GetLastCommitted(ctx, req)
 	return resp, nil
 }
 
-func (srv *RPCServer) GetLeader(ctx context.Context, req *comm.GetLeaderRequest) (*comm.GetLeaderResponse, error) {
-	return &comm.GetLeaderResponse{}, nil
+func (srv *RPCServer) GetBroker(ctx context.Context, req *comm.GetBrokerRequest) (*comm.GetBrokerResponse, error) {
+	return &comm.GetBrokerResponse{}, nil
 }
 
 func (srv *RPCServer) GetClusterConfig(ctx context.Context, req *comm.GetClusterConfigRequest) (*comm.GetClusterConfigResponse, error) {
@@ -136,8 +137,8 @@ func (srv *RPCServer) GetClusterConfig(ctx context.Context, req *comm.GetCluster
 }
 
 func (srv *RPCServer) RegisterConsumer(ctx context.Context, req *comm.RegisterConsumerRequest) (*comm.RegisterConsumerResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
+	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
+	if err != nil {
 		return &comm.RegisterConsumerResponse{Error: srv.createInvalidClusterErrorProto()}, nil
 	}
 	resp := im.RegisterConsumer(ctx, req)

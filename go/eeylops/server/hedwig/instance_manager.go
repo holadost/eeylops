@@ -34,7 +34,7 @@ type InstanceManager struct {
 	peerAddresses         []PeerAddress
 	replicationController *replication.RaftController
 	storageController     *storage.StorageController
-	fsm                   *FSM
+	fsm                   *InstanceFSM
 	lastTopicIDAssigned   base.TopicIDType
 	logger                *logging.PrefixLogger
 }
@@ -72,7 +72,7 @@ func (im *InstanceManager) initialize(opts *InstanceManagerOpts) {
 		im.lastTopicIDAssigned = 0
 	}
 
-	// Initialize FSM.
+	// Initialize InstanceFSM.
 	fsm := NewFSM(im.storageController, logging.NewPrefixLogger(im.clusterID))
 	im.fsm = fsm
 	// TODO: Initialize replication controller.
@@ -117,7 +117,7 @@ func (im *InstanceManager) Produce(ctx context.Context, req *comm.ProduceRequest
 	tmpResp := im.fsm.Apply(&log)
 	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
-		im.logger.Fatalf("Unable to cast produce response to FSM response. Received: %v", fsmResp)
+		im.logger.Fatalf("Unable to cast produce response to InstanceFSM response. Received: %v", fsmResp)
 	}
 	if fsmResp.CommandType != KAppendCommand {
 		im.logger.Fatalf("Got an unexpected command type for produce. Expected: %s(%d), Got: %s(%d)",
@@ -316,7 +316,7 @@ func (im *InstanceManager) internalCommit(ctx context.Context, cm CommitMessage)
 	}
 	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
-		im.logger.Fatalf("Unable to cast response from FSM to FSMResponse. Received: %v", tmpResp)
+		im.logger.Fatalf("Unable to cast response from InstanceFSM to FSMResponse. Received: %v", tmpResp)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrConsumerNotRegistered {
@@ -399,174 +399,6 @@ func (im *InstanceManager) GetLastCommitted(ctx context.Context,
 	return makeResponse(offset, comm.Error_KNoError, nil, "")
 }
 
-func (im *InstanceManager) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {
-	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.CreateTopicResponse {
-		var resp comm.CreateTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
-		return &resp
-	}
-	// Sanity checks.
-	topic := req.GetTopic()
-	if len(topic.GetTopicName()) == 0 {
-		im.logger.Errorf("Invalid topic name. Req: %v", req)
-		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
-	}
-	if len(topic.GetPartitionIds()) == 0 {
-		im.logger.Errorf("No partitions provided while creating topic")
-		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid partition ID")
-	}
-	// TODO: This must go through the replication controller and we must be the leader.
-	// Populate arg, command and log.
-	var prtIds []int
-	for _, id := range topic.GetPartitionIds() {
-		prtIds = append(prtIds, int(id))
-	}
-	var tc base.TopicConfig
-	now := time.Now()
-	tc.Name = topic.GetTopicName()
-	tc.PartitionIDs = prtIds
-	tc.TTLSeconds = int(topic.TtlSeconds)
-	tc.CreatedAt = now
-	tc.ID = im.lastTopicIDAssigned + 1
-	addTopicMsg := AddTopicMessage{TopicConfig: tc}
-	cmd := Command{
-		CommandType:     KAddTopicCommand,
-		AddTopicCommand: addTopicMsg,
-	}
-	data := Serialize(&cmd)
-	log := raft.Log{
-		Index:      uint64(now.UnixNano()),
-		Term:       0,
-		Type:       0,
-		Data:       data,
-		Extensions: nil,
-		AppendedAt: time.Time{},
-	}
-
-	// Apply to FSM, wait for response and handle errors.
-	tmpResp := im.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
-	if !ok {
-		im.logger.Fatalf("Invalid response from FSM. Received: %v", tmpResp)
-	}
-	if fsmResp.Error != nil {
-		if fsmResp.Error == storage.ErrTopicExists {
-			return makeResponse(comm.Error_KErrTopicExists, nil,
-				fmt.Sprintf("Topic: %s already exists", req.GetTopic().GetTopicName()))
-		}
-		im.logger.Fatalf("Unexpected error while creating topic: %s", fsmResp.Error.Error())
-	}
-	im.lastTopicIDAssigned++
-	return makeResponse(comm.Error_KNoError, nil, "")
-}
-
-func (im *InstanceManager) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) *comm.RemoveTopicResponse {
-	// Sanity checks.
-	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RemoveTopicResponse {
-		var resp comm.RemoveTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
-		return &resp
-	}
-	topicID := base.TopicIDType(req.GetTopicId())
-	if topicID == 0 {
-		im.logger.VInfof(1, "Invalid topic name. Req: %v", req)
-		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
-	}
-
-	// TODO: This must go through the replication controller and we must be the leader.
-	rmTopicMsg := RemoveTopicMessage{TopicID: topicID}
-	cmd := Command{
-		CommandType:        KRemoveTopicCommand,
-		RemoveTopicCommand: rmTopicMsg,
-	}
-	data := Serialize(&cmd)
-	log := raft.Log{
-		Index:      uint64(time.Now().UnixNano()),
-		Term:       0,
-		Type:       0,
-		Data:       data,
-		Extensions: nil,
-		AppendedAt: time.Time{},
-	}
-
-	// Apply to FSM, wait for response and handle errors.
-	tmpResp := im.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
-	if !ok {
-		im.logger.Fatalf("Unable to cast to FSM response. Received: %v", tmpResp)
-	}
-	if fsmResp.Error != nil {
-		if fsmResp.Error == storage.ErrTopicNotFound {
-			return makeResponse(comm.Error_KErrTopicNotFound, nil, fmt.Sprintf("Topic: %d does not exist", topicID))
-		}
-		im.logger.Fatalf("Unexpected error from FSM while attempting to remove topic: %d. Error: %s",
-			req.GetTopicId(), fsmResp.Error.Error())
-	}
-	return makeResponse(comm.Error_KNoError, nil, "")
-}
-
-func (im *InstanceManager) GetTopic(ctx context.Context, req *comm.GetTopicRequest) *comm.GetTopicResponse {
-	makeResponse := func(tpc *base.TopicConfig, ec comm.Error_ErrorCodes, err error, msg string) *comm.GetTopicResponse {
-		var resp comm.GetTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
-		if tpc != nil {
-			var topicProto comm.Topic
-			topicProto.TopicId = int32(tpc.ID)
-			topicProto.TopicName = tpc.Name
-			for _, prtID := range tpc.PartitionIDs {
-				topicProto.PartitionIds = append(topicProto.PartitionIds, int32(prtID))
-			}
-			topicProto.TtlSeconds = int32(tpc.TTLSeconds)
-			resp.Topic = &topicProto
-		}
-		return &resp
-	}
-	// Sanity checks.
-	if len(req.GetTopicName()) == 0 {
-		im.logger.Errorf("Invalid argument. Topic name not provided")
-		return makeResponse(nil, comm.Error_KErrInvalidArg, nil, "Invalid topic name")
-	}
-
-	// Sync if required. Do this only if we are the leader!!
-	if req.GetSync() {
-		err := im.doSyncOp()
-		if err != nil {
-			im.logger.Errorf("Unable to doSyncOp before get topic: %s due to err: %s", req.GetTopicName(), err.Error())
-			return makeResponse(nil, comm.Error_KErrReplication, err, "Unable to doSyncOp before getting topic")
-		}
-	}
-
-	// Fetch topic.
-	topic, err := im.storageController.GetTopicByName(req.GetTopicName())
-	if err != nil {
-		if err == storage.ErrTopicNotFound {
-			return makeResponse(nil, comm.Error_KErrTopicNotFound, err,
-				fmt.Sprintf("Topic: %s does not exist", req.GetTopicName()))
-		}
-		im.logger.Errorf("Unable to get topic: %s due to err: %s", req.GetTopicName(), err.Error())
-		return makeResponse(nil, comm.Error_KErrBackend, err, "Unable to fetch topic")
-	}
-	return makeResponse(&topic, comm.Error_KNoError, nil, "")
-}
-
-func (im *InstanceManager) GetAllTopics(ctx context.Context) *comm.GetAllTopicsResponse {
-	// TODO: Only if we are the leader.
-	topics := im.storageController.GetAllTopics()
-	var resp comm.GetAllTopicsResponse
-	resp.Error = makeErrorProto(comm.Error_KNoError, nil, "")
-	for _, tpc := range topics {
-		var topicProto comm.Topic
-		topicProto.TopicId = int32(tpc.ID)
-		topicProto.TopicName = tpc.Name
-		for _, prtID := range tpc.PartitionIDs {
-			topicProto.PartitionIds = append(topicProto.PartitionIds, int32(prtID))
-		}
-		topicProto.TtlSeconds = int32(tpc.TTLSeconds)
-		resp.Topics = append(resp.Topics, &topicProto)
-	}
-	return &resp
-}
-
 func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 	req *comm.RegisterConsumerRequest) *comm.RegisterConsumerResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RegisterConsumerResponse {
@@ -609,11 +441,11 @@ func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 		AppendedAt: time.Time{},
 	}
 
-	// Apply to FSM, wait for the response and handle errors.
+	// Apply to InstanceFSM, wait for the response and handle errors.
 	tmpResp := im.fsm.Apply(&log)
 	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
-		im.logger.Fatalf("Unable to cast response to FSM response. Received: %v", tmpResp)
+		im.logger.Fatalf("Unable to cast response to InstanceFSM response. Received: %v", tmpResp)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicNotFound {
@@ -623,7 +455,7 @@ func (im *InstanceManager) RegisterConsumer(ctx context.Context,
 			return makeResponse(comm.Error_KErrTopicNotFound, nil,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetTopicId(), req.GetPartitionId()))
 		} else {
-			im.logger.Fatalf("Unexpected error from FSM when attempting to register consumer: %s for "+
+			im.logger.Fatalf("Unexpected error from InstanceFSM when attempting to register consumer: %s for "+
 				"topic: %d, partition: %d. Error: %v", req.GetConsumerId(), req.GetTopicId(), req.GetPartitionId(),
 				fsmResp.Error)
 		}
@@ -649,7 +481,7 @@ func (im *InstanceManager) doSyncOp() error {
 	if appErr != nil {
 		// Crash here since we cannot be sure that if the other nodes successfully applied this log or not.
 		// This will require manual intervention.
-		im.logger.Fatalf("Unable to apply to FSM due to err: %v", appErr)
+		im.logger.Fatalf("Unable to apply to InstanceFSM due to err: %v", appErr)
 	}
 	return nil
 }

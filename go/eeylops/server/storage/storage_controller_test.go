@@ -39,10 +39,10 @@ func TestStorageController(t *testing.T) {
 	topic.TTLSeconds = 86400 * 7
 	topic.ID = 1
 	topic.CreatedAt = time.Now()
-	if err := controller.AddTopic(topic); err != nil {
+	if err := controller.AddTopic(topic, 100); err != nil {
 		glog.Fatalf("Unable to add topic due to err: %s", err.Error())
 	}
-	err := controller.AddTopic(topic)
+	err := controller.AddTopic(topic, 101)
 	if err == ErrTopicExists {
 		glog.V(1).Infof("Topic was not updated as expected")
 	} else {
@@ -71,7 +71,7 @@ func TestStorageController(t *testing.T) {
 			glog.Fatalf("Partition mismatch. Expected: %d, Got: %d", id, tpc.PartitionIDs[ii])
 		}
 	}
-	err = controller.RemoveTopic(topic.ID)
+	err = controller.RemoveTopic(topic.ID, 102)
 	if err != nil {
 		glog.Fatalf("Failed to mark topic for removal due to err: %s", err.Error())
 	}

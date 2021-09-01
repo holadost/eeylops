@@ -24,7 +24,6 @@ message Error {
 }
 
 message ClusterConfig {
-  string cluster_id = 1;
   repeated NodeConfig node_config_list = 2;
   int32 leader_id = 3;
 }
@@ -58,8 +57,6 @@ message Topic {
 }
 
 message CreateTopicRequest {
-  // Cluster ID where the topic is to be created.
-  string cluster_id = 1;
   // Topic to be created.
   Topic topic = 2;
 }
@@ -70,8 +67,6 @@ message CreateTopicResponse {
 }
 
 message RemoveTopicRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // Topic ID.
   int32 topic_id = 2;
 }
@@ -82,8 +77,6 @@ message RemoveTopicResponse {
 }
 
 message GetTopicRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // Topic name.
   string topic_name = 2;
   // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
@@ -98,8 +91,6 @@ message GetTopicResponse {
 }
 
 message GetAllTopicsRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
   bool sync = 2;
 }
@@ -112,8 +103,6 @@ message GetAllTopicsResponse {
 }
 
 message ProduceRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // Topic ID.
   int32 topic_id = 2;
   // Partition where the given values must be appended.
@@ -128,8 +117,6 @@ message ProduceResponse {
 }
 
 message RegisterConsumerRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // Consumer ID. Must be <= 256 characters.
   string consumer_id = 2;
   // Topic ID.
@@ -144,8 +131,6 @@ message RegisterConsumerResponse {
 }
 
 message ConsumeRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // Consumer ID.
   string consumer_id = 2;
   // Topic ID.
@@ -181,8 +166,6 @@ message ConsumeResponse {
 }
 
 message CommitRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // Topic ID
   int32 topic_id = 2;
   // Partition ID.
@@ -199,8 +182,6 @@ message CommitResponse {
 }
 
 message LastCommittedRequest {
-  // Cluster ID.
-  string cluster_id = 1;
   // Topic ID.
   int32 topic_id = 2;
   // Partition ID.
@@ -218,12 +199,14 @@ message LastCommittedResponse {
   int64 offset = 3;
 }
 
-message GetLeaderRequest {
-  // Cluster ID.
-  string cluster_id = 1;
+message GetBrokerRequest {
+  // Topic ID.
+  int32 topic_id = 1;
+  // Partition ID.
+  int32 partition_id = 2;
 }
 
-message GetLeaderResponse {
+message GetBrokerResponse {
   // Error.
   Error error = 1;
   // Leader configuration.
@@ -231,8 +214,6 @@ message GetLeaderResponse {
 }
 
 message GetClusterConfigRequest {
-  // Cluster ID.
-  string cluster_id = 1;
 }
 
 message GetClusterConfigResponse {
@@ -286,9 +267,9 @@ service EeylopsService{
   // Fetches the last committed offset by the client.
   rpc GetLastCommitted(LastCommittedRequest) returns (LastCommittedResponse);
 
-  // Fetches the node configuration of the leader for the given cluster_id.
-  rpc GetLeader(GetLeaderRequest) returns (GetLeaderResponse);
+  // Fetches the broker for the given topic and partition.
+  rpc GetBroker(GetBrokerRequest) returns (GetBrokerResponse);
 
-  // Fetches the cluster configuration for the given cluster_id.
+  // Fetches the cluster configuration.
   rpc GetClusterConfig(GetClusterConfigRequest) returns (GetClusterConfigResponse);
 }

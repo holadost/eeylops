@@ -58,7 +58,7 @@ func TestTopicConfigStore(t *testing.T) {
 		if ii%readVerifyIterNum == 0 {
 			for jj := 0; jj < ii+1; jj++ {
 				topicName := topicNameGen(jj)
-				rtopic, err := ts.GetTopic(topicName)
+				rtopic, err := ts.GetTopicByName(topicName)
 				if err != nil {
 					glog.Fatalf("Failed to get topic: %s due to err: %s", topicName, err.Error())
 					return
@@ -70,10 +70,7 @@ func TestTopicConfigStore(t *testing.T) {
 		}
 	}
 
-	allTopics, err := ts.GetAllTopics()
-	if err != nil {
-		glog.Fatalf("Hit an unexpected error while fetching all topics: %s", err.Error())
-	}
+	allTopics := ts.GetAllTopics()
 	if len(allTopics) != numTopics {
 		glog.Fatalf("Num topics mismatch. Expected: %d, got: %d", numTopics, len(allTopics))
 	}
@@ -87,7 +84,7 @@ func TestTopicConfigStore(t *testing.T) {
 		if ii%readVerifyIterNum == 0 {
 			for jj := 0; jj < numTopics; jj++ {
 				topicName := topicNameGen(jj)
-				_, err := ts.GetTopic(topicName)
+				_, err := ts.GetTopicByName(topicName)
 				if jj <= ii {
 					if err != ErrTopicNotFound {
 						glog.Fatalf("Expected topic to not be found but got err: %v", err)

@@ -9,160 +9,7 @@ import (
 	"fmt"
 	"github.com/golang/glog"
 	"testing"
-	"time"
 )
-
-func TestInstanceManager_AddRemoveGetTopic(t *testing.T) {
-	util.LogTestMarker("TestInstanceManager_AddRemoveGetTopic")
-	testDirName := util.CreateTestDir(t, "TestInstanceManager_AddRemoveGetTopic")
-	clusterID := "nikhil1nikhil1"
-	opts := InstanceManagerOpts{
-		DataDirectory: testDirName,
-		ClusterID:     clusterID,
-		PeerAddresses: nil,
-	}
-	generateTopicName := func(id int) string {
-		return fmt.Sprintf("hello_topic_%d", id)
-	}
-	numTopics := 15
-	im := NewInstanceManager(&opts)
-	// Add topics.
-	for ii := 0; ii < numTopics; ii++ {
-		var req comm.CreateTopicRequest
-		var topic comm.Topic
-		topic.PartitionIds = []int32{1, 2, 3, 4}
-		topic.TtlSeconds = 86400 * 7
-		topic.TopicName = generateTopicName(ii)
-		req.Topic = &topic
-		resp := im.AddTopic(context.Background(), &req)
-		err := resp.GetError()
-		if err.GetErrorCode() != comm.Error_KNoError {
-			glog.Fatalf("Expected no error but got: %v. Unable to add topic", err)
-		}
-	}
-
-	// Get topics.
-	var allTopics []*comm.Topic
-	for ii := 0; ii < numTopics; ii++ {
-		var req comm.GetTopicRequest
-		req.ClusterId = clusterID
-		req.TopicName = generateTopicName(ii)
-		resp := im.GetTopic(context.Background(), &req)
-		err := resp.GetError()
-		if err.GetErrorCode() != comm.Error_KNoError {
-			glog.Fatalf("Error while fetching topic: %s", generateTopicName(ii))
-		}
-		topic := resp.GetTopic()
-		glog.Infof("Received topic: %s, ID: %d", topic.GetTopicName(), topic.GetTopicId())
-		allTopics = append(allTopics, topic)
-	}
-
-	// Add same topics again. We should get an error.
-	for ii := 0; ii < numTopics; ii++ {
-		var req comm.CreateTopicRequest
-		var topic comm.Topic
-		topic.PartitionIds = []int32{1, 2}
-		topic.TtlSeconds = 86400 * 5
-		topic.TopicName = generateTopicName(ii)
-		req.Topic = &topic
-		resp := im.AddTopic(context.Background(), &req)
-		err := resp.GetError()
-		if err.GetErrorCode() != comm.Error_KErrTopicExists {
-			glog.Fatalf("Unexpected error while adding same topic: %s, %v", generateTopicName(ii), err)
-		}
-	}
-
-	// Get all topics.
-	resp := im.GetAllTopics(context.Background())
-	allTopicsErr := resp.GetError()
-	if allTopicsErr.GetErrorCode() != comm.Error_KNoError {
-		glog.Fatalf("Unexpected error while getting all topics: %v", allTopicsErr)
-	}
-	if len(resp.GetTopics()) != numTopics {
-		glog.Fatalf("Did not get the desired number of topics. Expected: %d, Got: %d", numTopics,
-			len(resp.GetTopics()))
-	}
-
-	// Remove topics.
-	for ii := 0; ii < numTopics; ii += 2 {
-		glog.Infof("Removing topic: %s:%d", allTopics[ii].GetTopicName(), allTopics[ii].GetTopicId())
-		var req comm.RemoveTopicRequest
-		req.TopicId = int32(allTopics[ii].GetTopicId())
-		req.ClusterId = clusterID
-		resp := im.RemoveTopic(context.Background(), &req)
-		err := resp.GetError()
-		if err.GetErrorCode() != comm.Error_KNoError {
-			glog.Fatalf("Unable to remove topic: %s(%d) due to err: %v",
-				allTopics[ii].GetTopicName(), allTopics[ii].GetTopicId(), err)
-		}
-	}
-
-	// Remove topics that don't exist.
-	glog.Infof("Removing non existent topics")
-	for ii := numTopics * 2; ii < numTopics*3; ii++ {
-		var req comm.RemoveTopicRequest
-		req.TopicId = int32(numTopics*10 + ii)
-		req.ClusterId = clusterID
-		resp := im.RemoveTopic(context.Background(), &req)
-		err := resp.GetError()
-		ec := comm.Error_ErrorCodes(err.GetErrorCode())
-		if ec != comm.Error_KErrTopicNotFound {
-			glog.Fatalf("Failed while removing non-existent topic due to unexpected error: %s", ec.String())
-		}
-	}
-
-	// Get topics.
-	for ii := 0; ii < numTopics; ii++ {
-		var req comm.GetTopicRequest
-		req.ClusterId = clusterID
-		req.TopicName = generateTopicName(ii)
-		resp := im.GetTopic(context.Background(), &req)
-		err := resp.GetError()
-		if ii%2 == 1 {
-			// This topic must exist.
-			if err.GetErrorCode() != comm.Error_KNoError {
-				glog.Fatalf("Error while fetching topic: %s", generateTopicName(ii))
-			}
-		} else {
-			// This topic must not exist.
-			if err.GetErrorCode() != comm.Error_KErrTopicNotFound {
-				glog.Fatalf("Expected ErrTopicNotFound but got %s instead",
-					err.GetErrorCode().String())
-			}
-		}
-	}
-
-	// Add removed topics.
-	for ii := 0; ii < numTopics; ii += 2 {
-		var req comm.CreateTopicRequest
-		var topic comm.Topic
-		topic.PartitionIds = []int32{1, 2, 3, 4}
-		topic.TtlSeconds = 86400 * 7
-		topic.TopicName = generateTopicName(ii)
-		req.Topic = &topic
-		resp := im.AddTopic(context.Background(), &req)
-		err := resp.GetError()
-		if err.GetErrorCode() != comm.Error_KNoError {
-			glog.Fatalf("Expected no error but got: %s. Unable to add topic",
-				err.GetErrorCode().String())
-		}
-	}
-
-	// Get all topics again and check that we them all.
-	for ii := 0; ii < numTopics; ii++ {
-		var req comm.GetTopicRequest
-		req.ClusterId = clusterID
-		req.TopicName = generateTopicName(ii)
-		resp := im.GetTopic(context.Background(), &req)
-		err := resp.GetError()
-		ec := err.GetErrorCode()
-		if ec != comm.Error_KNoError {
-			glog.Fatalf("Error while fetching topic: %s. Error: %s", generateTopicName(ii), ec.String())
-		}
-	}
-	time.Sleep(2 * time.Second)
-	// TODO: Check that the removed topics have been deleted from the underlying file system.
-}
 
 func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	util.LogTestMarker("TestInstanceManager_ConsumerCommit")
@@ -179,6 +26,7 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	numConsumers := 15
 	commitOffset := base.Offset(100)
 	im := NewInstanceManager(&opts)
+	ms := NewMotherShip()
 	// Register consumers for non-existent topics.
 	for ii := 0; ii < numConsumers; ii++ {
 		var req comm.RegisterConsumerRequest
@@ -199,7 +47,7 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	topic.TtlSeconds = 86400 * 7
 	topic.TopicName = "hello_topic_1"
 	req.Topic = &topic
-	resp := im.AddTopic(context.Background(), &req)
+	resp := ms.AddTopic(context.Background(), &req)
 	ec := resp.GetError().GetErrorCode()
 	if ec != comm.Error_KNoError {
 		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
@@ -371,6 +219,7 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	numIters := 500
 	batchSize := 10
 	im := NewInstanceManager(&opts)
+	ms := NewMotherShip()
 	partIDs := []int32{1, 2, 3, 4}
 	var req comm.CreateTopicRequest
 	var topic comm.Topic
@@ -378,15 +227,14 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	topic.TtlSeconds = 86400 * 7
 	topic.TopicName = topicName
 	req.Topic = &topic
-	resp := im.AddTopic(context.Background(), &req)
+	resp := ms.AddTopic(context.Background(), &req)
 	ec := resp.GetError().GetErrorCode()
 	if ec != comm.Error_KNoError {
 		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
 	}
 	var greq comm.GetTopicRequest
-	greq.ClusterId = clusterID
 	greq.TopicName = topicName
-	gresp := im.GetTopic(context.Background(), &greq)
+	gresp := ms.GetTopic(context.Background(), &greq)
 	ec = gresp.GetError().GetErrorCode()
 	if ec != comm.Error_KNoError {
 		glog.Fatalf("Error while fetching topic: %s. Error: %s", topicName, ec.String())
@@ -400,7 +248,6 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 			values = append(values, []byte(fmt.Sprintf("value-%d", (jj*batchSize)+jj)))
 		}
 		var req comm.ProduceRequest
-		req.ClusterId = clusterID
 		req.TopicId = 100
 		req.PartitionId = 2
 		req.Values = values
@@ -414,7 +261,6 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	produceNonExistentTopic()
 	consumeNonExistentTopic := func() {
 		var req comm.ConsumeRequest
-		req.ClusterId = clusterID
 		req.TopicId = gresp.GetTopic().GetTopicId() + 1000
 		req.PartitionId = 1
 		req.StartOffset = 0
@@ -438,7 +284,6 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 			values = append(values, []byte(fmt.Sprintf("value-%d", (jj*batchSize)+jj)))
 		}
 		var req comm.ProduceRequest
-		req.ClusterId = clusterID
 		req.TopicId = gresp.GetTopic().GetTopicId()
 		req.PartitionId = 100
 		req.Values = values
@@ -452,7 +297,6 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	produceNonExistentPartition()
 	consumeNonExistentPartition := func() {
 		var req comm.ConsumeRequest
-		req.ClusterId = clusterID
 		req.TopicId = gresp.GetTopic().GetTopicId()
 		req.PartitionId = 100
 		req.StartOffset = 0
@@ -480,7 +324,6 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 					values = append(values, []byte(fmt.Sprintf("value-%d", (ii*batchSize)+jj)))
 				}
 				var req comm.ProduceRequest
-				req.ClusterId = clusterID
 				req.TopicId = gresp.GetTopic().GetTopicId()
 				req.PartitionId = prtID
 				req.Values = values
@@ -508,7 +351,6 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 			prevNextOffset := int64(0)
 			for ii := 0; ii < numIters+1; ii++ {
 				var req comm.ConsumeRequest
-				req.ClusterId = clusterID
 				req.TopicId = gresp.GetTopic().GetTopicId()
 				req.PartitionId = prtID
 				req.StartOffset = prevNextOffset

@@ -3,21 +3,30 @@ package storage
 import (
 	"eeylops/server/base"
 	"eeylops/server/storage/kv_store"
+	"eeylops/util"
 	"encoding/json"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/golang/glog"
 	"os"
 	"path"
+	"sync"
 )
 
 const kTopicsConfigStoreDirectory = "topics_config_store"
+const kLastTopicIDKey = "last::::topic::::id"
+
+var kLastTopicIDBytes = []byte(kLastTopicIDKey)
 
 // TopicsConfigStore holds all the topics for eeylops.
 type TopicsConfigStore struct {
-	kvStore *kv_store.BadgerKVStore
-	rootDir string
-	tsDir   string
+	kvStore      *kv_store.BadgerKVStore
+	rootDir      string
+	tsDir        string
+	topicNameMap map[string]*base.TopicConfig
+	topicIDMap   map[base.TopicIDType]*base.TopicConfig
+	topicMapLock sync.RWMutex
+	nextTopicID  base.TopicIDType
 }
 
 func NewTopicsConfigStore(rootDir string) *TopicsConfigStore {
@@ -34,6 +43,7 @@ func NewTopicsConfigStore(rootDir string) *TopicsConfigStore {
 
 func (tcs *TopicsConfigStore) initialize() {
 	glog.Infof("Initializing topic store located at: %s", tcs.tsDir)
+	// Initialize KV store.
 	opts := badger.DefaultOptions(tcs.tsDir)
 	opts.SyncWrites = true
 	opts.NumMemtables = 2
@@ -45,6 +55,14 @@ func (tcs *TopicsConfigStore) initialize() {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	tcs.kvStore = kv_store.NewBadgerKVStore(tcs.tsDir, opts)
+
+	// Initialize internal maps.
+	tcs.topicNameMap = make(map[string]*base.TopicConfig)
+	tcs.topicIDMap = make(map[base.TopicIDType]*base.TopicConfig)
+	allTopics := tcs.getTopicsFromKVStore()
+	for _, topic := range allTopics {
+		tcs.addTopicToMaps(topic)
+	}
 }
 
 func (tcs *TopicsConfigStore) Close() error {
@@ -53,62 +71,82 @@ func (tcs *TopicsConfigStore) Close() error {
 
 func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig) error {
 	glog.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
-	key := []byte(topic.Name)
-	val := tcs.marshalTopic(&topic)
-	err := tcs.kvStore.Put(key, val)
+	tcs.topicMapLock.Lock()
+	defer tcs.topicMapLock.Unlock()
+	_, exists := tcs.topicNameMap[topic.Name]
+	if exists {
+		glog.Warningf("Topic named: %s already exists. Not adding topic again", topic.Name)
+		return ErrTopicExists
+	}
+	topic.ID = tcs.nextTopicID
+	var keys [][]byte
+	var values [][]byte
+	keys = append(keys, []byte(topic.Name), kLastTopicIDBytes)
+	values = append(values, tcs.marshalTopic(&topic), util.UintToBytes(uint64(topic.ID)))
+	err := tcs.kvStore.BatchPut(keys, values)
 	if err != nil {
 		glog.Errorf("Unable to add topic: %s due to err: %s", topic.Name, err.Error())
 		return ErrTopicStore
 	}
+	tcs.addTopicToMaps(&topic)
+	tcs.nextTopicID += 1
 	return nil
 }
 
 func (tcs *TopicsConfigStore) RemoveTopic(topicName string) error {
 	glog.Infof("Removing topic: %s from topic store", topicName)
-	key := []byte(topicName)
-	_, err := tcs.GetTopic(topicName)
-	if err != nil {
-		glog.Errorf("Unable to fetch topic info to mark it for removal due to err: %s", err.Error())
-		if err == kv_store.ErrKVStoreKeyNotFound {
-			return ErrTopicNotFound
-		}
-		return ErrTopicStore
+	tcs.topicMapLock.Lock()
+	defer tcs.topicMapLock.Unlock()
+	tpc, exists := tcs.topicNameMap[topicName]
+	if !exists {
+		return ErrTopicNotFound
 	}
-	err = tcs.kvStore.Delete(key)
+	_, exists = tcs.topicIDMap[tpc.ID]
+	if !exists {
+		glog.Fatalf("Found topic named: %s in name map but not in ID map. Topic ID: %d", tpc.Name, tpc.ID)
+	}
+	key := []byte(topicName)
+	err := tcs.kvStore.Delete(key)
 	if err != nil {
 		glog.Errorf("Unable to delete topic: %s due to err: %s", topicName, err.Error())
 		return ErrTopicStore
 	}
+	tcs.removeTopicFromMaps(tpc)
 	return nil
 }
 
-func (tcs *TopicsConfigStore) GetTopic(topicName string) (base.TopicConfig, error) {
-	key := []byte(topicName)
-	var topic base.TopicConfig
-	topicVal, err := tcs.kvStore.Get(key)
-	if err != nil {
-		if err == kv_store.ErrKVStoreKeyNotFound {
-			return topic, ErrTopicNotFound
-		}
-		glog.Errorf("Unable to get topic: %s due to err: %s", topicName, err.Error())
-		return topic, ErrTopicStore
+func (tcs *TopicsConfigStore) GetTopicByName(topicName string) (base.TopicConfig, error) {
+	tcs.topicMapLock.RLock()
+	defer tcs.topicMapLock.RUnlock()
+	tpc, exists := tcs.topicNameMap[topicName]
+	if !exists {
+		return base.TopicConfig{}, ErrTopicNotFound
 	}
-	topic = tcs.unmarshalTopic(topicVal)
-	return topic, nil
+	return *tpc, nil
 }
 
-func (tcs *TopicsConfigStore) GetAllTopics() ([]base.TopicConfig, error) {
-	_, values, _, err := tcs.kvStore.Scan(nil, -1, -1, false)
-	glog.Infof("Total number of topics in the store: %d", len(values))
-	if err != nil {
-		glog.Errorf("Unable to get all topics in topic store due to err: %s", err.Error())
-		return nil, ErrTopicStore
+func (tcs *TopicsConfigStore) GetTopicByID(topicID base.TopicIDType) (base.TopicConfig, error) {
+	tcs.topicMapLock.RLock()
+	defer tcs.topicMapLock.RUnlock()
+	tpc, exists := tcs.topicIDMap[topicID]
+	if !exists {
+		return base.TopicConfig{}, ErrTopicNotFound
 	}
+	return *tpc, nil
+}
+
+func (tcs *TopicsConfigStore) GetAllTopics() []base.TopicConfig {
+	tcs.topicMapLock.RLock()
+	defer tcs.topicMapLock.RUnlock()
 	var topics []base.TopicConfig
-	for ii := 0; ii < len(values); ii++ {
-		topics = append(topics, tcs.unmarshalTopic(values[ii]))
+	for _, topic := range tcs.topicIDMap {
+		topics = append(topics, *topic)
 	}
-	return topics, nil
+	return topics
+}
+
+func (tcs *TopicsConfigStore) GetLastTopicIDCreated() base.TopicIDType {
+	return tcs.nextTopicID - 1
 }
 
 func (tcs *TopicsConfigStore) Snapshot() error {
@@ -117,6 +155,18 @@ func (tcs *TopicsConfigStore) Snapshot() error {
 
 func (tcs *TopicsConfigStore) Restore() error {
 	return nil
+}
+
+func (tcs *TopicsConfigStore) getTopicsFromKVStore() []*base.TopicConfig {
+	_, values, _, err := tcs.kvStore.Scan(nil, -1, -1, false)
+	if err != nil {
+		glog.Fatalf("Unable to get all topics in topic store due to err: %s", err.Error())
+	}
+	var topics []*base.TopicConfig
+	for ii := 0; ii < len(values); ii++ {
+		topics = append(topics, tcs.unmarshalTopic(values[ii]))
+	}
+	return topics
 }
 
 func (tcs *TopicsConfigStore) marshalTopic(topic *base.TopicConfig) []byte {
@@ -128,11 +178,31 @@ func (tcs *TopicsConfigStore) marshalTopic(topic *base.TopicConfig) []byte {
 	return data
 }
 
-func (tcs *TopicsConfigStore) unmarshalTopic(data []byte) base.TopicConfig {
+func (tcs *TopicsConfigStore) unmarshalTopic(data []byte) *base.TopicConfig {
 	var topic base.TopicConfig
 	err := json.Unmarshal(data, &topic)
 	if err != nil {
 		glog.Fatalf("Unable to deserialize topic due to err: %s", err.Error())
 	}
-	return topic
+	return &topic
+}
+
+// addTopicToMaps adds the given topic to the maps. This method assumes the topicMapLock has been acquired.
+func (tcs *TopicsConfigStore) addTopicToMaps(topic *base.TopicConfig) {
+	tcs.topicNameMap[topic.Name] = topic
+	tcs.topicIDMap[topic.ID] = topic
+}
+
+// removeTopicFromMaps removes the given topic to the maps. This method assumes the topicMapLock has been acquired.
+func (tcs *TopicsConfigStore) removeTopicFromMaps(topic *base.TopicConfig) {
+	_, exists := tcs.topicNameMap[topic.Name]
+	if !exists {
+		glog.Fatalf("Did not find topic: %s in name map", topic.Name)
+	}
+	_, exists = tcs.topicIDMap[topic.ID]
+	if !exists {
+		glog.Fatalf("Did not find topic: %s[%d] in name map", topic.Name, topic.ID)
+	}
+	delete(tcs.topicNameMap, topic.Name)
+	delete(tcs.topicIDMap, topic.ID)
 }
