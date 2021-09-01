@@ -22,7 +22,7 @@ func createConsumerStoreTestDir(t *testing.T, testName string) string {
 	return dataDir
 }
 
-func TestConsumerStore(t *testing.T) {
+func c(t *testing.T) {
 	util.LogTestMarker("TestConsumerStore")
 	testDir := createConsumerStoreTestDir(t, "TestConsumerStore")
 	cs := NewConsumerStore(testDir)
