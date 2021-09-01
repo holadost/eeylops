@@ -2,7 +2,7 @@ package storage
 
 import (
 	"eeylops/server/base"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -24,8 +24,8 @@ func createTopicStoreTestDir(t *testing.T, testName string) string {
 }
 
 func TestTopicConfigStore(t *testing.T) {
-	util.LogTestMarker("TestTopicConfigStore")
-	testDir := util.CreateTestDir(t, "TestTopicConfigStore")
+	testutil.LogTestMarker("TestTopicConfigStore")
+	testDir := testutil.CreateTestDir(t, "TestTopicConfigStore")
 	numTopics := 100
 	closeReopenIterNum := 5
 	readVerifyIterNum := 5

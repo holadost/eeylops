@@ -2,7 +2,7 @@ package storage
 
 import (
 	"eeylops/server/base"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -23,7 +23,7 @@ func createConsumerStoreTestDir(t *testing.T, testName string) string {
 }
 
 func c(t *testing.T) {
-	util.LogTestMarker("TestConsumerStore")
+	testutil.LogTestMarker("TestConsumerStore")
 	testDir := createConsumerStoreTestDir(t, "TestConsumerStore")
 	cs := NewConsumerStore(testDir)
 	consumerID := "consumer1"

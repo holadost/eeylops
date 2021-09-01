@@ -5,15 +5,15 @@ import (
 	"context"
 	"eeylops/comm"
 	"eeylops/server/base"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"testing"
 )
 
 func TestInstanceManager_ConsumerCommit(t *testing.T) {
-	util.LogTestMarker("TestInstanceManager_ConsumerCommit")
-	testDirName := util.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
+	testutil.LogTestMarker("TestInstanceManager_ConsumerCommit")
+	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
 	clusterID := "nikhil1nikhil1"
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
@@ -207,8 +207,8 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 }
 
 func TestInstanceManager_ProduceConsume(t *testing.T) {
-	util.LogTestMarker("TestInstanceManager_ProduceConsume")
-	testDirName := util.CreateTestDir(t, "TestInstanceManager_ProduceConsume")
+	testutil.LogTestMarker("TestInstanceManager_ProduceConsume")
+	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ProduceConsume")
 	clusterID := "nikhil1nikhil1"
 	topicName := "produce_consume_topic"
 	opts := BrokerOpts{

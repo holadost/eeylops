@@ -56,41 +56,41 @@ func (srv *RPCServer) Run() {
 	glog.Infof("RPC server has finished!")
 }
 
-func (srv *RPCServer) CreateTopic(ctx context.Context, req *comm.CreateTopicRequest) (*comm.CreateTopicResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
-		return &comm.CreateTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.AddTopic(ctx, req)
-	return resp, nil
-}
-
-func (srv *RPCServer) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) (*comm.RemoveTopicResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
-		return &comm.RemoveTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.RemoveTopic(ctx, req)
-	return resp, nil
-}
-
-func (srv *RPCServer) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*comm.GetTopicResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
-		return &comm.GetTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.GetTopic(ctx, req)
-	return resp, nil
-}
-
-func (srv *RPCServer) GetAllTopics(ctx context.Context, req *comm.GetAllTopicsRequest) (*comm.GetAllTopicsResponse, error) {
-	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-	if !exists {
-		return &comm.GetAllTopicsResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.GetAllTopics(ctx)
-	return resp, nil
-}
+//func (srv *RPCServer) CreateTopic(ctx context.Context, req *comm.CreateTopicRequest) (*comm.CreateTopicResponse, error) {
+//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
+//	if !exists {
+//		return &comm.CreateTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
+//	}
+//	resp := im.AddTopic(ctx, req)
+//	return resp, nil
+//}
+//
+//func (srv *RPCServer) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) (*comm.RemoveTopicResponse, error) {
+//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
+//	if !exists {
+//		return &comm.RemoveTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
+//	}
+//	resp := im.RemoveTopic(ctx, req)
+//	return resp, nil
+//}
+//
+//func (srv *RPCServer) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*comm.GetTopicResponse, error) {
+//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
+//	if !exists {
+//		return &comm.GetTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
+//	}
+//	resp := im.GetTopic(ctx, req)
+//	return resp, nil
+//}
+//
+//func (srv *RPCServer) GetAllTopics(ctx context.Context, req *comm.GetAllTopicsRequest) (*comm.GetAllTopicsResponse, error) {
+//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
+//	if !exists {
+//		return &comm.GetAllTopicsResponse{Error: srv.createInvalidClusterErrorProto()}, nil
+//	}
+//	resp := im.GetAllTopics(ctx)
+//	return resp, nil
+//}
 
 func (srv *RPCServer) Produce(ctx context.Context, req *comm.ProduceRequest) (*comm.ProduceResponse, error) {
 	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))

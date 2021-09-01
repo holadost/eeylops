@@ -5,7 +5,7 @@ import (
 	"eeylops/server/base"
 	sbase "eeylops/server/storage/base"
 	"eeylops/server/storage/segments"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"math/rand"
@@ -73,7 +73,7 @@ func loadDataBasicWithNewSegments(p *Partition, numSegments int, numValuesPerSeg
 }
 
 func TestPartitionInitialize(t *testing.T) {
-	util.LogTestMarker("TestPartitionInitialize")
+	testutil.LogTestMarker("TestPartitionInitialize")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -92,7 +92,7 @@ func TestPartitionInitialize(t *testing.T) {
 }
 
 func TestPartitionReInitialize(t *testing.T) {
-	util.LogTestMarker("TestPartitionReInitialize")
+	testutil.LogTestMarker("TestPartitionReInitialize")
 	for ii := 0; ii < 5; ii++ {
 		glog.Infof("\n\n\nIteration: %d", ii)
 		opts := PartitionOpts{
@@ -114,7 +114,7 @@ func TestPartitionReInitialize(t *testing.T) {
 }
 
 func TestPartitionAppend(t *testing.T) {
-	util.LogTestMarker("TestPartitionAppend")
+	testutil.LogTestMarker("TestPartitionAppend")
 	testDir := "/tmp/eeylops/TestPartitionAppend"
 	defer func() { _ = os.RemoveAll(testDir) }()
 	opts := PartitionOpts{
@@ -133,7 +133,7 @@ func TestPartitionAppend(t *testing.T) {
 }
 
 func TestPartitionNewSegmentCreation(t *testing.T) {
-	util.LogTestMarker("TestPartitionNewSegmentCreation")
+	testutil.LogTestMarker("TestPartitionNewSegmentCreation")
 	testDir := "/tmp/eeylops/TestPartitionNewSegmentCreation"
 	_ = os.RemoveAll(testDir)
 	opts := PartitionOpts{
@@ -224,8 +224,8 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 }
 
 func TestPartitionScan(t *testing.T) {
-	util.LogTestMarker("TestPartitionScan")
-	testDir := util.CreateTestDir(t, "TestPartitionScan")
+	testutil.LogTestMarker("TestPartitionScan")
+	testDir := testutil.CreateTestDir(t, "TestPartitionScan")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -348,8 +348,8 @@ func TestPartitionScan(t *testing.T) {
 }
 
 func TestPartitionManager(t *testing.T) {
-	util.LogTestMarker("TestPartitionManager")
-	testDir := util.CreateTestDir(t, "TestPartitionManager")
+	testutil.LogTestMarker("TestPartitionManager")
+	testDir := testutil.CreateTestDir(t, "TestPartitionManager")
 	totalValues := 500
 	numValuesPerBatch := 50
 	valueSizeBytes := 100
@@ -464,8 +464,8 @@ func TestPartitionManager(t *testing.T) {
 }
 
 func TestPartitionScan2(t *testing.T) {
-	util.LogTestMarker("TestPartitionScan2")
-	testDir := util.CreateTestDir(t, "TestPartitionScan2")
+	testutil.LogTestMarker("TestPartitionScan2")
+	testDir := testutil.CreateTestDir(t, "TestPartitionScan2")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,

@@ -3,7 +3,7 @@ package hedwig
 import (
 	"context"
 	"eeylops/comm"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"testing"
@@ -11,13 +11,13 @@ import (
 )
 
 func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
-	util.LogTestMarker("TestMotherShip_AddRemoveGetTopic")
-	util.CreateTestDir(t, "TestMotherShip_AddRemoveGetTopic")
+	testutil.LogTestMarker("TestMotherShip_AddRemoveGetTopic")
+	testDir := testutil.CreateTestDir(t, "TestMotherShip_AddRemoveGetTopic")
 	generateTopicName := func(id int) string {
 		return fmt.Sprintf("hello_topic_%d", id)
 	}
 	numTopics := 15
-	im := NewMotherShip()
+	im := NewMotherShip(testDir)
 	// Add topics.
 	for ii := 0; ii < numTopics; ii++ {
 		var req comm.CreateTopicRequest

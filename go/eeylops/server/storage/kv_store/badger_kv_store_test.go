@@ -2,7 +2,7 @@ package kv_store
 
 import (
 	"bytes"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/golang/glog"
@@ -12,8 +12,8 @@ import (
 )
 
 func TestBadgerKVStore(t *testing.T) {
-	util.LogTestMarker("TestBadgerKVStore")
-	testDir := util.CreateTestDir(t, "TestBadgerKVStore")
+	testutil.LogTestMarker("TestBadgerKVStore")
+	testDir := testutil.CreateTestDir(t, "TestBadgerKVStore")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -124,8 +124,8 @@ func TestBadgerKVStore(t *testing.T) {
 }
 
 func TestBadgerKVStore_BatchPut(t *testing.T) {
-	util.LogTestMarker("TestBadgerKVStore_BatchPut")
-	testDir := util.CreateTestDir(t, "TestBadgerKVStore_BatchPut")
+	testutil.LogTestMarker("TestBadgerKVStore_BatchPut")
+	testDir := testutil.CreateTestDir(t, "TestBadgerKVStore_BatchPut")
 	opts := badger.DefaultOptions(testDir)
 	opts.NumMemtables = 3
 	opts.SyncWrites = true

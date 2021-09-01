@@ -5,26 +5,35 @@ import (
 	"eeylops/comm"
 	"eeylops/server/base"
 	"eeylops/server/storage"
+	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
 	"github.com/hashicorp/raft"
+	"path"
 	"time"
 )
+
+const kMotherShipDirName = "mothership"
 
 type MotherShip struct {
 	logger              *logging.PrefixLogger
 	lastTopicIDAssigned base.TopicIDType
 	fsm                 *MotherShipFSM
 	topicsConfigStore   *storage.TopicsConfigStore
+	rootDir             string
 }
 
-func NewMotherShip() *MotherShip {
+func NewMotherShip(rootDir string) *MotherShip {
 	ms := MotherShip{logger: logging.NewPrefixLogger("mothership")}
+	msRootPath := path.Join(rootDir, kMotherShipDirName)
+	util.CreateDir(msRootPath)
+	ms.rootDir = msRootPath
+	ms.topicsConfigStore = storage.NewTopicsConfigStore(msRootPath)
 	return &ms
 }
 
 func (ms *MotherShip) initialize() {
-
+	// Initialize replication controller when we need to.
 }
 
 func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {

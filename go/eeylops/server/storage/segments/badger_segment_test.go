@@ -6,6 +6,7 @@ import (
 	"eeylops/server/base"
 	"eeylops/util"
 	"eeylops/util/logging"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"math/rand"
@@ -159,8 +160,8 @@ func (tw *testWorkload) scanMessagesByOffset(seg *BadgerSegment, numMessages int
 }
 
 func TestBadgerSegment(t *testing.T) {
-	util.LogTestMarker("TestBadgerSegment")
-	dataDir := util.CreateTestDir(t, "TestBadgerSegment")
+	testutil.LogTestMarker("TestBadgerSegment")
+	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment")
 	initialMeta := SegmentMetadata{
 		ID:               100,
 		Immutable:        false,
@@ -335,8 +336,8 @@ func TestBadgerSegment(t *testing.T) {
 }
 
 func TestBadgerSegment_Scan(t *testing.T) {
-	util.LogTestMarker("TestBadgerSegment_Scan")
-	dataDir := util.CreateTestDir(t, "TestBadgerSegment_Scan")
+	testutil.LogTestMarker("TestBadgerSegment_Scan")
+	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment_Scan")
 	initialMeta := SegmentMetadata{
 		ID:               1,
 		Immutable:        false,
@@ -431,8 +432,8 @@ func TestBadgerSegment_Scan(t *testing.T) {
 }
 
 func TestBadgerSegment_Append(t *testing.T) {
-	util.LogTestMarker("TestBadgerSegment_Append")
-	dataDir := util.CreateTestDir(t, "TestBadgerSegment_Append")
+	testutil.LogTestMarker("TestBadgerSegment_Append")
+	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment_Append")
 	initialMeta := SegmentMetadata{
 		ID:               100,
 		Immutable:        false,
@@ -481,8 +482,8 @@ func TestBadgerSegment_Append(t *testing.T) {
 }
 
 func TestBadgerSegment_AppendScanBM(t *testing.T) {
-	util.LogTestMarker("TestBadgerSegment_AppendScanBM")
-	dataDir := util.CreateTestDir(t, "TestBadgerSegment_AppendScanBM")
+	testutil.LogTestMarker("TestBadgerSegment_AppendScanBM")
+	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment_AppendScanBM")
 	initialMeta := SegmentMetadata{
 		ID:               100,
 		Immutable:        false,

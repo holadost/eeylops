@@ -28,7 +28,7 @@ func (nm *NodeManager) initialize() {
 	var brokerOpts BrokerOpts
 	brokerOpts.DataDirectory = dataDir
 	brokerOpts.PeerAddresses = nil
-	broker := NewBroker(&brokerOpts)
+	// broker := NewBroker(&brokerOpts)
 	nm.rpcServer = NewRPCServer("", 0)
 }
 
