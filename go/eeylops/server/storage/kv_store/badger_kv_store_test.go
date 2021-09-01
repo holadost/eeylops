@@ -1,6 +1,7 @@
 package kv_store
 
 import (
+	"bytes"
 	"eeylops/util"
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
@@ -33,14 +34,14 @@ func TestBadgerKVStore(t *testing.T) {
 			}
 			store = NewBadgerKVStore(testDir, opts)
 		}
-		var keys []string
-		var values []string
+		var keys [][]byte
+		var values [][]byte
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			keys = append(keys, fmt.Sprintf("key-%03d", meraVal))
-			values = append(values, fmt.Sprintf("value-%03d", meraVal))
+			keys = append(keys, []byte(fmt.Sprintf("key-%03d", meraVal)))
+			values = append(values, []byte(fmt.Sprintf("value-%03d", meraVal)))
 		}
-		err := store.BatchPutS(keys, values)
+		err := store.BatchPut(keys, values)
 		if err != nil {
 			glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
 			return
@@ -50,21 +51,21 @@ func TestBadgerKVStore(t *testing.T) {
 	// Batch read and verify values
 	glog.Infof("Testing MultiGet")
 	for iter := 0; iter < numIters; iter++ {
-		var keys []string
-		var values []string
+		var keys [][]byte
+		var values [][]byte
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			keys = append(keys, fmt.Sprintf("key-%03d", meraVal))
+			keys = append(keys, []byte(fmt.Sprintf("key-%03d", meraVal)))
 		}
-		values, errs := store.MultiGetS(keys)
+		values, errs := store.MultiGet(keys)
 		for ii := 0; ii < len(keys); ii++ {
 			if errs[ii] != nil {
 				glog.Fatalf("Hit an unexpected error: %s", errs[ii].Error())
 				return
 			}
-			exVal := fmt.Sprintf("value-%03d", iter*batchSize+ii)
+			exVal := []byte(fmt.Sprintf("value-%03d", iter*batchSize+ii))
 			val := values[ii]
-			if exVal != val {
+			if bytes.Compare(exVal, val) != 0 {
 				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", exVal, val)
 				return
 			}
@@ -104,19 +105,19 @@ func TestBadgerKVStore(t *testing.T) {
 	scanner.Close()
 
 	glog.Infof("Testing put and get")
-	singleKey := "singleKey"
-	singleVal := "singleVal"
-	err := store.PutS(singleKey, singleVal)
+	singleKey := []byte("singleKey")
+	singleVal := []byte("singleVal")
+	err := store.Put(singleKey, singleVal)
 	if err != nil {
 		glog.Fatalf("Hit an unexpected error while loading single key. Err: %s", err.Error())
 		return
 	}
-	val, err := store.GetS(singleKey)
+	val, err := store.Get(singleKey)
 	if err != nil {
 		glog.Fatalf("Hit an unexpected error while reading single key. Err: %s", err.Error())
 		return
 	}
-	if val != singleVal {
+	if bytes.Compare(val, singleVal) != 0 {
 		glog.Fatalf("Value mismatch. Expected: %s, Got: %s", singleVal, val)
 	}
 	glog.Infof("Badger KV store test finished successfully")
