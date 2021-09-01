@@ -481,8 +481,8 @@ func TestBadgerSegment_Append(t *testing.T) {
 }
 
 func TestBadgerSegment_AppendScanBM(t *testing.T) {
-	util.LogTestMarker("TestBadgerSegment_ScanBM")
-	dataDir := util.CreateTestDir(t, "TestBadgerSegment_ScanBM")
+	util.LogTestMarker("TestBadgerSegment_AppendScanBM")
+	dataDir := util.CreateTestDir(t, "TestBadgerSegment_AppendScanBM")
 	initialMeta := SegmentMetadata{
 		ID:               100,
 		Immutable:        false,
@@ -527,7 +527,8 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 		}
 	}
 	elapsed := time.Since(start)
-	glog.Infof("Total time: %v, average time: %v", elapsed, elapsed/time.Duration(numIters))
+	glog.Infof("Total append time: %v, average time: %v. Data size: %d, Batch size: %d",
+		elapsed, elapsed/time.Duration(numIters), 1024*1024, batchSize)
 
 	// Scanning entries.
 	var sarg ScanEntriesArg
@@ -545,5 +546,6 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 		}
 	}
 	elapsed = time.Since(start)
-	glog.Infof("Total scan time: %v, Avg scan time: %v", elapsed, elapsed/time.Duration(numIters))
+	glog.Infof("Total scan time: %v, Avg scan time: %v, Data size: %d, Batch size: %d",
+		elapsed, elapsed/time.Duration(numIters), 1024*1024, batchSize)
 }

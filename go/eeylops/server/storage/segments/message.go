@@ -72,19 +72,6 @@ func (msg *Message) Serialize() []byte {
 	return append(util.UintToBytes(uint64(msg.timestamp)), msg.body...)
 }
 
-func PrepareMessageValues(values [][]byte, ts int64) (retValues [][]byte, totalSize int64) {
-	totalSize = 0
-	retValues = make([][]byte, len(values))
-	for ii, value := range values {
-		totalSize += int64(len(value))
-		var msg Message
-		msg.SetTimestamp(ts)
-		msg.SetBody(value)
-		retValues[ii] = msg.Serialize()
-	}
-	return
-}
-
 func prepareMessageValues(values [][]byte, ts int64, currIndexBatchSizeBytes int64, nextOffset base.Offset) ([][]byte, []TimestampIndexEntry, int64) {
 	var tse []TimestampIndexEntry
 	retValues := make([][]byte, len(values))

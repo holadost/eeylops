@@ -79,9 +79,18 @@ func TestTopicConfigStore(t *testing.T) {
 
 	// Remove topics.
 	for ii := 0; ii < numTopics; ii++ {
-		err := ts.RemoveTopic(topicNameGen(ii), int64(10000+ii))
+		err := ts.RemoveTopic(base.TopicIDType(ii), int64(10000+ii))
 		if err != nil {
 			glog.Fatalf("Unable to remove topic due to err: %s", err.Error())
+		}
+		// Close and reopen the topic store every 5 iterations.
+		if ii%closeReopenIterNum == 0 {
+			glog.Infof("Closing and reopening topic store")
+			if err := ts.Close(); err != nil {
+				glog.Fatalf("Unable to close topic store due to err: %s", err.Error())
+				return
+			}
+			ts = NewTopicsConfigStore(testDir)
 		}
 		if ii%readVerifyIterNum == 0 {
 			for jj := 0; jj < numTopics; jj++ {
