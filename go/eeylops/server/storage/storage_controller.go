@@ -9,16 +9,12 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"sort"
-	"strings"
 	"sync"
 )
 
 const kTopicsDirName = "topics"
 
 type StorageController struct {
-	// Backing TopicsConfigStore for topics registered with eeylops.
-	topicsConfigStore *TopicsConfigStore
 	// Consumer store.
 	consumerStore *ConsumerStore
 	// In memory map that holds the topics and partitions.
@@ -51,6 +47,9 @@ type StorageControllerOpts struct {
 
 	// The interval at which the topic store is scanned by the janitor to dispose removed topics.
 	StoreGCScanIntervalSecs int
+
+	// Topics list.
+	Topics []base.TopicConfig
 }
 
 func NewStorageController(opts StorageControllerOpts) *StorageController {
@@ -61,12 +60,11 @@ func NewStorageController(opts StorageControllerOpts) *StorageController {
 	if sc.controllerID == "" {
 		glog.Fatalf("No controller ID provided")
 	}
-	sc.initialize()
+	sc.initialize(opts.Topics)
 	return sc
 }
 
-func (sc *StorageController) initialize() {
-	sc.topicsConfigStore = NewTopicsConfigStore(sc.getControllerRootDirectory())
+func (sc *StorageController) initialize(allTopics []base.TopicConfig) {
 	sc.consumerStore = NewConsumerStore(sc.getControllerRootDirectory())
 	sc.topicMap = make(map[base.TopicIDType]*topicEntry)
 	sc.disposedChan = make(chan string, 128)
@@ -75,92 +73,45 @@ func (sc *StorageController) initialize() {
 	// Read all the topics from the topic topicsConfigStore and check if the topic directories
 	// exist under the given directory.
 	glog.Infof("Initializing topic controller. Controller ID: %s", sc.controllerID)
-	allTopics := sc.topicsConfigStore.GetAllTopics()
-	if len(allTopics) == 0 {
-		util.CreateDir(sc.getTopicsRootDirectory())
-	} else {
-		fsDirs := sc.getFileSystemTopics()
-		for _, topic := range allTopics {
-			glog.Infof("Initializing topic: %s for controller: %s", topic.Name, sc.controllerID)
-			topicDir := sc.getTopicDirectory(topic.Name, topic.ID)
-			_, exists := fsDirs[topicDir]
-			if !exists {
-				glog.Fatalf("Did not find a directory for topic: %s(%d)", topic.Name, topic.ID)
-			}
-			delete(fsDirs, topicDir)
-			if err := os.MkdirAll(topicDir, 0774); err != nil {
-				glog.Fatalf("Unable to create topic directory for topic: %s due to err: %s",
-					topic.Name, err.Error())
-				return
-			}
-			pMap := make(map[int]*Partition)
-			for _, ii := range topic.PartitionIDs {
-				opts := PartitionOpts{
-					TopicName:     topic.Name,
-					PartitionID:   ii,
-					RootDirectory: topicDir,
-					TTLSeconds:    topic.TTLSeconds,
-				}
-				pMap[ii] = NewPartition(opts)
-			}
-			entry := &topicEntry{
-				topic:        &topic,
-				partitionMap: pMap,
-			}
-			sc.topicMap[topic.ID] = entry
+	util.CreateDir(sc.getTopicsRootDirectory())
+	fsDirs := sc.getFileSystemTopics()
+	for _, topic := range allTopics {
+		glog.Infof("Initializing topic: %s for controller: %s", topic.Name, sc.controllerID)
+		topicDir := sc.getTopicDirectory(topic.Name, topic.ID)
+		_, exists := fsDirs[topicDir]
+		if !exists {
+			glog.Fatalf("Did not find a directory for topic: %s(%d)", topic.Name, topic.ID)
 		}
-		sc.disposeZombieTopics(fsDirs)
+		delete(fsDirs, topicDir)
+		if err := os.MkdirAll(topicDir, 0774); err != nil {
+			glog.Fatalf("Unable to create topic directory for topic: %s due to err: %s",
+				topic.Name, err.Error())
+			return
+		}
+		pMap := make(map[int]*Partition)
+		for _, prtId := range topic.PartitionIDs {
+			opts := PartitionOpts{
+				TopicName:     sc.generateTopicName(topic.Name, topic.ID),
+				PartitionID:   prtId,
+				RootDirectory: topicDir,
+				TTLSeconds:    topic.TTLSeconds,
+			}
+			pMap[prtId] = NewPartition(opts)
+		}
+		entry := &topicEntry{
+			topic:        &topic,
+			partitionMap: pMap,
+		}
+		sc.topicMap[topic.ID] = entry
 	}
+	sc.disposeZombieTopics(fsDirs)
 	go sc.janitor()
 }
 
-func (sc *StorageController) GetTopicByName(topicName string) (base.TopicConfig, error) {
-	allTopics := sc.GetAllTopics()
-	for _, topic := range allTopics {
-		if topic.Name == topicName {
-			return topic, nil
-		}
-	}
-	glog.Errorf("Did not find any topic named: %s", topicName)
-	return base.TopicConfig{}, ErrTopicNotFound
-}
-
-func (sc *StorageController) GetTopicByID(topicID base.TopicIDType) (base.TopicConfig, error) {
-	sc.topicMapLock.RLock()
-	defer sc.topicMapLock.RUnlock()
-	val, exists := sc.topicMap[topicID]
-	if !exists {
-		glog.Errorf("Did not find any topic with ID: %d", topicID)
-		return base.TopicConfig{}, ErrTopicNotFound
-	}
-	return *val.topic, nil
-}
-
-func (sc *StorageController) GetAllTopics() []base.TopicConfig {
-	sc.topicMapLock.RLock()
-	defer sc.topicMapLock.RUnlock()
-	var topics []base.TopicConfig
-	for _, topicEntry := range sc.topicMap {
-		topics = append(topics, *topicEntry.topic)
-	}
-	sort.SliceStable(topics, func(i int, j int) bool {
-		if strings.Compare(topics[i].Name, topics[j].Name) == -1 {
-			return true
-		}
-		return false
-	})
-	return topics
-}
-
-func (sc *StorageController) AddTopic(topic base.TopicConfig, rLogIdx int64) error {
+func (sc *StorageController) AddTopic(topic base.TopicConfig) error {
 	_, exists := sc.topicMap[topic.ID]
 	if exists {
 		glog.Errorf("Topic: %s already exists", topic.Name)
-		return ErrTopicExists
-	}
-	tc, err := sc.GetTopicByName(topic.Name)
-	if err == nil {
-		glog.Errorf("Topic: %s already exists. Current topic: %s", topic.Name, tc.ToString())
 		return ErrTopicExists
 	}
 	topicDirName := sc.getTopicDirectory(topic.Name, topic.ID)
@@ -168,15 +119,10 @@ func (sc *StorageController) AddTopic(topic base.TopicConfig, rLogIdx int64) err
 		glog.Errorf("Unable to create directory for topic: %s due to err: %s", topic.Name, err.Error())
 		return ErrStorageController
 	}
-	if err := sc.topicsConfigStore.AddTopic(topic); err != nil {
-		glog.Errorf("Unable to add topic: %s to topic store due to err: %s", topic.Name, err.Error())
-		return ErrStorageController
-	}
 	partMap := make(map[int]*Partition)
-	topicName := topic.Name + fmt.Sprintf("-%d", topic.ID)
 	for _, elem := range topic.PartitionIDs {
 		opts := PartitionOpts{
-			TopicName:     topicName,
+			TopicName:     sc.generateTopicName(topic.Name, topic.ID),
 			PartitionID:   elem,
 			RootDirectory: topicDirName,
 			TTLSeconds:    topic.TTLSeconds,
@@ -194,7 +140,7 @@ func (sc *StorageController) AddTopic(topic base.TopicConfig, rLogIdx int64) err
 	return nil
 }
 
-func (sc *StorageController) RemoveTopic(topicID base.TopicIDType, rLogIdx int64) error {
+func (sc *StorageController) RemoveTopic(topicID base.TopicIDType) error {
 	te, exists := sc.topicMap[topicID]
 	if !exists {
 		glog.Errorf("Unable to remove topic as topic: %d was not found", topicID)
@@ -203,14 +149,19 @@ func (sc *StorageController) RemoveTopic(topicID base.TopicIDType, rLogIdx int64
 	// Remove topic from the store and map.
 	sc.topicMapLock.Lock()
 	defer sc.topicMapLock.Unlock()
-	err := sc.topicsConfigStore.RemoveTopic(te.topic.Name)
-	if err != nil {
-		glog.Errorf("Unable to remove topic due to err: %s", err.Error())
-		return err
-	}
 	delete(sc.topicMap, topicID)
 	sc.topicDeletionChan <- te
 	return nil
+}
+
+func (sc *StorageController) GetAllTopics() []base.TopicConfig {
+	sc.topicMapLock.RLock()
+	sc.topicMapLock.RUnlock()
+	var topics []base.TopicConfig
+	for _, entry := range sc.topicMap {
+		topics = append(topics, *entry.topic)
+	}
+	return topics
 }
 
 func (sc *StorageController) GetPartition(topicID base.TopicIDType, partitionID int) (*Partition, error) {
@@ -233,6 +184,7 @@ func (sc *StorageController) GetConsumerStore() *ConsumerStore {
 	return sc.consumerStore
 }
 
+/*************************************************** Helper methods ***************************************************/
 func (sc *StorageController) getControllerRootDirectory() string {
 	return sc.rootDir
 }
@@ -262,9 +214,13 @@ func (sc *StorageController) getFileSystemTopics() map[string]struct{} {
 	return fsDirs
 }
 
+func (sc *StorageController) generateTopicName(name string, id base.TopicIDType) string {
+	return fmt.Sprintf("%s-%d", name, id)
+}
+
 /********************************************** TOPICS JANITOR ********************************************************/
 // janitor is a long-running background goroutine that periodically checks topics that have been marked for removal and
-// clears those topics from the underlying storage.
+// removes those topics and its associated partitions from the underlying storage.
 func (sc *StorageController) janitor() {
 	glog.Infof("Starting janitor for storage controller: %s", sc.controllerID)
 	for {

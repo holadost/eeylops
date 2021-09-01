@@ -213,6 +213,16 @@ message GetBrokerResponse {
   NodeConfig leader_config = 2;
 }
 
+message GetLeaderRequest {
+}
+
+message GetLeaderResponse {
+  // Error.
+  Error error = 1;
+  // Leader configuration.
+  NodeConfig leader_config = 2;
+}
+
 message GetClusterConfigRequest {
 }
 
@@ -269,6 +279,9 @@ service EeylopsService{
 
   // Fetches the broker for the given topic and partition.
   rpc GetBroker(GetBrokerRequest) returns (GetBrokerResponse);
+
+  // Fetches the broker for the given topic and partition.
+  rpc GetLeader(GetLeaderRequest) returns (GetLeaderResponse);
 
   // Fetches the cluster configuration.
   rpc GetClusterConfig(GetClusterConfigRequest) returns (GetClusterConfigResponse);
