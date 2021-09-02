@@ -1,4 +1,4 @@
-package hedwig
+package server
 
 type FSMResponse struct {
 	CommandType CmdType

@@ -1,4 +1,4 @@
-package hedwig
+package server
 
 import (
 	"eeylops/comm"

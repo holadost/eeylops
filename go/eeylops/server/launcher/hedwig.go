@@ -1,12 +1,12 @@
 package main
 
 import (
-	"eeylops/server/hedwig"
+	"eeylops/server"
 	"flag"
 )
 
 func main() {
 	flag.Parse()
-	nm := hedwig.NewNodeManager()
+	nm := server.NewNodeManager()
 	nm.Run()
 }

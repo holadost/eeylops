@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"eeylops/server/hedwig/playgrpc/greet"
+	greet2 "eeylops/server/playgrpc/greet"
 	"flag"
 	"fmt"
 	"github.com/golang/glog"
@@ -14,24 +14,24 @@ import (
 )
 
 type Server struct {
-	greet.UnimplementedGreetServiceServer
+	greet2.UnimplementedGreetServiceServer
 }
 
-func (s *Server) Greet(ctx context.Context, req *greet.GreetReq) (*greet.GreetResp, error) {
+func (s *Server) Greet(ctx context.Context, req *greet2.GreetReq) (*greet2.GreetResp, error) {
 	firstName := req.GetGreeting().GetFirstName()
 	ret := "Hello " + firstName
-	var resp greet.GreetResp
+	var resp greet2.GreetResp
 	resp.Result = ret
 	glog.Infof("Hello %s %s", req.GetGreeting().GetFirstName(), req.GetGreeting().GetLastName())
 	return &resp, nil
 }
 
-func (s *Server) GreetManyTimes(req *greet.GreetManyTimesReq, stream greet.GreetService_GreetManyTimesServer) error {
+func (s *Server) GreetManyTimes(req *greet2.GreetManyTimesReq, stream greet2.GreetService_GreetManyTimesServer) error {
 	glog.Infof("============================= GreetManyTimes invoked!! ========================================")
 	firstName := req.GetGreeting().GetFirstName()
 	for ii := 0; ii < 10; ii++ {
 		ret := "Hello " + firstName + " " + strconv.Itoa(ii)
-		resp := &greet.GreetManyTimesResp{Result: ret}
+		resp := &greet2.GreetManyTimesResp{Result: ret}
 		err := stream.Send(resp)
 		if err != nil {
 			return err
@@ -44,7 +44,7 @@ func (s *Server) GreetManyTimes(req *greet.GreetManyTimesReq, stream greet.Greet
 	return nil
 }
 
-func (s *Server) LongGreet(stream greet.GreetService_LongGreetServer) error {
+func (s *Server) LongGreet(stream greet2.GreetService_LongGreetServer) error {
 	glog.Infof("============================= LongGreet invoked!! ========================================")
 	result := "Hello "
 	count := 0
@@ -52,7 +52,7 @@ func (s *Server) LongGreet(stream greet.GreetService_LongGreetServer) error {
 		req, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
-				var resp greet.LongGreetResp
+				var resp greet2.LongGreetResp
 				resp.Result = result
 				serr := stream.SendAndClose(&resp)
 				if serr != nil {
@@ -81,7 +81,7 @@ func main() {
 
 	glog.Infof("Initializing new server")
 	s := grpc.NewServer()
-	greet.RegisterGreetServiceServer(s, &Server{})
+	greet2.RegisterGreetServiceServer(s, &Server{})
 
 	glog.Infof("Starting server")
 	if err := s.Serve(lis); err != nil {

@@ -1,4 +1,4 @@
-package hedwig
+package server
 
 import (
 	"context"
@@ -370,16 +370,16 @@ func (broker *Broker) GetLastCommitted(ctx context.Context,
 		}
 	}
 
-	// Check if topic and partition exist.
-	tpc, ok := doesTopicExist(topicID, broker.storageController)
-	if !ok {
-		return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
-			fmt.Sprintf("Topic: %d does not found", topicID))
-	}
-	if !doesPartitionExist(tpc, int(req.GetPartitionId())) {
-		return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
-			fmt.Sprintf("Topic: %d, Partition: %d not found", topicID, req.GetPartitionId()))
-	}
+	// TODO: Check if topic and partition exist.
+	//tpc, ok := doesTopicExist(topicID, broker.storageController)
+	//if !ok {
+	//	return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
+	//		fmt.Sprintf("Topic: %d does not found", topicID))
+	//}
+	//if !doesPartitionExist(tpc, int(req.GetPartitionId())) {
+	//	return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
+	//		fmt.Sprintf("Topic: %d, Partition: %d not found", topicID, req.GetPartitionId()))
+	//}
 
 	// Fetch the last committed offset.
 	cs := broker.storageController.GetConsumerStore()

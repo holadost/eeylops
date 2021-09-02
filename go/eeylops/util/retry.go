@@ -18,7 +18,7 @@ var (
 	ErrRetryContextExpired       = errors.New("retry context/timeout expired")
 )
 
-func DoRetry(fn RetryFunc, bfn BackoffFunc) error {
+func Retry(fn RetryFunc, bfn BackoffFunc) error {
 	var err error
 	attempt := 0
 	for {
@@ -35,7 +35,7 @@ func DoRetry(fn RetryFunc, bfn BackoffFunc) error {
 	return err
 }
 
-func DoRetryWithMultiAttempts(fn RetryFunc, bfn BackoffFunc, numAttempts int) error {
+func RetryWithMultiAttempts(fn RetryFunc, bfn BackoffFunc, numAttempts int) error {
 	var err error
 	var retry bool
 	attempt := 0
@@ -55,16 +55,16 @@ func DoRetryWithMultiAttempts(fn RetryFunc, bfn BackoffFunc, numAttempts int) er
 	}
 }
 
-func DoRetryWithTimeout(fn RetryFunc, bfn BackoffFunc, timeout time.Duration) error {
+func RetryWithTimeout(fn RetryFunc, bfn BackoffFunc, timeout time.Duration) error {
 	if timeout < 0 {
 		glog.Fatalf("timeout must be >= 0")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return DoRetryWithContext(ctx, fn, bfn)
+	return RetryWithContext(ctx, fn, bfn)
 }
 
-func DoRetryWithContext(ctx context.Context, fn RetryFunc, bfn BackoffFunc) error {
+func RetryWithContext(ctx context.Context, fn RetryFunc, bfn BackoffFunc) error {
 	var err error
 	attempt := 0
 	for {

@@ -76,7 +76,6 @@ func (tcs *TopicsConfigStore) Close() error {
 }
 
 func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) error {
-	tcs.logger.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
 	tcs.topicMapLock.Lock()
 	defer tcs.topicMapLock.Unlock()
 	_, exists := tcs.topicNameMap[topic.Name]
@@ -85,6 +84,7 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) er
 		return ErrTopicExists
 	}
 	topic.ID = tcs.nextTopicID
+	tcs.logger.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
 	var keys [][]byte
 	var values [][]byte
 	keys = append(keys, []byte(topic.Name), kLastTopicIDBytes, kLastRLogIdxBytes)

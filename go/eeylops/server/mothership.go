@@ -1,4 +1,4 @@
-package hedwig
+package server
 
 import (
 	"context"
@@ -16,11 +16,10 @@ import (
 const kMotherShipDirName = "mothership"
 
 type MotherShip struct {
-	logger              *logging.PrefixLogger
-	lastTopicIDAssigned base.TopicIDType
-	fsm                 *MotherShipFSM
-	topicsConfigStore   *storage.TopicsConfigStore
-	rootDir             string
+	logger            *logging.PrefixLogger
+	fsm               *MotherShipFSM
+	topicsConfigStore *storage.TopicsConfigStore
+	rootDir           string
 }
 
 func NewMotherShip(rootDir string) *MotherShip {
@@ -29,11 +28,11 @@ func NewMotherShip(rootDir string) *MotherShip {
 	util.CreateDir(msRootPath)
 	ms.rootDir = msRootPath
 	ms.topicsConfigStore = storage.NewTopicsConfigStore(msRootPath)
+	ms.fsm = NewMotherShipFSM(ms.topicsConfigStore, ms.logger)
 	return &ms
 }
 
 func (ms *MotherShip) initialize() {
-	// Initialize replication controller when we need to.
 }
 
 func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {
@@ -64,7 +63,6 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 	tc.PartitionIDs = prtIds
 	tc.TTLSeconds = int(topic.TtlSeconds)
 	tc.CreatedAt = now
-	tc.ID = ms.lastTopicIDAssigned + 1
 	addTopicMsg := AddTopicMessage{TopicConfig: tc}
 	cmd := Command{
 		CommandType:     KAddTopicCommand,
@@ -93,7 +91,6 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 		}
 		ms.logger.Fatalf("Unexpected error while creating topic: %s", fsmResp.Error.Error())
 	}
-	ms.lastTopicIDAssigned++
 	return makeResponse(comm.Error_KNoError, nil, "")
 }
 

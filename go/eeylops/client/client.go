@@ -89,7 +89,6 @@ func (client *Client) CreateTopic(topicName string, partitionIDs []int, ttlSecon
 		TtlSeconds:   int32(ttlSeconds),
 	}
 	req.Topic = topic
-	req.ClusterId = client.clusterID
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
 	defer cancel()
 	// TODO: Perform RPC on leader
@@ -116,7 +115,7 @@ func (client *Client) CreateTopic(topicName string, partitionIDs []int, ttlSecon
 	bfn := func(attempt int) {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return util.DoRetryWithContext(ctx, fn, bfn)
+	return util.RetryWithContext(ctx, fn, bfn)
 }
 
 func (client *Client) RemoveTopic(topicName string) error {
@@ -127,7 +126,6 @@ func (client *Client) RemoveTopic(topicName string) error {
 		return err
 	}
 	var req comm.RemoveTopicRequest
-	req.ClusterId = client.clusterID
 	req.TopicId = int32(topicConfig.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
 	defer cancel()
@@ -153,12 +151,11 @@ func (client *Client) RemoveTopic(topicName string) error {
 	bfn := func(attempt int) {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return util.DoRetryWithContext(ctx, fn, bfn)
+	return util.RetryWithContext(ctx, fn, bfn)
 }
 
 func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDType, partitionId int) error {
 	var req comm.RegisterConsumerRequest
-	req.ClusterId = client.clusterID
 	req.ConsumerId = consumerId
 	req.TopicId = int32(topicId)
 	req.PartitionId = int32(partitionId)
@@ -188,7 +185,7 @@ func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDTy
 	bfn := func(attempt int) {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return util.DoRetryWithContext(ctx, fn, bfn)
+	return util.RetryWithContext(ctx, fn, bfn)
 }
 
 func (client *Client) getTopic(topicName string) (base.TopicConfig, error) {
@@ -231,14 +228,13 @@ func (client *Client) getTopic(topicName string) (base.TopicConfig, error) {
 	bfn := func(attempt int) {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	retErr := util.DoRetryWithContext(ctx, fn, bfn)
+	retErr := util.RetryWithContext(ctx, fn, bfn)
 	return topicConfig, retErr
 }
 
 func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDType, partitionID int) (base.Offset, error) {
 	var req comm.LastCommittedRequest
 	req.ConsumerId = consumerID
-	req.ClusterId = client.clusterID
 	req.TopicId = int32(topicID)
 	req.PartitionId = int32(partitionID)
 	req.Sync = true
@@ -271,7 +267,7 @@ func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDTy
 	bfn := func(attempt int) {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	retErr := util.DoRetryWithContext(ctx, fn, bfn)
+	retErr := util.RetryWithContext(ctx, fn, bfn)
 	return myOffset, retErr
 }
 

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"eeylops/server/hedwig/playgrpc/greet"
+	greet2 "eeylops/server/playgrpc/greet"
 	"flag"
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
@@ -18,16 +18,16 @@ func main() {
 		glog.Fatalf("Unable to establish connection to server due to err: %s", err.Error())
 	}
 	defer cc.Close()
-	client := greet.NewGreetServiceClient(cc)
+	client := greet2.NewGreetServiceClient(cc)
 	doUnary(client)
 	doServerStreaming(client)
 	doClientStreaming(client)
 }
 
-func doUnary(client greet.GreetServiceClient) {
+func doUnary(client greet2.GreetServiceClient) {
 	glog.Infof("\n=============================== Unary RPC ===============================\n")
-	var req greet.GreetReq
-	var greeting greet.Greeting
+	var req greet2.GreetReq
+	var greeting greet2.Greeting
 	greeting.FirstName = "Nikhil"
 	greeting.LastName = "Srinivasan"
 	req.Greeting = &greeting
@@ -38,10 +38,10 @@ func doUnary(client greet.GreetServiceClient) {
 	glog.Infof("Response: %s", resp.GetResult())
 }
 
-func doServerStreaming(client greet.GreetServiceClient) {
+func doServerStreaming(client greet2.GreetServiceClient) {
 	glog.Infof("\n=============================== Server Streaming RPC ===============================\n")
-	var req greet.GreetManyTimesReq
-	var greeting greet.Greeting
+	var req greet2.GreetManyTimesReq
+	var greeting greet2.Greeting
 	greeting.FirstName = "Nikhil"
 	greeting.LastName = "Srinivasan"
 	req.Greeting = &greeting
@@ -61,12 +61,12 @@ func doServerStreaming(client greet.GreetServiceClient) {
 	}
 }
 
-func doClientStreaming(client greet.GreetServiceClient) {
+func doClientStreaming(client greet2.GreetServiceClient) {
 	glog.Infof("\n=============================== Client Streaming RPC ===============================\n")
-	var requests []*greet.LongGreetReq
+	var requests []*greet2.LongGreetReq
 	for ii := 0; ii < 10; ii++ {
-		var req greet.LongGreetReq
-		var greeting greet.Greeting
+		var req greet2.LongGreetReq
+		var greeting greet2.Greeting
 		greeting.FirstName = "Nikhil" + strconv.Itoa(ii)
 		greeting.LastName = "Srinivasan"
 		req.Greeting = &greeting

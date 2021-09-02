@@ -1,4 +1,4 @@
-package hedwig
+package server
 
 import (
 	"bytes"
@@ -14,10 +14,8 @@ import (
 func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	testutil.LogTestMarker("TestInstanceManager_ConsumerCommit")
 	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
-	clusterID := "nikhil1nikhil1"
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
-		ClusterID:     clusterID,
 		PeerAddresses: nil,
 	}
 	generateConsumerName := func(id int) string {
@@ -26,7 +24,7 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	numConsumers := 15
 	commitOffset := base.Offset(100)
 	im := NewBroker(&opts)
-	ms := NewMotherShip()
+	ms := NewMotherShip(testDirName)
 	// Register consumers for non-existent topics.
 	for ii := 0; ii < numConsumers; ii++ {
 		var req comm.RegisterConsumerRequest
@@ -209,17 +207,15 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 func TestInstanceManager_ProduceConsume(t *testing.T) {
 	testutil.LogTestMarker("TestInstanceManager_ProduceConsume")
 	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ProduceConsume")
-	clusterID := "nikhil1nikhil1"
 	topicName := "produce_consume_topic"
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
-		ClusterID:     clusterID,
 		PeerAddresses: nil,
 	}
 	numIters := 500
 	batchSize := 10
 	im := NewBroker(&opts)
-	ms := NewMotherShip()
+	ms := NewMotherShip(testDirName)
 	partIDs := []int32{1, 2, 3, 4}
 	var req comm.CreateTopicRequest
 	var topic comm.Topic

@@ -142,7 +142,6 @@ func (consumer *Consumer) initialize() {
 func (consumer *Consumer) Consume(batchSize int, timeout time.Duration) ([]Message, error) {
 	var req comm.ConsumeRequest
 	var messages []Message
-	req.ClusterId = consumer.clusterID
 	req.TopicId = int32(consumer.topicID)
 	req.PartitionId = int32(consumer.partitionID)
 	req.BatchSize = int32(batchSize)
@@ -204,7 +203,7 @@ func (consumer *Consumer) Consume(batchSize int, timeout time.Duration) ([]Messa
 	backoffFn := func(attempt int) {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	retErr := util.DoRetryWithContext(ctx, consumeFn, backoffFn)
+	retErr := util.RetryWithContext(ctx, consumeFn, backoffFn)
 	return messages, retErr
 }
 
@@ -223,7 +222,6 @@ func (consumer *Consumer) Commit() error {
 
 func (consumer *Consumer) CommitOffset(offset base.Offset) error {
 	var req comm.CommitRequest
-	req.ClusterId = consumer.clusterID
 	req.TopicId = int32(consumer.topicID)
 	req.PartitionId = int32(consumer.partitionID)
 	if offset < 0 {
@@ -253,5 +251,5 @@ func (consumer *Consumer) CommitOffset(offset base.Offset) error {
 	backoffFn := func(attempt int) {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
-	return util.DoRetryWithContext(ctx, commitFn, backoffFn)
+	return util.RetryWithContext(ctx, commitFn, backoffFn)
 }
