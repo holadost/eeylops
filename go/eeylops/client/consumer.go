@@ -107,8 +107,8 @@ type Consumer struct {
 	startEpochNs            int64
 	endEpochNs              int64
 	nextOffset              base.Offset
-	firstConsumeDone        bool // Flag to indicate whether Consume has been called at least once.
-	consumerDone            bool // Flag to indicate when consumer has finished scanning the partition.
+	firstFetchDone          bool // Flag to indicate whether Consume has been called at least once.
+	consumerFinished        bool // Flag to indicate when consumer has finished scanning the partition.
 }
 
 func newConsumer(cfg *ConsumerConfig) *Consumer {
@@ -122,8 +122,8 @@ func newConsumer(cfg *ConsumerConfig) *Consumer {
 		endEpochNs:              cfg.EndEpochNs,
 		resumeFromLastCommitted: cfg.ResumeFromLastCommitted,
 		nextOffset:              -1,
-		firstConsumeDone:        false,
-		consumerDone:            false,
+		firstFetchDone:          false,
+		consumerFinished:        false,
 	}
 	if consumer.rpcClient == nil {
 		glog.Fatalf("Invalid rpc client: %v", consumer.rpcClient)
@@ -147,12 +147,12 @@ func (consumer *Consumer) Consume(batchSize int, timeout time.Duration) ([]Messa
 	req.BatchSize = int32(batchSize)
 	req.EndTimestamp = consumer.endEpochNs
 	req.AutoCommit = consumer.autoCommit
-	if !consumer.firstConsumeDone {
+	if !consumer.firstFetchDone {
 		// This is the first consume call. Use consumer config to start scans.
 		req.ResumeFromLastCommittedOffset = consumer.resumeFromLastCommitted
 		req.StartTimestamp = consumer.startEpochNs
 	} else {
-		if consumer.consumerDone {
+		if consumer.consumerFinished {
 			// We have finished consuming all messages from the partition.
 			return nil, ErrConsumerDone
 		}
@@ -192,11 +192,15 @@ func (consumer *Consumer) Consume(batchSize int, timeout time.Duration) ([]Messa
 			msg.Value = val.GetValue()
 			messages = append(messages, msg)
 		}
+		if !consumer.firstFetchDone {
+			consumer.firstFetchDone = true
+		}
 		// Remember nextOffset for the next time Consume is called.
 		if resp.GetNextOffset() != -1 {
 			consumer.nextOffset = base.Offset(resp.GetNextOffset())
 		} else {
-			consumer.consumerDone = true
+			// Mark the consumer as finished.
+			consumer.consumerFinished = true
 		}
 		return false, nil
 	}
@@ -211,7 +215,7 @@ func (consumer *Consumer) Commit() error {
 	if consumer.nextOffset != -1 {
 		return consumer.CommitOffset(consumer.nextOffset)
 	} else {
-		if !consumer.firstConsumeDone {
+		if !consumer.firstFetchDone {
 			// Cannot commit when nothing has been consumed.
 			return ErrInvalidCommitBeforeConsume
 		}

@@ -35,7 +35,6 @@ func (producer *Producer) initialize() {
 // Produce appends the given batch 'data' to the specified partition. Each item in 'data' is a byte slice.
 func (producer *Producer) Produce(data [][]byte) error {
 	var req comm.ProduceRequest
-	req.ClusterId = producer.clusterID
 	req.TopicId = int32(producer.topicID)
 	req.PartitionId = int32(producer.partitionID)
 	req.Values = append(req.Values, data...)
