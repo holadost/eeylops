@@ -23,14 +23,15 @@ var kLastRLogIdxBytes = []byte(kLastRLogIdx)
 
 // TopicsConfigStore holds all the topics for eeylops.
 type TopicsConfigStore struct {
-	kvStore      *kv_store.BadgerKVStore
-	logger       *logging.PrefixLogger
-	rootDir      string
-	tsDir        string
-	topicNameMap map[string]*base.TopicConfig
-	topicIDMap   map[base.TopicIDType]*base.TopicConfig
-	topicMapLock sync.RWMutex
-	nextTopicID  base.TopicIDType
+	kvStore                  *kv_store.BadgerKVStore
+	logger                   *logging.PrefixLogger
+	rootDir                  string
+	tsDir                    string
+	topicNameMap             map[string]*base.TopicConfig
+	topicIDMap               map[base.TopicIDType]*base.TopicConfig
+	topicMapLock             sync.RWMutex
+	topicIDGenerationEnabled bool
+	nextTopicID              base.TopicIDType
 }
 
 func NewTopicsConfigStore(rootDir string) *TopicsConfigStore {
@@ -42,6 +43,20 @@ func NewTopicsConfigStore(rootDir string) *TopicsConfigStore {
 		ts.logger.Fatalf("Unable to create directory for topic store due to err: %v", err)
 		return nil
 	}
+	ts.initialize()
+	return ts
+}
+
+func NewTopicsConfigStoreWithTopicIDGenerationEnabled(rootDir string) *TopicsConfigStore {
+	ts := new(TopicsConfigStore)
+	ts.rootDir = rootDir
+	ts.tsDir = path.Join(rootDir, kTopicsConfigStoreDirectory)
+	ts.logger = logging.NewPrefixLogger("topics_config_store")
+	if err := os.MkdirAll(ts.tsDir, 0774); err != nil {
+		ts.logger.Fatalf("Unable to create directory for topic store due to err: %v", err)
+		return nil
+	}
+	ts.topicIDGenerationEnabled = true
 	ts.initialize()
 	return ts
 }
@@ -83,7 +98,15 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) er
 		tcs.logger.Warningf("Topic named: %s already exists. Not adding topic again", topic.Name)
 		return ErrTopicExists
 	}
-	topic.ID = tcs.nextTopicID
+	if tcs.topicIDGenerationEnabled {
+		topic.ID = tcs.nextTopicID
+	} else {
+		// A topic ID must have been provided. Panic if not.
+		if topic.ID <= 0 {
+			tcs.logger.Fatalf("Topic ID generation is disabled an a topic id was not provided for topic: %s",
+				topic.ToString())
+		}
+	}
 	tcs.logger.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
 	var keys [][]byte
 	var values [][]byte
@@ -96,7 +119,9 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) er
 		return ErrTopicStore
 	}
 	tcs.addTopicToMaps(&topic)
-	tcs.nextTopicID += 1
+	if tcs.topicIDGenerationEnabled {
+		tcs.nextTopicID += 1
+	}
 	return nil
 }
 
@@ -231,6 +256,9 @@ func (tcs *TopicsConfigStore) removeTopicFromMaps(topic *base.TopicConfig) {
 }
 
 func (tcs *TopicsConfigStore) getNextTopicIDFromKVStore() base.TopicIDType {
+	if !tcs.topicIDGenerationEnabled {
+		return 0
+	}
 	val, err := tcs.kvStore.Get(kLastTopicIDBytes)
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {

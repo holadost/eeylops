@@ -27,7 +27,7 @@ func NewMotherShip(rootDir string) *MotherShip {
 	msRootPath := path.Join(rootDir, kMotherShipDirName)
 	util.CreateDir(msRootPath)
 	ms.rootDir = msRootPath
-	ms.topicsConfigStore = storage.NewTopicsConfigStore(msRootPath)
+	ms.topicsConfigStore = storage.NewTopicsConfigStoreWithTopicIDGenerationEnabled(msRootPath)
 	ms.fsm = NewMotherShipFSM(ms.topicsConfigStore, ms.logger)
 	return &ms
 }
