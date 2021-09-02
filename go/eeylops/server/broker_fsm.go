@@ -70,11 +70,8 @@ func (fsm *BrokerFSM) append(cmd *Command, log *raft.Log) *FSMResponse {
 	resp.Error = nil
 	prt, err := fsm.storageController.GetPartition(cmd.AppendCommand.TopicID, cmd.AppendCommand.PartitionID)
 	if err != nil {
-		if err == storage.ErrPartitionNotFound {
-			resp.Error = err
-			return &resp
-		} else if err == storage.ErrTopicNotFound {
-			resp.Error = err
+		resp.Error = err
+		if err == storage.ErrPartitionNotFound || err == storage.ErrTopicNotFound {
 			return &resp
 		} else {
 			fsm.logger.Fatalf("Unable to get partition: %d, topic ID: %d due to err: %s",

@@ -12,8 +12,8 @@ import (
 )
 
 func TestBroker_ConsumerCommit(t *testing.T) {
-	testutil.LogTestMarker("TestInstanceManager_ConsumerCommit")
-	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
+	testutil.LogTestMarker("TestBroker_ConsumerCommit")
+	testDirName := testutil.CreateTestDir(t, "TestBroker_ConsumerCommit")
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
 		PeerAddresses: nil,
@@ -207,8 +207,8 @@ func TestBroker_ConsumerCommit(t *testing.T) {
 }
 
 func TestBroker_ProduceConsume(t *testing.T) {
-	testutil.LogTestMarker("TestInstanceManager_ProduceConsume")
-	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ProduceConsume")
+	testutil.LogTestMarker("TestBroker_ProduceConsume")
+	testDirName := testutil.CreateTestDir(t, "TestBroker_ProduceConsume")
 	topicName := "produce_consume_topic"
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
@@ -218,7 +218,6 @@ func TestBroker_ProduceConsume(t *testing.T) {
 	numIters := 500
 	batchSize := 10
 	im := NewBroker(&opts)
-	ms := NewMotherShip(testDirName)
 	partIDs := []int32{1, 2, 3, 4}
 	var req comm.CreateTopicRequest
 	var topic comm.Topic
@@ -227,19 +226,11 @@ func TestBroker_ProduceConsume(t *testing.T) {
 	topic.TopicName = topicName
 	topic.TopicId = 1
 	req.Topic = &topic
-	resp := ms.AddTopic(context.Background(), &req)
+	resp := im.AddTopic(context.Background(), &req)
 	ec := resp.GetError().GetErrorCode()
 	if ec != comm.Error_KNoError {
 		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
 	}
-	var greq comm.GetTopicRequest
-	greq.TopicName = topicName
-	gresp := ms.GetTopic(context.Background(), &greq)
-	ec = gresp.GetError().GetErrorCode()
-	if ec != comm.Error_KNoError {
-		glog.Fatalf("Error while fetching topic: %s. Error: %s", topicName, ec.String())
-	}
-	glog.Infof("Received topic: %s, ID: %d", gresp.GetTopic().GetTopicName(), gresp.GetTopic().GetTopicId())
 
 	// Produce and consume from non-existent topics and partitions.
 	produceNonExistentTopic := func() {
@@ -261,7 +252,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 	produceNonExistentTopic()
 	consumeNonExistentTopic := func() {
 		var req comm.ConsumeRequest
-		req.TopicId = gresp.GetTopic().GetTopicId() + 1000
+		req.TopicId = 1001
 		req.PartitionId = 1
 		req.StartOffset = 0
 		req.ConsumerId = "nikhil"
@@ -284,7 +275,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 			values = append(values, []byte(fmt.Sprintf("value-%d", (jj*batchSize)+jj)))
 		}
 		var req comm.ProduceRequest
-		req.TopicId = gresp.GetTopic().GetTopicId()
+		req.TopicId = 1
 		req.PartitionId = 100
 		req.Values = values
 		resp := im.Produce(context.Background(), &req)
@@ -297,7 +288,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 	produceNonExistentPartition()
 	consumeNonExistentPartition := func() {
 		var req comm.ConsumeRequest
-		req.TopicId = gresp.GetTopic().GetTopicId()
+		req.TopicId = 1
 		req.PartitionId = 100
 		req.StartOffset = 0
 		req.ConsumerId = "nikhil"
@@ -324,7 +315,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 					values = append(values, []byte(fmt.Sprintf("value-%d", (ii*batchSize)+jj)))
 				}
 				var req comm.ProduceRequest
-				req.TopicId = gresp.GetTopic().GetTopicId()
+				req.TopicId = 1
 				req.PartitionId = prtID
 				req.Values = values
 				resp := im.Produce(context.Background(), &req)
@@ -351,7 +342,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 			prevNextOffset := int64(0)
 			for ii := 0; ii < numIters+1; ii++ {
 				var req comm.ConsumeRequest
-				req.TopicId = gresp.GetTopic().GetTopicId()
+				req.TopicId = 1
 				req.PartitionId = prtID
 				req.StartOffset = prevNextOffset
 				req.ConsumerId = "nikhil"

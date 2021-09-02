@@ -126,7 +126,6 @@ func (broker *Broker) Produce(ctx context.Context, req *comm.ProduceRequest) *co
 			KAppendCommand.ToString(), KAppendCommand, fsmResp.CommandType.ToString(), fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
-		broker.logger.Infof("Got error: %s", fsmResp.Error.Error())
 		if fsmResp.Error == storage.ErrPartitionClosed {
 			return makeResponse(comm.Error_KErrTopicNotFound, fsmResp.Error,
 				fmt.Sprintf("Partition: %d is closed. Has topic: %d been deleted?", req.GetPartitionId(),
