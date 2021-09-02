@@ -340,8 +340,7 @@ func (broker *Broker) internalCommit(ctx context.Context, cm CommitMessage) *com
 	return makeResponse(comm.Error_KNoError, nil, "")
 }
 
-func (broker *Broker) GetLastCommitted(ctx context.Context,
-	req *comm.LastCommittedRequest) *comm.LastCommittedResponse {
+func (broker *Broker) GetLastCommitted(ctx context.Context, req *comm.LastCommittedRequest) *comm.LastCommittedResponse {
 	makeResponse := func(offset base.Offset, ec comm.Error_ErrorCodes, err error,
 		msg string) *comm.LastCommittedResponse {
 		var resp comm.LastCommittedResponse
@@ -411,8 +410,7 @@ func (broker *Broker) GetLastCommitted(ctx context.Context,
 	return makeResponse(offset, comm.Error_KNoError, nil, "")
 }
 
-func (broker *Broker) RegisterConsumer(ctx context.Context,
-	req *comm.RegisterConsumerRequest) *comm.RegisterConsumerResponse {
+func (broker *Broker) RegisterConsumer(ctx context.Context, req *comm.RegisterConsumerRequest) *comm.RegisterConsumerResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RegisterConsumerResponse {
 		var resp comm.RegisterConsumerResponse
 		resp.Error = makeErrorProto(ec, err, msg)
