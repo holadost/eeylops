@@ -25,3 +25,10 @@ func CreateDir(dirName string) {
 		glog.Fatalf("Unable to create test dir: %s", dirName)
 	}
 }
+
+func RenameDir(oldPath string, newPath string) {
+	glog.Infof("Renaming directory: %s to %s", oldPath, newPath)
+	if err := os.Rename(oldPath, newPath); err != nil {
+		glog.Fatalf("Unable to rename dir: %s to %s", oldPath, newPath)
+	}
+}

@@ -43,6 +43,7 @@ func NewTopicsConfigStore(rootDir string) *TopicsConfigStore {
 		ts.logger.Fatalf("Unable to create directory for topic store due to err: %v", err)
 		return nil
 	}
+	ts.topicIDGenerationEnabled = false
 	ts.initialize()
 	return ts
 }
@@ -99,6 +100,10 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) er
 		return ErrTopicExists
 	}
 	if tcs.topicIDGenerationEnabled {
+		if topic.ID > 0 {
+			tcs.logger.Fatalf("Topic ID generation enabled but received topic with an ID. Topic: %s",
+				topic.ToString())
+		}
 		topic.ID = tcs.nextTopicID
 	} else {
 		// A topic ID must have been provided. Panic if not.
