@@ -24,6 +24,7 @@ type PeerAddress struct {
 type BrokerOpts struct {
 	DataDirectory string        // Data directory for this Broker.
 	PeerAddresses []PeerAddress // List of peer addresses. The first address must be the current host's address.
+	BrokerID      string        // Broker ID.
 }
 
 // Broker manages the replication and storage controller for the node.
@@ -47,7 +48,10 @@ func NewBroker(opts *BrokerOpts) *Broker {
 func (broker *Broker) initialize(opts *BrokerOpts) {
 	broker.logger = logging.NewPrefixLogger(broker.brokerID)
 	broker.peerAddresses = opts.PeerAddresses
-
+	broker.brokerID = opts.BrokerID
+	if broker.brokerID == "" {
+		broker.logger.Fatalf("Invalid broker ID: %s", broker.brokerID)
+	}
 	// Create a root directory for this instance.
 	clusterRootDir := path.Join(opts.DataDirectory, broker.brokerID)
 	util.CreateDir(clusterRootDir)
@@ -345,7 +349,7 @@ func (broker *Broker) GetLastCommitted(ctx context.Context,
 	}
 	// Sanity checks.
 	if len(req.GetConsumerId()) == 0 {
-		broker.logger.VInfof(1, "Invalid argument. Subscriber ID has not been defined")
+		broker.logger.VInfof(1, "Invalid argument. Consumer ID has not been defined")
 		return makeResponse(-1, comm.Error_KErrInvalidArg, nil, "Invalid subscriber ID")
 	}
 	topicID := base.TopicIDType(req.GetTopicId())
@@ -371,15 +375,20 @@ func (broker *Broker) GetLastCommitted(ctx context.Context,
 	}
 
 	// TODO: Check if topic and partition exist.
-	//tpc, ok := doesTopicExist(topicID, broker.storageController)
-	//if !ok {
-	//	return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
-	//		fmt.Sprintf("Topic: %d does not found", topicID))
-	//}
-	//if !doesPartitionExist(tpc, int(req.GetPartitionId())) {
-	//	return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
-	//		fmt.Sprintf("Topic: %d, Partition: %d not found", topicID, req.GetPartitionId()))
-	//}
+	topic, err := broker.storageController.GetTopicByID(topicID)
+	if err != nil {
+		broker.logger.Errorf("Unable to get topic: %d due to err: %s", topicID, err.Error())
+		if err == storage.ErrTopicNotFound {
+			return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("Topic: %d does not found", topicID))
+		} else {
+			return makeResponse(-1, comm.Error_KErrBackend, err, "")
+		}
+	}
+	if !util.ContainsInt(topic.PartitionIDs, int(req.GetPartitionId())) {
+		return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
+			fmt.Sprintf("Topic: %d does not found", topicID))
+	}
 
 	// Fetch the last committed offset.
 	cs := broker.storageController.GetConsumerStore()
@@ -453,13 +462,123 @@ func (broker *Broker) RegisterConsumer(ctx context.Context,
 			return makeResponse(comm.Error_KErrTopicNotFound, nil,
 				fmt.Sprintf("Topic: %d was not found", req.GetTopicId()))
 		} else if fsmResp.Error == storage.ErrPartitionNotFound {
-			return makeResponse(comm.Error_KErrTopicNotFound, nil,
+			return makeResponse(comm.Error_KErrPartitionNotFound, nil,
 				fmt.Sprintf("Topic: %d, partition: %d was not found", req.GetTopicId(), req.GetPartitionId()))
 		} else {
 			broker.logger.Fatalf("Unexpected error from BrokerFSM when attempting to "+
 				"register consumer: %s for topic: %d, partition: %d. Error: %v", req.GetConsumerId(), req.GetTopicId(),
 				req.GetPartitionId(), fsmResp.Error)
 		}
+	}
+	return makeResponse(comm.Error_KNoError, nil, "")
+}
+
+func (broker *Broker) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {
+	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.CreateTopicResponse {
+		var resp comm.CreateTopicResponse
+		resp.Error = makeErrorProto(ec, err, msg)
+		return &resp
+	}
+	// Sanity checks.
+	topic := req.GetTopic()
+	if len(topic.GetTopicName()) == 0 {
+		broker.logger.Errorf("Invalid topic name. Req: %v", req)
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
+	}
+	if topic.GetTopicId() <= 0 {
+		broker.logger.Errorf("No topic id provided")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic ID")
+	}
+	if len(topic.GetPartitionIds()) == 0 {
+		broker.logger.Errorf("No partitions provided while creating topic")
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid partition ID")
+	}
+	// TODO: This must go through the replication controller and we must be the leader.
+	// Populate arg, command and log.
+	var prtIds []int
+	for _, id := range topic.GetPartitionIds() {
+		prtIds = append(prtIds, int(id))
+	}
+	var tc base.TopicConfig
+	now := time.Now()
+	tc.Name = topic.GetTopicName()
+	tc.ID = base.TopicIDType(topic.TopicId)
+	tc.PartitionIDs = prtIds
+	tc.TTLSeconds = int(topic.TtlSeconds)
+	tc.CreatedAt = now
+	addTopicMsg := AddTopicMessage{TopicConfig: tc}
+	cmd := Command{
+		CommandType:     KAddTopicCommand,
+		AddTopicCommand: addTopicMsg,
+	}
+	data := Serialize(&cmd)
+	log := raft.Log{
+		Index:      uint64(now.UnixNano()),
+		Term:       0,
+		Type:       0,
+		Data:       data,
+		Extensions: nil,
+		AppendedAt: time.Now(),
+	}
+
+	// Apply to BrokerFSM, wait for response and handle errors.
+	tmpResp := broker.fsm.Apply(&log)
+	fsmResp, ok := tmpResp.(*FSMResponse)
+	if !ok {
+		broker.logger.Fatalf("Invalid response from BrokerFSM. Received: %v", tmpResp)
+	}
+	if fsmResp.Error != nil {
+		if fsmResp.Error == storage.ErrTopicExists {
+			return makeResponse(comm.Error_KErrTopicExists, nil,
+				fmt.Sprintf("Topic: %s already exists", req.GetTopic().GetTopicName()))
+		}
+		broker.logger.Fatalf("Unexpected error while creating topic: %s", fsmResp.Error.Error())
+	}
+	return makeResponse(comm.Error_KNoError, nil, "")
+}
+
+func (broker *Broker) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) *comm.RemoveTopicResponse {
+	// Sanity checks.
+	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RemoveTopicResponse {
+		var resp comm.RemoveTopicResponse
+		resp.Error = makeErrorProto(ec, err, msg)
+		return &resp
+	}
+	topicID := base.TopicIDType(req.GetTopicId())
+	if topicID == 0 {
+		broker.logger.VInfof(1, "Invalid topic ID. Req: %v", req)
+		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic ID")
+	}
+
+	// TODO: This must go through the replication controller and we must be the leader.
+	rmTopicMsg := RemoveTopicMessage{TopicID: topicID}
+	cmd := Command{
+		CommandType:        KRemoveTopicCommand,
+		RemoveTopicCommand: rmTopicMsg,
+	}
+	data := Serialize(&cmd)
+	log := raft.Log{
+		Index:      uint64(time.Now().UnixNano()),
+		Term:       0,
+		Type:       0,
+		Data:       data,
+		Extensions: nil,
+		AppendedAt: time.Now(),
+	}
+
+	// Apply to BrokerFSM, wait for response and handle errors.
+	tmpResp := broker.fsm.Apply(&log)
+	fsmResp, ok := tmpResp.(*FSMResponse)
+	if !ok {
+		broker.logger.Fatalf("Unable to cast to BrokerFSM response. Received: %v", tmpResp)
+	}
+	if fsmResp.Error != nil {
+		if fsmResp.Error == storage.ErrTopicNotFound {
+			return makeResponse(comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("Topic: %d does not exist", topicID))
+		}
+		broker.logger.Fatalf("Unexpected error from BrokerFSM while attempting to remove topic: %d. Error: %s",
+			req.GetTopicId(), fsmResp.Error.Error())
 	}
 	return makeResponse(comm.Error_KNoError, nil, "")
 }

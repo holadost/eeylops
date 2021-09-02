@@ -11,12 +11,13 @@ import (
 	"testing"
 )
 
-func TestInstanceManager_ConsumerCommit(t *testing.T) {
+func TestBroker_ConsumerCommit(t *testing.T) {
 	testutil.LogTestMarker("TestInstanceManager_ConsumerCommit")
 	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ConsumerCommit")
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
 		PeerAddresses: nil,
+		BrokerID:      "broker-1",
 	}
 	generateConsumerName := func(id int) string {
 		return fmt.Sprintf("hello_consumer_%d", id)
@@ -24,7 +25,6 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	numConsumers := 15
 	commitOffset := base.Offset(100)
 	im := NewBroker(&opts)
-	ms := NewMotherShip(testDirName)
 	// Register consumers for non-existent topics.
 	for ii := 0; ii < numConsumers; ii++ {
 		var req comm.RegisterConsumerRequest
@@ -44,8 +44,9 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	topic.PartitionIds = []int32{1, 2, 3, 4}
 	topic.TtlSeconds = 86400 * 7
 	topic.TopicName = "hello_topic_1"
+	topic.TopicId = 1
 	req.Topic = &topic
-	resp := ms.AddTopic(context.Background(), &req)
+	resp := im.AddTopic(context.Background(), &req)
 	ec := resp.GetError().GetErrorCode()
 	if ec != comm.Error_KNoError {
 		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
@@ -63,6 +64,7 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 		if ec != comm.Error_KNoError {
 			glog.Fatalf("Unable to register consumer commit due to err: %s", ec.String())
 		}
+		glog.Infof("Successfully registered consumer: %s", generateConsumerName(ii))
 	}
 
 	// Get last committed offset for all consumers.
@@ -204,13 +206,14 @@ func TestInstanceManager_ConsumerCommit(t *testing.T) {
 	}
 }
 
-func TestInstanceManager_ProduceConsume(t *testing.T) {
+func TestBroker_ProduceConsume(t *testing.T) {
 	testutil.LogTestMarker("TestInstanceManager_ProduceConsume")
 	testDirName := testutil.CreateTestDir(t, "TestInstanceManager_ProduceConsume")
 	topicName := "produce_consume_topic"
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
 		PeerAddresses: nil,
+		BrokerID:      "broker-1",
 	}
 	numIters := 500
 	batchSize := 10
@@ -222,6 +225,7 @@ func TestInstanceManager_ProduceConsume(t *testing.T) {
 	topic.PartitionIds = partIDs
 	topic.TtlSeconds = 86400 * 7
 	topic.TopicName = topicName
+	topic.TopicId = 1
 	req.Topic = &topic
 	resp := ms.AddTopic(context.Background(), &req)
 	ec := resp.GetError().GetErrorCode()

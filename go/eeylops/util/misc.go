@@ -32,3 +32,12 @@ func RenameDir(oldPath string, newPath string) {
 		glog.Fatalf("Unable to rename dir: %s to %s", oldPath, newPath)
 	}
 }
+
+func ContainsInt(s []int, e int) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}

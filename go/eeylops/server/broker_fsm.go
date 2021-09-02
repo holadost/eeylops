@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"eeylops/server/base"
 	"eeylops/server/storage"
 	sbase "eeylops/server/storage/base"
 	"eeylops/util/logging"
@@ -41,6 +42,10 @@ func (fsm *BrokerFSM) Apply(log *raft.Log) interface{} {
 		return fsm.commit(cmd, log)
 	case KRegisterConsumerCommand:
 		return fsm.registerConsumer(cmd, log)
+	case KAddTopicCommand:
+		return fsm.addTopic(cmd, log)
+	case KRemoveTopicCommand:
+		return fsm.removeTopic(cmd, log)
 	default:
 		fsm.logger.Fatalf("Invalid command type: %d", cmd.CommandType)
 		return nil
@@ -118,23 +123,23 @@ func (fsm *BrokerFSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse
 	resp.Error = nil
 
 	// TODO: Check if topic exists before registering consumer.
-	//tpc, exists := doesTopicExist(cmd.RegisterConsumerCommand.TopicID, fsm.storageController)
-	//if !exists {
-	//	fsm.logger.Warningf("Unable to register consumer: %s as topic: %d does not exist. Log Index: %d, "+
-	//		"Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID, log.Index,
-	//		log.Term)
-	//	resp.Error = storage.ErrTopicNotFound
-	//	return &resp
-	//}
-	//
-	//// Check if partition exists before registering consumer.
-	//if !doesPartitionExist(tpc, cmd.RegisterConsumerCommand.PartitionID) {
-	//	fsm.logger.Warningf("Unable to register consumer: %s as topic: %d, partition: %d does not exist. "+
-	//		"Log Index: %d, Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
-	//		cmd.RegisterConsumerCommand.PartitionID, log.Index, log.Term)
-	//	resp.Error = storage.ErrPartitionNotFound
-	//	return &resp
-	//}
+	tpc, exists := fsm.doesTopicExist(cmd.RegisterConsumerCommand.TopicID)
+	if !exists {
+		fsm.logger.Warningf("Unable to register consumer: %s as topic: %d does not exist. Log Index: %d, "+
+			"Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID, log.Index,
+			log.Term)
+		resp.Error = storage.ErrTopicNotFound
+		return &resp
+	}
+
+	// Check if partition exists before registering consumer.
+	if !fsm.doesPartitionExist(&tpc, cmd.RegisterConsumerCommand.PartitionID) {
+		fsm.logger.Warningf("Unable to register consumer: %s as topic: %d, partition: %d does not exist. "+
+			"Log Index: %d, Log Term: %d", cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
+			cmd.RegisterConsumerCommand.PartitionID, log.Index, log.Term)
+		resp.Error = storage.ErrPartitionNotFound
+		return &resp
+	}
 
 	cs := fsm.storageController.GetConsumerStore()
 	err := cs.RegisterConsumer(cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
@@ -165,21 +170,20 @@ func (fsm *BrokerFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 	var resp FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
-	// TODO: Check if topic and partition exist.
-	//tpc, exists := doesTopicExist(cmd.CommitCommand.TopicID, fsm.storageController)
-	//if !exists {
-	//	fsm.logger.VInfof(1, "Topic: %d does not exist. Skipping this command. "+
-	//		"Log Index: %d, Log Term: %d", cmd.CommitCommand.TopicID, log.Index, log.Term)
-	//	resp.Error = storage.ErrTopicNotFound
-	//	return &resp
-	//}
-	//if !doesPartitionExist(tpc, cmd.CommitCommand.PartitionID) {
-	//	fsm.logger.VInfof(1, "Topic: %d, Partition: %d does not exist. Skipping this command. "+
-	//		"Log Index: %d, Log Term: %d", cmd.CommitCommand.TopicID, cmd.CommitCommand.PartitionID,
-	//		log.Index, log.Term)
-	//	resp.Error = storage.ErrPartitionNotFound
-	//	return &resp
-	//}
+	tpc, exists := fsm.doesTopicExist(cmd.CommitCommand.TopicID)
+	if !exists {
+		fsm.logger.VInfof(1, "Topic: %d does not exist. Skipping this command. "+
+			"Log Index: %d, Log Term: %d", cmd.CommitCommand.TopicID, log.Index, log.Term)
+		resp.Error = storage.ErrTopicNotFound
+		return &resp
+	}
+	if !fsm.doesPartitionExist(&tpc, cmd.CommitCommand.PartitionID) {
+		fsm.logger.VInfof(1, "Topic: %d, Partition: %d does not exist. Skipping this command. "+
+			"Log Index: %d, Log Term: %d", cmd.CommitCommand.TopicID, cmd.CommitCommand.PartitionID,
+			log.Index, log.Term)
+		resp.Error = storage.ErrPartitionNotFound
+		return &resp
+	}
 	cs := fsm.storageController.GetConsumerStore()
 	if err := cs.Commit(cmd.CommitCommand.ConsumerID, cmd.CommitCommand.TopicID,
 		uint(cmd.CommitCommand.PartitionID), cmd.CommitCommand.Offset, int64(log.Index)); err != nil {
@@ -204,4 +208,94 @@ func (fsm *BrokerFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 		}
 	}
 	return &resp
+}
+
+func (fsm *BrokerFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
+	// Sanity check command.
+	topic := &cmd.AddTopicCommand.TopicConfig
+	if len(topic.Name) == 0 {
+		fsm.logger.Fatalf("Invalid topic name. Log Index: %d, Log Term: %d", log.Index, log.Term)
+	}
+	if len(topic.PartitionIDs) == 0 {
+		fsm.logger.Fatalf("Invalid partition IDs provided. Log Index: %d, Log Term: %d", log.Index, log.Term)
+	}
+	if topic.TTLSeconds <= 0 {
+		topic.TTLSeconds = -1
+	}
+	topic.CreatedAt = log.AppendedAt
+	topic.CreationConfirmed = false
+	var resp FSMResponse
+	resp.CommandType = cmd.CommandType
+	resp.Error = nil
+	// Add topic.
+	if err := fsm.storageController.AddTopic(cmd.AddTopicCommand.TopicConfig, int64(log.Index)); err != nil {
+		if err == storage.ErrTopicExists {
+			fsm.logger.Warningf("Unable to add topic as it already exists. Topic Details: %s, "+
+				"Log Index: %d, Log Term: %d", cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
+				log.Term)
+			resp.Error = err
+			return &resp
+		} else if err == storage.ErrInvalidRLogIdx {
+			fsm.logger.Warningf("An older replicated log index was attempted to create a topic. "+
+				"Log Index: %d, Log Term: %d. Skipping this index as it has already been applied", log.Index, log.Term)
+			return &resp
+		} else {
+			fsm.logger.Fatalf("Unable to add topic due to err: %s. Topic details: %s, "+
+				"Log Index: %d, Term: %d", err.Error(), cmd.AddTopicCommand.TopicConfig.ToString(),
+				log.Index, log.Term)
+		}
+	}
+	return &resp
+}
+
+func (fsm *BrokerFSM) removeTopic(cmd *Command, log *raft.Log) *FSMResponse {
+	// Sanity checks.
+	if cmd.RemoveTopicCommand.TopicID == 0 {
+		fsm.logger.Fatalf("Invalid topic ID")
+	}
+	var resp FSMResponse
+	resp.CommandType = cmd.CommandType
+	resp.Error = nil
+
+	// Remove topic.
+	if err := fsm.storageController.RemoveTopic(cmd.RemoveTopicCommand.TopicID, int64(log.Index)); err != nil {
+		if err == storage.ErrTopicNotFound {
+			fsm.logger.Warningf("Unable to remove topic: %d as topic does not exist. Log Index: %d, "+
+				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
+			resp.Error = storage.ErrTopicNotFound
+			return &resp
+		} else if err == storage.ErrInvalidRLogIdx {
+			fsm.logger.Warningf("An older replicated log index was attempted to remove topic: %d. "+
+				"Log Index: %d, Log Term: %d. Skipping this log as it has already been applied",
+				cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
+			return &resp
+		} else {
+			fsm.logger.Fatalf("Unable to remove topic: %d due to err: %s, Log Index: %d, Log Term: %d",
+				cmd.RemoveTopicCommand.TopicID, err.Error(), log.Index, log.Term)
+		}
+	}
+	return &resp
+}
+
+func (fsm *BrokerFSM) doesTopicExist(topicID base.TopicIDType) (base.TopicConfig, bool) {
+	tpc, err := fsm.storageController.GetTopicByID(topicID)
+	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return base.TopicConfig{}, false
+		}
+		fsm.logger.Fatalf("Unexpected error while attempting to check if topic: %d exists. Error: %s",
+			topicID, err.Error())
+	}
+	return tpc, true
+}
+
+func (fsm *BrokerFSM) doesPartitionExist(tpc *base.TopicConfig, partID int) bool {
+	found := false
+	for _, iPrtID := range tpc.PartitionIDs {
+		if partID == iPrtID {
+			found = true
+			break
+		}
+	}
+	return found
 }

@@ -49,17 +49,17 @@ func TestStorageController(t *testing.T) {
 		glog.Fatalf("Added topic: %s even though we should not have. Error: %v", topicName, err)
 	}
 
-	tp, err := controller.getTopicByName(topicName)
+	tp, err := controller.GetTopicByName(topicName)
 	if err != nil {
 		glog.Fatalf("Unable to fetch topic due to err: %s", err.Error())
 	}
 	glog.V(1).Infof("Topic: %v", tp)
 
-	_, err = controller.getTopicByName("topic2")
+	_, err = controller.GetTopicByName("topic2")
 	if err != ErrTopicNotFound {
 		glog.Fatalf("Fetched a topic that was never created")
 	}
-	tpc, err := controller.getTopicByID(topic.ID)
+	tpc, err := controller.GetTopicByID(topic.ID)
 	if err != nil {
 		glog.Fatalf("Unable to fetch topic by ID due to err: %s", err.Error())
 	}
@@ -75,7 +75,7 @@ func TestStorageController(t *testing.T) {
 	if err != nil {
 		glog.Fatalf("Failed to mark topic for removal due to err: %s", err.Error())
 	}
-	tp, err = controller.getTopicByName(topicName)
+	tp, err = controller.GetTopicByName(topicName)
 	if err == ErrTopicNotFound {
 		glog.V(1).Infof("Did not find topic as expected after it was deleted")
 	} else {

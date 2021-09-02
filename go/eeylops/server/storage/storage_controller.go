@@ -148,7 +148,7 @@ func (sc *StorageController) AddTopic(topic base.TopicConfig, rLogIdx int64) err
 }
 
 func (sc *StorageController) RemoveTopic(topicID base.TopicIDType, rLogIdx int64) error {
-	_, err := sc.getTopicByID(topicID)
+	_, err := sc.GetTopicByID(topicID)
 	if err != nil {
 		sc.logger.Errorf("Unable to remove topic as topic: %d was not found", topicID)
 		return ErrTopicNotFound
@@ -185,17 +185,17 @@ func (sc *StorageController) GetConsumerStore() *ConsumerStore {
 	return sc.consumerStore
 }
 
-/*************************************************** Helper methods ***************************************************/
-
-// getTopicByName returns the topic whose name matches the given topicName.
-func (sc *StorageController) getTopicByName(topicName string) (base.TopicConfig, error) {
+// GetTopicByName returns the topic whose name matches the given topicName.
+func (sc *StorageController) GetTopicByName(topicName string) (base.TopicConfig, error) {
 	return sc.topicsStore.GetTopicByName(topicName)
 }
 
-// getTopicByID returns the topic based on the given ID.
-func (sc *StorageController) getTopicByID(id base.TopicIDType) (base.TopicConfig, error) {
+// GetTopicByID returns the topic based on the given ID.
+func (sc *StorageController) GetTopicByID(id base.TopicIDType) (base.TopicConfig, error) {
 	return sc.topicsStore.GetTopicByID(id)
 }
+
+/*************************************************** Helper methods ***************************************************/
 
 // getControllerRootDirectory returns the root directory for the controller.
 func (sc *StorageController) getControllerRootDirectory() string {
