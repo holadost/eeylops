@@ -232,7 +232,8 @@ func (client *Client) getTopic(topicName string) (base.TopicConfig, error) {
 	return topicConfig, retErr
 }
 
-func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDType, partitionID int) (base.Offset, error) {
+func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDType,
+	partitionID int) (base.Offset, error) {
 	var req comm.LastCommittedRequest
 	req.ConsumerId = consumerID
 	req.TopicId = int32(topicID)
