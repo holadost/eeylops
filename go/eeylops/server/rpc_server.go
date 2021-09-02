@@ -22,6 +22,7 @@ type RPCServer struct {
 	port             int
 	instanceSelector *BrokerSelector
 	motherShip       *MotherShip
+	broker           *Broker
 }
 
 func NewRPCServer(host string, port int) *RPCServer {
@@ -56,75 +57,55 @@ func (srv *RPCServer) Run() {
 	glog.Infof("RPC server has finished!")
 }
 
-//func (srv *RPCServer) CreateTopic(ctx context.Context, req *comm.CreateTopicRequest) (*comm.CreateTopicResponse, error) {
-//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-//	if !exists {
-//		return &comm.CreateTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-//	}
-//	resp := im.AddTopic(ctx, req)
-//	return resp, nil
-//}
-//
-//func (srv *RPCServer) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequest) (*comm.RemoveTopicResponse, error) {
-//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-//	if !exists {
-//		return &comm.RemoveTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-//	}
-//	resp := im.RemoveTopic(ctx, req)
-//	return resp, nil
-//}
-//
-//func (srv *RPCServer) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*comm.GetTopicResponse, error) {
-//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-//	if !exists {
-//		return &comm.GetTopicResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-//	}
-//	resp := im.GetTopic(ctx, req)
-//	return resp, nil
-//}
-//
-//func (srv *RPCServer) GetAllTopics(ctx context.Context, req *comm.GetAllTopicsRequest) (*comm.GetAllTopicsResponse, error) {
-//	im, exists := srv.instanceMgrMap[req.GetClusterId()]
-//	if !exists {
-//		return &comm.GetAllTopicsResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-//	}
-//	resp := im.GetAllTopics(ctx)
-//	return resp, nil
-//}
+func (srv *RPCServer) CreateTopic(ctx context.Context,
+	req *comm.CreateTopicRequest) (*comm.CreateTopicResponse, error) {
+	resp := srv.motherShip.AddTopic(ctx, req)
+	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+		return resp, nil
+	}
+	resp = srv.broker.AddTopic(ctx, req)
+	return resp, nil
+}
+
+func (srv *RPCServer) RemoveTopic(ctx context.Context,
+	req *comm.RemoveTopicRequest) (*comm.RemoveTopicResponse, error) {
+	resp := srv.motherShip.RemoveTopic(ctx, req)
+	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+		return resp, nil
+	}
+	resp = srv.broker.RemoveTopic(ctx, req)
+	return resp, nil
+}
+
+func (srv *RPCServer) GetTopic(ctx context.Context, req *comm.GetTopicRequest) (*comm.GetTopicResponse, error) {
+	resp := srv.motherShip.GetTopic(ctx, req)
+	return resp, nil
+}
+
+func (srv *RPCServer) GetAllTopics(ctx context.Context,
+	req *comm.GetAllTopicsRequest) (*comm.GetAllTopicsResponse, error) {
+	resp := srv.motherShip.GetAllTopics(ctx)
+	return resp, nil
+}
 
 func (srv *RPCServer) Produce(ctx context.Context, req *comm.ProduceRequest) (*comm.ProduceResponse, error) {
-	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
-	if err != nil {
-		return &comm.ProduceResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.Produce(ctx, req)
+	resp := srv.broker.Produce(ctx, req)
 	return resp, nil
 }
 
 func (srv *RPCServer) Consume(ctx context.Context, req *comm.ConsumeRequest) (*comm.ConsumeResponse, error) {
-	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
-	if err != nil {
-		return &comm.ConsumeResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.Consume(ctx, req)
+	resp := srv.broker.Consume(ctx, req)
 	return resp, nil
 }
 
 func (srv *RPCServer) Commit(ctx context.Context, req *comm.CommitRequest) (*comm.CommitResponse, error) {
-	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
-	if err != nil {
-		return &comm.CommitResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.Commit(ctx, req)
+	resp := srv.broker.Commit(ctx, req)
 	return resp, nil
 }
 
-func (srv *RPCServer) GetLastCommitted(ctx context.Context, req *comm.LastCommittedRequest) (*comm.LastCommittedResponse, error) {
-	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
-	if err != nil {
-		return &comm.LastCommittedResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.GetLastCommitted(ctx, req)
+func (srv *RPCServer) GetLastCommitted(ctx context.Context,
+	req *comm.LastCommittedRequest) (*comm.LastCommittedResponse, error) {
+	resp := srv.broker.GetLastCommitted(ctx, req)
 	return resp, nil
 }
 
@@ -132,11 +113,13 @@ func (srv *RPCServer) GetBroker(ctx context.Context, req *comm.GetBrokerRequest)
 	return &comm.GetBrokerResponse{}, nil
 }
 
-func (srv *RPCServer) GetClusterConfig(ctx context.Context, req *comm.GetClusterConfigRequest) (*comm.GetClusterConfigResponse, error) {
+func (srv *RPCServer) GetClusterConfig(ctx context.Context,
+	req *comm.GetClusterConfigRequest) (*comm.GetClusterConfigResponse, error) {
 	return &comm.GetClusterConfigResponse{}, nil
 }
 
-func (srv *RPCServer) RegisterConsumer(ctx context.Context, req *comm.RegisterConsumerRequest) (*comm.RegisterConsumerResponse, error) {
+func (srv *RPCServer) RegisterConsumer(ctx context.Context,
+	req *comm.RegisterConsumerRequest) (*comm.RegisterConsumerResponse, error) {
 	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
 	if err != nil {
 		return &comm.RegisterConsumerResponse{Error: srv.createInvalidClusterErrorProto()}, nil

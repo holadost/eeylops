@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"github.com/golang/glog"
 	"sync"
@@ -93,6 +94,26 @@ func (logger *PrefixLogger) Fatalf(format string, args ...interface{}) {
 	glog.FatalDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
 }
 
+func (logger *PrefixLogger) InfofWithCtx(ctx context.Context, format string, args ...interface{}) {
+	logStr := fmt.Sprintf(format, args...)
+	glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
+}
+
+func (logger *PrefixLogger) ErrorfWithCtx(ctx context.Context, format string, args ...interface{}) {
+	logStr := fmt.Sprintf(format, args...)
+	glog.ErrorDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
+}
+
+func (logger *PrefixLogger) WarningfWithCtx(ctx context.Context, format string, args ...interface{}) {
+	logStr := fmt.Sprintf(format, args...)
+	glog.WarningDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
+}
+
+func (logger *PrefixLogger) FatalfWithCtx(ctx context.Context, format string, args ...interface{}) {
+	logStr := fmt.Sprintf(format, args...)
+	glog.FatalDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
+}
+
 func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
 	if glog.V(glog.Level(v)) {
 		logStr := fmt.Sprintf(format, args...)
@@ -100,7 +121,21 @@ func (logger *PrefixLogger) VInfof(v uint, format string, args ...interface{}) {
 	}
 }
 
+func (logger *PrefixLogger) VInfofWithCtx(ctx context.Context, v uint, format string, args ...interface{}) {
+	if glog.V(glog.Level(v)) {
+		logStr := fmt.Sprintf(format, args...)
+		glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
+	}
+}
+
 func (logger *PrefixLogger) Debugf(format string, args ...interface{}) {
+	if glog.V(glog.Level(1)) {
+		logStr := fmt.Sprintf(format, args...)
+		glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
+	}
+}
+
+func (logger *PrefixLogger) DebugfWithCtx(ctx context.Context, format string, args ...interface{}) {
 	if glog.V(glog.Level(1)) {
 		logStr := fmt.Sprintf(format, args...)
 		glog.InfoDepth(1+logger.depth, fmt.Sprintf("%s %s", logger.logPrefixStr, logStr))
@@ -119,4 +154,19 @@ func createPrefixStr(prefixes []string) string {
 		}
 	}
 	return fullPrefixStr
+}
+
+const kLogContextKey = "log_context"
+
+func GetLogCtx(ctx context.Context) string {
+	val := ctx.Value(kLogContextKey)
+	actualVal, ok := val.(string)
+	if !ok {
+		return ""
+	}
+	return actualVal
+}
+
+func WithLogContext(ctx context.Context, logCtxMsg string) context.Context {
+	return context.WithValue(ctx, kLogContextKey, logCtxMsg)
 }
