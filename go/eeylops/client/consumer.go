@@ -200,7 +200,12 @@ func (consumer *Consumer) Consume(batchSize int, timeout time.Duration) ([]Messa
 			consumer.nextOffset = base.Offset(resp.GetNextOffset())
 		} else {
 			// Mark the consumer as finished.
+			consumer.nextOffset = -1
 			consumer.consumerFinished = true
+		}
+		if len(messages) == 0 && !consumer.consumerFinished {
+			// We didn't get any messages in this consume call. Try again with the next offset.
+			return true, nil
 		}
 		return false, nil
 	}
