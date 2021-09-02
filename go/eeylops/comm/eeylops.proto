@@ -24,8 +24,8 @@ message Error {
 }
 
 message ClusterConfig {
-  repeated NodeConfig node_config_list = 2;
-  int32 leader_id = 3;
+  repeated NodeConfig node_config_list = 1;
+  int32 leader_id = 2;
 }
 
 message NodeConfig {
@@ -56,9 +56,24 @@ message Topic {
   int32 ttl_seconds = 4;
 }
 
+// This topic config is used for internal communications between the mothership and the various brokers.
+message BrokerTopicConfig {
+  // Topic ID.
+  int32 topic_id = 1;
+  // Name of the topic.
+  string topic_name = 2;
+  // List of partition IDs associated with this topic.
+  repeated int32 partition_ids = 3;
+  // Time to live(in seconds) or retention policy for messages
+  // in this topic.
+  int32 ttl_seconds = 4;
+  // Created epoch time(in nanoseconds).
+  int64 created_at = 5;
+}
+
 message CreateTopicRequest {
   // Topic to be created.
-  Topic topic = 2;
+  Topic topic = 1;
 }
 
 message CreateTopicResponse {
@@ -66,9 +81,19 @@ message CreateTopicResponse {
   Error error = 1;
 }
 
+message CreateBrokerTopicRequest {
+  // Topic to be created.
+  BrokerTopicConfig topic = 1;
+}
+
+message CreateBrokerTopicResponse {
+  // Error.
+  Error error = 1;
+}
+
 message RemoveTopicRequest {
   // Topic ID.
-  int32 topic_id = 2;
+  int32 topic_id = 1;
 }
 
 message RemoveTopicResponse {
@@ -78,37 +103,37 @@ message RemoveTopicResponse {
 
 message GetTopicRequest {
   // Topic name.
-  string topic_name = 2;
+  string topic_name = 1;
   // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
-  bool sync = 3;
+  bool sync = 2;
 }
 
 message GetTopicResponse {
   // Error.
   Error error = 1;
   // Topic.
-  Topic topic = 3;
+  Topic topic = 2;
 }
 
 message GetAllTopicsRequest {
   // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
-  bool sync = 2;
+  bool sync = 1;
 }
 
 message GetAllTopicsResponse {
   // Error.
   Error error = 1;
   // All topics.
-  repeated Topic topics = 3;
+  repeated Topic topics = 2;
 }
 
 message ProduceRequest {
   // Topic ID.
-  int32 topic_id = 2;
+  int32 topic_id = 1;
   // Partition where the given values must be appended.
-  int32 partition_id = 3;
+  int32 partition_id = 2;
   // List of values to append to the partition.
-  repeated bytes values = 4;
+  repeated bytes values = 3;
 }
 
 message ProduceResponse {
@@ -118,11 +143,11 @@ message ProduceResponse {
 
 message RegisterConsumerRequest {
   // Consumer ID. Must be <= 256 characters.
-  string consumer_id = 2;
+  string consumer_id = 1;
   // Topic ID.
-  int32 topic_id = 3;
+  int32 topic_id = 2;
   // Partition Id.
-  int32 partition_id = 4;
+  int32 partition_id = 3;
 }
 
 message RegisterConsumerResponse {
@@ -132,27 +157,27 @@ message RegisterConsumerResponse {
 
 message ConsumeRequest {
   // Consumer ID.
-  string consumer_id = 2;
+  string consumer_id = 1;
   // Topic ID.
-  int32 topic_id = 3;
+  int32 topic_id = 2;
   // Partition ID.
-  int32 partition_id = 4;
+  int32 partition_id = 3;
   // Batch size(number of messages) to fetch per scan RPC. Defaults to 1.
-  int32 batch_size = 5;
+  int32 batch_size = 4;
   // Specifies the start offset from where the scan starts.
   // Defaults to -1.
-  int64 start_offset = 6;
+  int64 start_offset = 5;
   // Filters messages such that only messages >= start_timestamp
   // are fetched.
-  int64 start_timestamp = 7;
+  int64 start_timestamp = 6;
   // Filters messages such that only messages < end_timestamp are
   // fetched.
-  int64 end_timestamp = 8;
+  int64 end_timestamp = 7;
   // If True, start_offset - 1 is committed before sending out the response. Defaults to false.
-  bool auto_commit = 9;
+  bool auto_commit = 8;
   // If true, consume resumes from the last committed offset. Defaults to false. If true, start_offset must not be
   // specified.
-  bool resume_from_last_committed_offset = 10;
+  bool resume_from_last_committed_offset = 9;
 }
 
 message ConsumeResponse {
@@ -167,13 +192,13 @@ message ConsumeResponse {
 
 message CommitRequest {
   // Topic ID
-  int32 topic_id = 2;
+  int32 topic_id = 1;
   // Partition ID.
-  int32 partition_id = 3;
+  int32 partition_id = 2;
   // Consumer ID.
-  string consumer_id = 4;
+  string consumer_id = 3;
   // Offset number.
-  int64 offset = 5;
+  int64 offset = 4;
 }
 
 message CommitResponse {
@@ -183,20 +208,20 @@ message CommitResponse {
 
 message LastCommittedRequest {
   // Topic ID.
-  int32 topic_id = 2;
+  int32 topic_id = 1;
   // Partition ID.
-  int32 partition_id = 3;
+  int32 partition_id = 2;
   // Consumer ID.
-  string consumer_id = 4;
+  string consumer_id = 3;
   // If true, a sync read is performed i.e. the latest value is fetched. Defaults to false.
-  bool sync = 5;
+  bool sync = 4;
 }
 
 message LastCommittedResponse {
   // Error.
   Error error = 1;
   // Last committed offset.
-  int64 offset = 3;
+  int64 offset = 2;
 }
 
 message GetBrokerRequest {
@@ -240,10 +265,14 @@ service EeylopsService{
   //
   // If ttl_seconds is not provided, it defaults to 7 days.
   rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
-
   // Removes a topic with eeylops. If the topic does not exist, KTopicNotFound
   // error code is returned.
   rpc RemoveTopic(RemoveTopicRequest) returns (RemoveTopicResponse);
+
+  // Creates a new topic with an eeylops broker. This is used for internal communications alone.
+  rpc CreateTopicOnBroker(CreateBrokerTopicRequest) returns (CreateBrokerTopicResponse);
+  // Removes a topic with an eeylops broker. This is used for internal communications alone.
+  rpc RemoveTopicFromBroker(RemoveTopicRequest) returns (RemoveTopicResponse);
 
   // Get a the requested topic. If the topic does not exist, KTopicNotFound
   // error code is returned.
