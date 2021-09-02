@@ -19,7 +19,6 @@ var (
 )
 
 func Retry(fn RetryFunc, bfn BackoffFunc) error {
-	var err error
 	attempt := 0
 	for {
 		attempt++
@@ -28,30 +27,7 @@ func Retry(fn RetryFunc, bfn BackoffFunc) error {
 			bfn(attempt)
 			continue
 		}
-		if err == nil {
-			break
-		}
-	}
-	return err
-}
-
-func RetryWithMultiAttempts(fn RetryFunc, bfn BackoffFunc, numAttempts int) error {
-	var err error
-	var retry bool
-	attempt := 0
-	for {
-		attempt++
-		retry, err = fn(attempt)
-		if retry {
-			bfn(attempt)
-			continue
-		}
-		if err == nil {
-			return nil
-		}
-		if attempt == numAttempts {
-			return ErrExhaustedAllRetryAttempts
-		}
+		return err
 	}
 }
 
@@ -65,7 +41,6 @@ func RetryWithTimeout(fn RetryFunc, bfn BackoffFunc, timeout time.Duration) erro
 }
 
 func RetryWithContext(ctx context.Context, fn RetryFunc, bfn BackoffFunc) error {
-	var err error
 	attempt := 0
 	for {
 		attempt++
@@ -78,9 +53,6 @@ func RetryWithContext(ctx context.Context, fn RetryFunc, bfn BackoffFunc) error 
 				bfn(attempt)
 			}
 		}
-		if err == nil {
-			break
-		}
+		return err
 	}
-	return err
 }

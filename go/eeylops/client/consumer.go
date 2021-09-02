@@ -43,8 +43,6 @@ type ConsumerConfig struct {
 	// Internal fields.
 	// Topic ID.
 	topicID base.TopicIDType
-	// Cluster ID.
-	clusterID string
 	// RPC client.
 	rpcClient comm.EeylopsServiceClient
 }
@@ -101,7 +99,6 @@ type Consumer struct {
 	topicID                 base.TopicIDType
 	partitionID             int
 	rpcClient               comm.EeylopsServiceClient
-	clusterID               string
 	autoCommit              bool
 	resumeFromLastCommitted bool
 	startEpochNs            int64
@@ -115,7 +112,6 @@ func newConsumer(cfg *ConsumerConfig) *Consumer {
 	consumer := &Consumer{
 		topicID:                 cfg.topicID,
 		partitionID:             cfg.PartitionID,
-		clusterID:               cfg.clusterID,
 		rpcClient:               cfg.rpcClient,
 		autoCommit:              cfg.AutoCommit,
 		startEpochNs:            cfg.StartEpochNs,

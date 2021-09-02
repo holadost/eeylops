@@ -40,9 +40,9 @@ type Broker struct {
 }
 
 func NewBroker(opts *BrokerOpts) *Broker {
-	im := new(Broker)
-	im.initialize(opts)
-	return im
+	broker := new(Broker)
+	broker.initialize(opts)
+	return broker
 }
 
 func (broker *Broker) initialize(opts *BrokerOpts) {
@@ -53,13 +53,13 @@ func (broker *Broker) initialize(opts *BrokerOpts) {
 		broker.logger.Fatalf("Invalid broker ID: %s", broker.brokerID)
 	}
 	// Create a root directory for this instance.
-	clusterRootDir := path.Join(opts.DataDirectory, broker.brokerID)
-	util.CreateDir(clusterRootDir)
+	brokerRootDir := path.Join(opts.DataDirectory, broker.brokerID)
+	util.CreateDir(brokerRootDir)
 
 	// Initialize storage controller.
 	var stopts storage.StorageControllerOpts
 	stopts.StoreGCScanIntervalSecs = 300
-	stopts.RootDirectory = path.Join(clusterRootDir, "storage")
+	stopts.RootDirectory = path.Join(brokerRootDir, "storage")
 	stopts.ControllerID = broker.brokerID
 	broker.storageController = storage.NewStorageController(stopts)
 	allTopics := broker.getAllTopics()

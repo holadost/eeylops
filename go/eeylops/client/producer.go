@@ -14,11 +14,10 @@ type Producer struct {
 	clusterID   string
 }
 
-func newProducer(topicID base.TopicIDType, partitionID int, clusterID string, rpcClient comm.EeylopsServiceClient) *Producer {
+func newProducer(topicID base.TopicIDType, partitionID int, rpcClient comm.EeylopsServiceClient) *Producer {
 	producer := &Producer{
 		topicID:     topicID,
 		partitionID: partitionID,
-		clusterID:   clusterID,
 		rpcClient:   rpcClient,
 	}
 	if producer.rpcClient == nil {

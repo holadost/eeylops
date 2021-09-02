@@ -19,23 +19,22 @@ type NodeAddress struct {
 
 type Client struct {
 	rpcClient comm.EeylopsServiceClient
-	clusterID string
+	cc        *grpc.ClientConn
 }
 
-func NewClient(clusterID string, addr NodeAddress) *Client {
+func NewClient(addr NodeAddress) *Client {
 	var client Client
-	client.clusterID = clusterID
 	cc, err := grpc.Dial(fmt.Sprintf("%s:%d", addr.Host, addr.Port), grpc.WithInsecure())
 	if err != nil {
 		glog.Fatalf("Unable to establish connection to server due to err: %s", err.Error())
 	}
-	defer cc.Close()
+	client.cc = cc
 	client.rpcClient = comm.NewEeylopsServiceClient(cc)
 	return &client
 }
 
 func (client *Client) NewProducer(topicName string, partitionID int) (*Producer, error) {
-	topicConfig, err := client.getTopic(topicName)
+	topicConfig, err := client.GetTopic(topicName)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +43,7 @@ func (client *Client) NewProducer(topicName string, partitionID int) (*Producer,
 			fmt.Sprintf("Partition: %d is not present in topic partitions: %v",
 				partitionID, topicConfig.PartitionIDs))
 	}
-	return newProducer(topicConfig.ID, partitionID, client.clusterID, client.rpcClient), nil
+	return newProducer(topicConfig.ID, partitionID, client.rpcClient), nil
 }
 
 func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
@@ -58,7 +57,7 @@ func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 			glog.Fatalf("Either StartEpochNs or ResumeFromLastCommitted must be set")
 		}
 	}
-	topicConfig, err := client.getTopic(cfg.TopicName)
+	topicConfig, err := client.GetTopic(cfg.TopicName)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +72,6 @@ func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 	}
 	cfg.rpcClient = client.rpcClient
 	cfg.topicID = topicConfig.ID
-	cfg.clusterID = client.clusterID
 	return newConsumer(&cfg), nil
 }
 
@@ -119,7 +117,7 @@ func (client *Client) CreateTopic(topicName string, partitionIDs []int, ttlSecon
 }
 
 func (client *Client) RemoveTopic(topicName string) error {
-	topicConfig, err := client.getTopic(topicName)
+	topicConfig, err := client.GetTopic(topicName)
 	if err != nil {
 		glog.Warningf("Unable to fetch topic config for: %s due to err: %s. Cannot remove topic",
 			topicName, err.Error())
@@ -152,6 +150,10 @@ func (client *Client) RemoveTopic(topicName string) error {
 		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
 	}
 	return util.RetryWithContext(ctx, fn, bfn)
+}
+
+func (client *Client) Close() {
+	client.cc.Close()
 }
 
 func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDType, partitionId int) error {
@@ -188,7 +190,7 @@ func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDTy
 	return util.RetryWithContext(ctx, fn, bfn)
 }
 
-func (client *Client) getTopic(topicName string) (base.TopicConfig, error) {
+func (client *Client) GetTopic(topicName string) (base.TopicConfig, error) {
 	var req comm.GetTopicRequest
 	req.TopicName = topicName
 	var topicConfig base.TopicConfig
