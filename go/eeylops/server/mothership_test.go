@@ -24,7 +24,7 @@ func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 		var topic comm.Topic
 		topic.PartitionIds = []int32{1, 2, 3, 4}
 		topic.TtlSeconds = 86400 * 7
-		topic.TopicName = generateTopicName(ii)
+		topic.TopicName = generateTopicName(ii + 1)
 		req.Topic = &topic
 		resp := im.AddTopic(context.Background(), &req)
 		err := resp.GetError()
@@ -37,11 +37,11 @@ func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 	var allTopics []*comm.Topic
 	for ii := 0; ii < numTopics; ii++ {
 		var req comm.GetTopicRequest
-		req.TopicName = generateTopicName(ii)
+		req.TopicName = generateTopicName(ii + 1)
 		resp := im.GetTopic(context.Background(), &req)
 		err := resp.GetError()
 		if err.GetErrorCode() != comm.Error_KNoError {
-			glog.Fatalf("Error while fetching topic: %s", generateTopicName(ii))
+			glog.Fatalf("Error while fetching topic: %s", generateTopicName(ii+1))
 		}
 		topic := resp.GetTopic()
 		glog.Infof("Received topic: %s, ID: %d", topic.GetTopicName(), topic.GetTopicId())
@@ -54,7 +54,7 @@ func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 		var topic comm.Topic
 		topic.PartitionIds = []int32{1, 2}
 		topic.TtlSeconds = 86400 * 5
-		topic.TopicName = generateTopicName(ii)
+		topic.TopicName = generateTopicName(ii + 1)
 		req.Topic = &topic
 		resp := im.AddTopic(context.Background(), &req)
 		err := resp.GetError()
@@ -78,7 +78,7 @@ func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 	for ii := 0; ii < numTopics; ii += 2 {
 		glog.Infof("Removing topic: %s:%d", allTopics[ii].GetTopicName(), allTopics[ii].GetTopicId())
 		var req comm.RemoveTopicRequest
-		req.TopicId = int32(allTopics[ii].GetTopicId())
+		req.TopicId = allTopics[ii].GetTopicId()
 		resp := im.RemoveTopic(context.Background(), &req)
 		err := resp.GetError()
 		if err.GetErrorCode() != comm.Error_KNoError {
@@ -103,13 +103,13 @@ func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 	// Get topics.
 	for ii := 0; ii < numTopics; ii++ {
 		var req comm.GetTopicRequest
-		req.TopicName = generateTopicName(ii)
+		req.TopicName = generateTopicName(ii + 1)
 		resp := im.GetTopic(context.Background(), &req)
 		err := resp.GetError()
 		if ii%2 == 1 {
 			// This topic must exist.
 			if err.GetErrorCode() != comm.Error_KNoError {
-				glog.Fatalf("Error while fetching topic: %s", generateTopicName(ii))
+				glog.Fatalf("Error while fetching topic: %s", req.TopicName)
 			}
 		} else {
 			// This topic must not exist.
@@ -126,7 +126,7 @@ func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 		var topic comm.Topic
 		topic.PartitionIds = []int32{1, 2, 3, 4}
 		topic.TtlSeconds = 86400 * 7
-		topic.TopicName = generateTopicName(ii)
+		topic.TopicName = generateTopicName(ii + 1)
 		req.Topic = &topic
 		resp := im.AddTopic(context.Background(), &req)
 		err := resp.GetError()
@@ -139,12 +139,12 @@ func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 	// Get all topics again and check that we them all.
 	for ii := 0; ii < numTopics; ii++ {
 		var req comm.GetTopicRequest
-		req.TopicName = generateTopicName(ii)
+		req.TopicName = generateTopicName(ii + 1)
 		resp := im.GetTopic(context.Background(), &req)
 		err := resp.GetError()
 		ec := err.GetErrorCode()
 		if ec != comm.Error_KNoError {
-			glog.Fatalf("Error while fetching topic: %s. Error: %s", generateTopicName(ii), ec.String())
+			glog.Fatalf("Error while fetching topic: %s. Error: %s", generateTopicName(ii+1), ec.String())
 		}
 	}
 	time.Sleep(2 * time.Second)

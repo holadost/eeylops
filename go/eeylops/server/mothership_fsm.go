@@ -54,15 +54,17 @@ func (fsm *MotherShipFSM) Restore(closer io.ReadCloser) error {
 func (fsm *MotherShipFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
 	// Sanity check command.
 	topic := &cmd.AddTopicCommand.TopicConfig
-	if topic.ID <= 0 {
-		fsm.logger.Fatalf("Invalid topic ID. Log Index: %d, Log Term: %d", log.Index, log.Term)
-	}
 	if len(topic.Name) == 0 {
 		fsm.logger.Fatalf("Invalid topic name. Log Index: %d, Log Term: %d", log.Index, log.Term)
 	}
 	if len(topic.PartitionIDs) == 0 {
 		fsm.logger.Fatalf("Invalid partition IDs provided. Log Index: %d, Log Term: %d", log.Index, log.Term)
 	}
+	if topic.TTLSeconds <= 0 {
+		topic.TTLSeconds = -1
+	}
+	topic.CreatedAt = log.AppendedAt
+	topic.CreationConfirmed = false
 	var resp FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil

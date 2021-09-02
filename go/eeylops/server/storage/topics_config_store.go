@@ -235,7 +235,7 @@ func (tcs *TopicsConfigStore) getNextTopicIDFromKVStore() base.TopicIDType {
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// No topics have been created yet.
-			return 0
+			return 1
 		} else {
 			tcs.logger.Fatalf("Unable to initialize next topic ID due to err: %s", err.Error())
 		}

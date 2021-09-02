@@ -75,7 +75,7 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 		Type:       0,
 		Data:       data,
 		Extensions: nil,
-		AppendedAt: time.Time{},
+		AppendedAt: time.Now(),
 	}
 
 	// Apply to BrokerFSM, wait for response and handle errors.
@@ -120,7 +120,7 @@ func (ms *MotherShip) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 		Type:       0,
 		Data:       data,
 		Extensions: nil,
-		AppendedAt: time.Time{},
+		AppendedAt: time.Now(),
 	}
 
 	// Apply to BrokerFSM, wait for response and handle errors.
