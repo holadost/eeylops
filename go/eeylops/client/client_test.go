@@ -250,7 +250,6 @@ func TestClient_ProducerConsumer(t *testing.T) {
 			totalMsgsExpected := numIters * batchSize
 			for {
 				iter++
-				glog.Infof("Consumer partition: %d, iteration: %d", prtID, iter+1)
 				messages, err := consumer.Consume(batchSize, -1)
 				if err != nil {
 					if err == ErrConsumerDone {
