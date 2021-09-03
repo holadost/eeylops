@@ -6,6 +6,7 @@ import (
 	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -99,7 +100,7 @@ func TestClient_AddRemoveTopic(t *testing.T) {
 }
 
 func TestClient_ProducerConsumer(t *testing.T) {
-	// runtime.GOMAXPROCS(2)
+	runtime.GOMAXPROCS(runtime.NumCPU() * 2)
 	testutil.LogTestMarker("TestClient_AddRemoveTopic")
 	testDirPath := testutil.CreateFreshTestDir("TestClient_AddRemoveTopic")
 	addr := NodeAddress{
@@ -120,7 +121,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 
 	glog.Infof("Creating topic: %s", generateTopicName(1))
 	testTopicName := generateTopicName(1)
-	testPartitions := []int{1, 2, 3, 4, 5, 6, 7, 8}
+	testPartitions := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	err := client.CreateTopic(testTopicName, testPartitions, 86400)
 	if err != nil {
 		glog.Fatalf("Expected no error but got: %v. Unable to add topic", err)

@@ -8,6 +8,7 @@ import (
 	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
+	"runtime"
 	"testing"
 )
 
@@ -207,6 +208,7 @@ func TestBroker_ConsumerCommit(t *testing.T) {
 }
 
 func TestBroker_ProduceConsume(t *testing.T) {
+	runtime.GOMAXPROCS(runtime.NumCPU() * 2)
 	testutil.LogTestMarker("TestBroker_ProduceConsume")
 	testDirName := testutil.CreateTestDir(t, "TestBroker_ProduceConsume")
 	topicName := "produce_consume_topic"
@@ -215,10 +217,10 @@ func TestBroker_ProduceConsume(t *testing.T) {
 		PeerAddresses: nil,
 		BrokerID:      "broker-1",
 	}
-	numIters := 500
+	numIters := 5000
 	batchSize := 10
-	im := NewBroker(&opts)
-	partIDs := []int32{1, 2, 3, 4}
+	broker := NewBroker(&opts)
+	partIDs := []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	var req comm.CreateTopicRequest
 	var topic comm.Topic
 	topic.PartitionIds = partIDs
@@ -226,7 +228,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 	topic.TopicName = topicName
 	topic.TopicId = 1
 	req.Topic = &topic
-	resp := im.AddTopic(context.Background(), &req)
+	resp := broker.AddTopic(context.Background(), &req)
 	ec := resp.GetError().GetErrorCode()
 	if ec != comm.Error_KNoError {
 		glog.Fatalf("Expected no error but got: %s. Unable to add topic", ec.String())
@@ -242,7 +244,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 		req.TopicId = 100
 		req.PartitionId = 2
 		req.Values = values
-		resp := im.Produce(context.Background(), &req)
+		resp := broker.Produce(context.Background(), &req)
 		ec := resp.GetError().GetErrorCode()
 		if ec != comm.Error_KErrTopicNotFound {
 			glog.Fatalf("Got error while producing. Expected: %s, Got: %s. Msg: %s",
@@ -259,7 +261,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 		req.BatchSize = int32(batchSize)
 		req.AutoCommit = false
 		req.ResumeFromLastCommittedOffset = false
-		resp := im.Consume(context.Background(), &req)
+		resp := broker.Consume(context.Background(), &req)
 		ec := resp.GetError().GetErrorCode()
 		if ec != comm.Error_KErrTopicNotFound {
 			glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
@@ -278,7 +280,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 		req.TopicId = 1
 		req.PartitionId = 100
 		req.Values = values
-		resp := im.Produce(context.Background(), &req)
+		resp := broker.Produce(context.Background(), &req)
 		ec := resp.GetError().GetErrorCode()
 		if ec != comm.Error_KErrPartitionNotFound {
 			glog.Fatalf("Got unexpected error while producing. Expected: %s, Got: %s. Msg: %s",
@@ -295,7 +297,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 		req.BatchSize = int32(batchSize)
 		req.AutoCommit = false
 		req.ResumeFromLastCommittedOffset = false
-		resp := im.Consume(context.Background(), &req)
+		resp := broker.Consume(context.Background(), &req)
 		ec := resp.GetError().GetErrorCode()
 		if ec != comm.Error_KErrPartitionNotFound {
 			glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
@@ -318,7 +320,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 				req.TopicId = 1
 				req.PartitionId = prtID
 				req.Values = values
-				resp := im.Produce(context.Background(), &req)
+				resp := broker.Produce(context.Background(), &req)
 				ec := resp.GetError().GetErrorCode()
 				if ec != comm.Error_KNoError {
 					glog.Fatalf("Got error while producing. Err: %s. Msg: %s", ec.String(),
@@ -349,7 +351,7 @@ func TestBroker_ProduceConsume(t *testing.T) {
 				req.BatchSize = int32(batchSize)
 				req.AutoCommit = false
 				req.ResumeFromLastCommittedOffset = false
-				resp := im.Consume(context.Background(), &req)
+				resp := broker.Consume(context.Background(), &req)
 				ec := resp.GetError().GetErrorCode()
 				if ec != comm.Error_KNoError {
 					glog.Fatalf("Got an unexpected error while scanning values: %s from partition: %d",
