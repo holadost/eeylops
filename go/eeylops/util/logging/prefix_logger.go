@@ -148,7 +148,7 @@ func createPrefixStr(prefixes []string) string {
 		if len(prefix) == 0 {
 			continue
 		}
-		fullPrefixStr += "{" + prefix + "}"
+		fullPrefixStr += "[" + prefix + "]"
 		if ii != len(prefixes)-1 {
 			fullPrefixStr += " "
 		}
