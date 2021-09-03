@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/golang/glog"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -110,6 +111,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 	glog.Infof("Initializing RPC server")
 	rpcServer := server.TestOnlyNewRPCServer(addr.Host, addr.Port, testDirPath)
 	go rpcServer.Run()
+	defer rpcServer.Stop()
 	time.Sleep(time.Second)
 	generateTopicName := func(idx int) string {
 		return fmt.Sprintf("hello_world_topic_%d", idx)
@@ -121,7 +123,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 
 	glog.Infof("Creating topic: %s", generateTopicName(1))
 	testTopicName := generateTopicName(1)
-	testPartitions := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	testPartitions := []int{1, 2, 3, 4}
 	err := client.CreateTopic(testTopicName, testPartitions, 86400)
 	if err != nil {
 		glog.Fatalf("Expected no error but got: %v. Unable to add topic", err)
@@ -129,31 +131,33 @@ func TestClient_ProducerConsumer(t *testing.T) {
 
 	// Produce and consume from non-existent topics and partitions.
 	produceNonExistentTopic := func() {
+		glog.Infof("Checking if producer for non existent topics return error")
 		_, err := client.NewProducer(generateTopicName(2), 1)
 		if err == nil {
 			glog.Fatalf("Expected an error but got nil")
 		}
 		glog.Infof("Received error while attempting to register producer to a non-existent topic: %v", err)
 	}
+	consumeNonExistentTopic := func() {
+		glog.Infof("Checking if consumer for non existent topics return error")
+		cfg := ConsumerConfig{
+			ConsumerID:              "foobar",
+			TopicName:               generateTopicName(2),
+			PartitionID:             1,
+			AutoCommit:              true,
+			ResumeFromLastCommitted: true,
+			StartEpochNs:            0,
+			EndEpochNs:              0,
+		}
+		_, err := client.NewConsumer(cfg)
+		if err == nil {
+			glog.Fatalf("Expected an error but got nil")
+		}
+		glog.Infof("Received error while attempting to register producer to a non-existent topic: %v", err)
+	}
 	produceNonExistentTopic()
-	//consumeNonExistentTopic := func() {
-	//	var req comm.ConsumeRequest
-	//	req.TopicId = 1001
-	//	req.PartitionId = 1
-	//	req.StartOffset = 0
-	//	req.ConsumerId = "nikhil"
-	//	req.BatchSize = int32(batchSize)
-	//	req.AutoCommit = false
-	//	req.ResumeFromLastCommittedOffset = false
-	//	resp := broker.Consume(context.Background(), &req)
-	//	ec := resp.GetError().GetErrorCode()
-	//	if ec != comm.Error_KErrTopicNotFound {
-	//		glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
-	//			comm.Error_KErrTopicNotFound.String(), ec.String())
-	//	}
-	//}
-	//consumeNonExistentTopic()
-	//
+	consumeNonExistentTopic()
+
 	// Produce and consume from non-existent partitions.
 	produceNonExistentPartition := func() {
 		_, err := client.NewProducer(generateTopicName(1), 100)
@@ -162,29 +166,29 @@ func TestClient_ProducerConsumer(t *testing.T) {
 		}
 		glog.Infof("Received error while attempting to register producer to a non-existent topic: %v", err)
 	}
+	consumeNonExistentPartition := func() {
+		glog.Infof("Checking if consumer for non existent partition return error")
+		cfg := ConsumerConfig{
+			ConsumerID:              "foobar",
+			TopicName:               generateTopicName(1),
+			PartitionID:             100,
+			AutoCommit:              true,
+			ResumeFromLastCommitted: true,
+			StartEpochNs:            0,
+			EndEpochNs:              0,
+		}
+		_, err := client.NewConsumer(cfg)
+		if err == nil {
+			glog.Fatalf("Expected an error but got nil")
+		}
+		glog.Infof("Received error while attempting to register producer to a non-existent topic: %v", err)
+	}
 	produceNonExistentPartition()
+	consumeNonExistentPartition()
 
-	//consumeNonExistentPartition := func() {
-	//	var req comm.ConsumeRequest
-	//	req.TopicId = 1
-	//	req.PartitionId = 100
-	//	req.StartOffset = 0
-	//	req.ConsumerId = "nikhil"
-	//	req.BatchSize = int32(batchSize)
-	//	req.AutoCommit = false
-	//	req.ResumeFromLastCommittedOffset = false
-	//	resp := broker.Consume(context.Background(), &req)
-	//	ec := resp.GetError().GetErrorCode()
-	//	if ec != comm.Error_KErrPartitionNotFound {
-	//		glog.Fatalf("Got an unexpected error while scanning values. Expected: %s, Got: %s",
-	//			comm.Error_KErrPartitionNotFound.String(), ec.String())
-	//	}
-	//}
-	//consumeNonExistentPartition()
-	//
 	// Produce and consume values.
 	producersDone := make(chan struct{}, len(testPartitions))
-	numIters := 5000
+	numIters := 500
 	batchSize := 10
 	generateStringValue := func(iternum int, batchnum int) string {
 		return fmt.Sprintf("value-%d", (iternum*batchSize)+batchnum)
@@ -192,9 +196,6 @@ func TestClient_ProducerConsumer(t *testing.T) {
 	generateByteValue := func(iternum int, batchnum int) []byte {
 		return []byte(generateStringValue(iternum, batchnum))
 	}
-	//generateStringValue := func(iternum int, batchnum int) string {
-	//	return string(generateByteValue(iternum, batchnum))
-	//}
 	time.Sleep(time.Second)
 	now := time.Now()
 	for _, pid := range testPartitions {
@@ -227,64 +228,61 @@ func TestClient_ProducerConsumer(t *testing.T) {
 	close(producersDone)
 	glog.Infof("All producers have finished! Total Time: %v", time.Since(now))
 
-	//consumersDone := make(chan struct{}, len(topic.PartitionIds))
-	//for _, pid := range partIDs {
-	//	go func(prtID int32) {
-	//		glog.Infof("Starting consumer on partition: %d", prtID)
-	//		prevNextOffset := int64(0)
-	//		for ii := 0; ii < numIters+1; ii++ {
-	//			var req comm.ConsumeRequest
-	//			req.TopicId = 1
-	//			req.PartitionId = prtID
-	//			req.StartOffset = prevNextOffset
-	//			req.ConsumerId = "nikhil"
-	//			req.BatchSize = int32(batchSize)
-	//			req.AutoCommit = false
-	//			req.ResumeFromLastCommittedOffset = false
-	//			resp := broker.Consume(context.Background(), &req)
-	//			ec := resp.GetError().GetErrorCode()
-	//			if ec != comm.Error_KNoError {
-	//				glog.Fatalf("Got an unexpected error while scanning values: %s from partition: %d",
-	//					ec.String(), prtID)
-	//			}
-	//			expectedNextOffset := base.Offset((ii + 1) * batchSize)
-	//			gotNextOffset := base.Offset(resp.GetNextOffset())
-	//			if ii < numIters-1 {
-	//				if gotNextOffset != expectedNextOffset {
-	//					glog.Fatalf("Expected next offset: %d, Got: %d, Partition: %d",
-	//						expectedNextOffset, gotNextOffset, prtID)
-	//				}
-	//			} else {
-	//				glog.Infof("Scan should have finished now. Next offset: %d", gotNextOffset)
-	//				if !(gotNextOffset == expectedNextOffset || gotNextOffset == -1) {
-	//					glog.Fatalf("Expected next offset: %d or -1, Got: %d, Partition: %d",
-	//						expectedNextOffset, gotNextOffset, prtID)
-	//				}
-	//			}
-	//			if ii < numIters {
-	//				for jj := 0; jj < batchSize; jj++ {
-	//					expectedVal := []byte(fmt.Sprintf("value-%d", (ii*batchSize)+jj))
-	//					if bytes.Compare(resp.GetValues()[jj].Value, expectedVal) != 0 {
-	//						glog.Fatalf("Expected value: %s, Got: %s, Partition: %d",
-	//							string(expectedVal), string(resp.GetValues()[jj].Value), prtID)
-	//					}
-	//				}
-	//			} else {
-	//				if len(resp.GetValues()) != 0 {
-	//					glog.Fatalf("Expected 0 records, got: %d from partition: %d",
-	//						len(resp.GetValues()), prtID)
-	//				}
-	//			}
-	//			if gotNextOffset >= 0 {
-	//				prevNextOffset = int64(gotNextOffset)
-	//			}
-	//		}
-	//		consumersDone <- struct{}{}
-	//	}(pid)
-	//}
-	//for ii := 0; ii < len(partIDs); ii++ {
-	//	<-consumersDone
-	//}
-	//close(consumersDone)
+	consumersDone := make(chan struct{}, len(testPartitions))
+	for _, pid := range testPartitions {
+		go func(prtID int) {
+			glog.Infof("Starting consumer on partition: %d", prtID)
+			cfg := ConsumerConfig{
+				ConsumerID:              "foobar" + "-" + strconv.Itoa(prtID),
+				TopicName:               generateTopicName(1),
+				PartitionID:             prtID,
+				AutoCommit:              true,
+				ResumeFromLastCommitted: true,
+				StartEpochNs:            0,
+				EndEpochNs:              0,
+			}
+			consumer, err := client.NewConsumer(cfg)
+			if err != nil {
+				glog.Fatalf("Unable to register consumer for partition: %d", prtID)
+			}
+			iter := -1
+			totalMsgsGot := 0
+			totalMsgsExpected := numIters * batchSize
+			for {
+				iter++
+				glog.Infof("Consumer partition: %d, iteration: %d", prtID, iter+1)
+				messages, err := consumer.Consume(batchSize, -1)
+				if err != nil {
+					if err == ErrConsumerDone {
+						glog.Infof("Consumer has finished!")
+						break
+					}
+					glog.Fatalf("Unable to fetch values from partition: %d, iteration: %d due to err: %v",
+						prtID, iter, err)
+				}
+				for ii, msg := range messages {
+					expectedOffset := base.Offset((iter * batchSize) + ii)
+					if msg.Offset != expectedOffset {
+						glog.Fatalf("Expected offset: %d, Got: %d, Partition: %d", expectedOffset, msg.Offset,
+							prtID)
+					}
+					expectedVal := string(generateByteValue(iter, ii))
+					gotVal := string(msg.Value)
+					if gotVal != expectedVal {
+						glog.Fatalf("Expected: %s, Got: %s", expectedVal, gotVal)
+					}
+					totalMsgsGot += 1
+				}
+			}
+			if totalMsgsGot != totalMsgsExpected {
+				glog.Fatalf("Expected total messages: %d, Got: %d", totalMsgsExpected, totalMsgsGot)
+			}
+			consumersDone <- struct{}{}
+		}(pid)
+	}
+	for ii := 0; ii < len(testPartitions); ii++ {
+		<-consumersDone
+	}
+	close(consumersDone)
 	glog.Infof("All consumers have finished!")
 }

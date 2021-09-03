@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"eeylops/comm"
-	"eeylops/server/base"
 	"flag"
 	"fmt"
 	"github.com/golang/glog"
@@ -159,11 +158,7 @@ func (srv *RPCServer) GetClusterConfig(ctx context.Context,
 
 func (srv *RPCServer) RegisterConsumer(ctx context.Context,
 	req *comm.RegisterConsumerRequest) (*comm.RegisterConsumerResponse, error) {
-	im, err := srv.instanceSelector.GetInstance(base.TopicIDType(req.GetTopicId()), int(req.GetPartitionId()))
-	if err != nil {
-		return &comm.RegisterConsumerResponse{Error: srv.createInvalidClusterErrorProto()}, nil
-	}
-	resp := im.RegisterConsumer(ctx, req)
+	resp := srv.broker.RegisterConsumer(ctx, req)
 	return resp, nil
 }
 

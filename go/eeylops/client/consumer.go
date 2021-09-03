@@ -96,6 +96,7 @@ var (
 )
 
 type Consumer struct {
+	consumerId              string
 	topicID                 base.TopicIDType
 	partitionID             int
 	rpcClient               comm.EeylopsServiceClient
@@ -117,6 +118,7 @@ func newConsumer(cfg *ConsumerConfig) *Consumer {
 		startEpochNs:            cfg.StartEpochNs,
 		endEpochNs:              cfg.EndEpochNs,
 		resumeFromLastCommitted: cfg.ResumeFromLastCommitted,
+		consumerId:              cfg.ConsumerID,
 		nextOffset:              -1,
 		firstFetchDone:          false,
 		consumerFinished:        false,
@@ -138,6 +140,7 @@ func (consumer *Consumer) initialize() {
 func (consumer *Consumer) Consume(batchSize int, timeout time.Duration) ([]Message, error) {
 	var req comm.ConsumeRequest
 	var messages []Message
+	req.ConsumerId = consumer.consumerId
 	req.TopicId = int32(consumer.topicID)
 	req.PartitionId = int32(consumer.partitionID)
 	req.BatchSize = int32(batchSize)
@@ -227,6 +230,7 @@ func (consumer *Consumer) Commit() error {
 
 func (consumer *Consumer) CommitOffset(offset base.Offset) error {
 	var req comm.CommitRequest
+	req.ConsumerId = consumer.consumerId
 	req.TopicId = int32(consumer.topicID)
 	req.PartitionId = int32(consumer.partitionID)
 	if offset < 0 {
