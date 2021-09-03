@@ -74,15 +74,6 @@ func (kvStore *BadgerKVStore) Get(key []byte) ([]byte, error) {
 	return kvStore.internalGet(txn, key)
 }
 
-// GetS gets the value associated with the key.
-func (kvStore *BadgerKVStore) GetS(key string) (string, error) {
-	val, err := kvStore.Get([]byte(key))
-	if err != nil {
-		return "", err
-	}
-	return string(val), nil
-}
-
 func (kvStore *BadgerKVStore) internalGet(txn *badger.Txn, key []byte) ([]byte, error) {
 	var val []byte
 	item, err := txn.Get(key)
