@@ -40,8 +40,8 @@ func (client *Client) NewProducer(topicName string, partitionID int) (*Producer,
 	}
 	if !isPartitionPresentInTopicConfig(topicConfig, partitionID) {
 		return nil, newError(comm.Error_KErrPartitionNotFound,
-			fmt.Sprintf("Partition: %d is not present in topic partitions: %v",
-				partitionID, topicConfig.PartitionIDs))
+			fmt.Sprintf("[%s] : partition: %d is not present in topic partitions: %v",
+				comm.Error_KErrPartitionNotFound.String(), partitionID, topicConfig.PartitionIDs))
 	}
 	return newProducer(topicConfig.ID, partitionID, client.rpcClient), nil
 }
@@ -63,8 +63,8 @@ func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 	}
 	if !isPartitionPresentInTopicConfig(topicConfig, cfg.PartitionID) {
 		return nil, newError(comm.Error_KErrPartitionNotFound,
-			fmt.Sprintf("Partition: %d is not present in topic partitions: %v",
-				cfg.PartitionID, topicConfig.PartitionIDs))
+			fmt.Sprintf("[%s] : partition: %d is not present in topic partitions: %v",
+				comm.Error_KErrPartitionNotFound.String(), cfg.PartitionID, topicConfig.PartitionIDs))
 	}
 	err = client.registerConsumer(cfg.ConsumerID, topicConfig.ID, cfg.PartitionID)
 	if err != nil {

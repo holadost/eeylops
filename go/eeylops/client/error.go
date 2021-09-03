@@ -2,7 +2,6 @@ package client
 
 import (
 	"eeylops/comm"
-	"fmt"
 )
 
 type Error struct {
@@ -18,5 +17,5 @@ func newError(code comm.Error_ErrorCodes, msg string) *Error {
 }
 
 func (err *Error) Error() string {
-	return fmt.Sprintf("[%s] %s", err.errorCode.String(), err.errorMsg)
+	return err.errorMsg
 }

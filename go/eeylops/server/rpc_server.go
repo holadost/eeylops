@@ -20,6 +20,7 @@ type RPCServer struct {
 	comm.UnimplementedEeylopsServiceServer
 	host             string
 	port             int
+	grpcServer       *grpc.Server
 	instanceSelector *BrokerSelector
 	motherShip       *MotherShip
 	broker           *Broker
@@ -70,18 +71,24 @@ func TestOnlyNewRPCServer(host string, port int, testDir string) *RPCServer {
 }
 
 func (srv *RPCServer) Run() {
-	s := grpc.NewServer()
-	comm.RegisterEeylopsServiceServer(s, srv)
+	srv.grpcServer = grpc.NewServer()
+	comm.RegisterEeylopsServiceServer(srv.grpcServer, srv)
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", srv.host, srv.port))
 	if err != nil {
 		glog.Fatalf("Unable to listen on (%s:%d) due to err: %s", srv.host, srv.port,
 			err.Error())
 	}
 	glog.Infof("Starting RPC server on host: %s, port: %d", srv.host, srv.port)
-	if err := s.Serve(lis); err != nil {
+	if err := srv.grpcServer.Serve(lis); err != nil {
 		glog.Fatalf("Unable to serve due to err: %s", err.Error())
 	}
 	glog.Infof("RPC server has finished!")
+}
+
+func (srv *RPCServer) Stop() {
+	if srv.grpcServer != nil {
+		srv.grpcServer.Stop()
+	}
 }
 
 func (srv *RPCServer) CreateTopic(ctx context.Context,
