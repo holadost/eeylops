@@ -8,6 +8,7 @@ import (
 	"github.com/golang/glog"
 	"runtime"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -187,7 +188,6 @@ func TestClient_ProducerConsumer(t *testing.T) {
 	consumeNonExistentPartition()
 
 	// Produce and consume values.
-	producersDone := make(chan struct{}, len(testPartitions))
 	numIters := 500
 	batchSize := 10
 	generateStringValue := func(iternum int, batchnum int) string {
@@ -196,9 +196,11 @@ func TestClient_ProducerConsumer(t *testing.T) {
 	generateByteValue := func(iternum int, batchnum int) []byte {
 		return []byte(generateStringValue(iternum, batchnum))
 	}
+	wg := sync.WaitGroup{}
 	time.Sleep(time.Second)
 	now := time.Now()
 	for _, pid := range testPartitions {
+		wg.Add(1)
 		go func(prtID int) {
 			glog.Infof("Starting producer on partition: %d", prtID)
 			producer, err := client.NewProducer(testTopicName, prtID)
@@ -218,18 +220,16 @@ func TestClient_ProducerConsumer(t *testing.T) {
 						"Iter: %d", testTopicName, prtID, err, ii)
 				}
 			}
-			producersDone <- struct{}{}
-			glog.Infof("Total bytes written: %d bytes or %d kilo bytes", totalSize, totalSize/1024)
+			glog.Infof("Partition: %d producer has finished. Total bytes written: %d bytes or %d kilo bytes",
+				prtID, totalSize, totalSize/1024)
+			wg.Done()
 		}(pid)
 	}
-	for ii := 0; ii < len(testPartitions); ii++ {
-		<-producersDone
-	}
-	close(producersDone)
+	wg.Wait()
 	glog.Infof("All producers have finished! Total Time: %v", time.Since(now))
 
-	consumersDone := make(chan struct{}, len(testPartitions))
 	for _, pid := range testPartitions {
+		wg.Add(1)
 		go func(prtID int) {
 			glog.Infof("Starting consumer on partition: %d", prtID)
 			cfg := ConsumerConfig{
@@ -253,7 +253,6 @@ func TestClient_ProducerConsumer(t *testing.T) {
 				messages, err := consumer.Consume(batchSize, -1)
 				if err != nil {
 					if err == ErrConsumerDone {
-						glog.Infof("Consumer has finished!")
 						break
 					}
 					glog.Fatalf("Unable to fetch values from partition: %d, iteration: %d due to err: %v",
@@ -276,12 +275,10 @@ func TestClient_ProducerConsumer(t *testing.T) {
 			if totalMsgsGot != totalMsgsExpected {
 				glog.Fatalf("Expected total messages: %d, Got: %d", totalMsgsExpected, totalMsgsGot)
 			}
-			consumersDone <- struct{}{}
+			glog.Infof("Partition: %d consumer has finished", prtID)
+			wg.Done()
 		}(pid)
 	}
-	for ii := 0; ii < len(testPartitions); ii++ {
-		<-consumersDone
-	}
-	close(consumersDone)
+	wg.Wait()
 	glog.Infof("All consumers have finished!")
 }
