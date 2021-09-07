@@ -7,24 +7,25 @@ import (
 	"sync"
 )
 
+// PrefixLogger is a wrapper around glog that uses the given prefixes in every log statement. Useful for debugging.
 type PrefixLogger struct {
-	prefixes     []string
-	logPrefixStr string // The logPrefixStr string that is attached to every log statement.
-	depth        int
+	prefixes     []string // List of prefixes.
+	logPrefixStr string   // The logPrefixStr string that is attached to every log statement.
+	depth        int      // Log depth.
 }
 
-// NewPrefixLogger returns a new instance of the logPrefixStr logger.
+// NewPrefixLogger returns a new instance of PrefixLogger which uses the given prefix in every log statement.
 func NewPrefixLogger(prefix string) *PrefixLogger {
 	return newPrefixLogger([]string{prefix}, 0)
 }
 
-// NewMultiPrefixLogger returns a new instance of the logPrefixStr logger.
+// NewMultiPrefixLogger returns a new instance of PrefixLogger which uses the given prefixes in every log statement.
 func NewMultiPrefixLogger(prefixes []string) *PrefixLogger {
 	return newPrefixLogger(prefixes, 0)
 }
 
-// NewPrefixLoggerWithParent returns a new instance of the logPrefixStr logger. It uses the logPrefixStr of the parent as well
-// as the given logPrefixStr in every log statement.
+// NewPrefixLoggerWithParent returns a new instance of PrefixLogger that uses both the parent prefixes and the given
+// prefix.
 func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *PrefixLogger {
 	if parentLogger != nil {
 		return newPrefixLogger(append(parentLogger.GetPrefixes(), prefix), 0)
@@ -32,6 +33,8 @@ func NewPrefixLoggerWithParent(prefix string, parentLogger *PrefixLogger) *Prefi
 	return newPrefixLogger([]string{prefix}, 0)
 }
 
+// NewPrefixLoggerWithParentAndDepth returns a new instance of the PrefixLogger that uses both the parent prefixes
+// and the given prefix. Additionally, the user can also specify the log depth.
 func NewPrefixLoggerWithParentAndDepth(prefix string, parentLogger *PrefixLogger, depth int) *PrefixLogger {
 	if parentLogger != nil {
 		return newPrefixLogger(append(parentLogger.GetPrefixes(), prefix), depth)
@@ -39,12 +42,14 @@ func NewPrefixLoggerWithParentAndDepth(prefix string, parentLogger *PrefixLogger
 	return newPrefixLogger([]string{prefix}, depth)
 }
 
-// NewPrefixLoggerWithDepth returns a new instance of the logPrefixStr logger.
+// NewPrefixLoggerWithDepth returns a new instance of PrefixLogger that uses the given prefix in every log statement.
+// Additionally, the user can also specify the log depth.
 func NewPrefixLoggerWithDepth(prefix string, depth int) *PrefixLogger {
 	return newPrefixLogger([]string{prefix}, depth)
 }
 
-// NewMultiPrefixLoggerWithDepth returns a new instance of the logPrefixStr logger.
+// NewMultiPrefixLoggerWithDepth returns a new instance of PrefixLogger that uses the given prefixes in every log
+// statement. Additionally, the user can also specify the log depth.
 func NewMultiPrefixLoggerWithDepth(prefixes []string, depth int) *PrefixLogger {
 	return newPrefixLogger(prefixes, depth)
 }
