@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
-	"math/rand"
 	"time"
 )
 
@@ -17,11 +16,13 @@ type NodeAddress struct {
 	Port int
 }
 
+// Eeylops client.
 type Client struct {
 	rpcClient comm.EeylopsServiceClient
 	cc        *grpc.ClientConn
 }
 
+// NewClient returns a new instance of the eeylops client.
 func NewClient(addr NodeAddress) *Client {
 	var client Client
 	cc, err := grpc.Dial(fmt.Sprintf("%s:%d", addr.Host, addr.Port), grpc.WithInsecure())
@@ -33,6 +34,7 @@ func NewClient(addr NodeAddress) *Client {
 	return &client
 }
 
+// NewProducer returns a new Producer instance that can be used to publish messages to a topic and partition.
 func (client *Client) NewProducer(topicName string, partitionID int) (*Producer, error) {
 	topicConfig, err := client.GetTopic(topicName)
 	if err != nil {
@@ -46,6 +48,7 @@ func (client *Client) NewProducer(topicName string, partitionID int) (*Producer,
 	return newProducer(topicConfig.ID, partitionID, client.rpcClient), nil
 }
 
+// NewConsumer returns a new Consumer instance that can be used to subscribe to a topic and partition.
 func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 	if cfg.ResumeFromLastCommitted {
 		// Confirm that StartEpochNs is not specified.
@@ -75,11 +78,15 @@ func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 	return newConsumer(&cfg), nil
 }
 
-func (client *Client) CreateTopic(topicName string, partitionIDs []int, ttlSeconds int64) error {
+// CreateTopic is an admin API that can be used to create a new topic with eeylops. The topic name must be
+// unique. Additionally, the user must also specify the number of partitions in the topic and the time to live
+// in seconds(ttlSeconds). It ttlSeconds <= 0, the messages are retained by eeylops indefinitely.
+func (client *Client) CreateTopic(topicName string, numPartitions int, ttlSeconds int64) error {
 	var req comm.CreateTopicRequest
 	var prtIDs []int32
-	for _, prtID := range partitionIDs {
-		prtIDs = append(prtIDs, int32(prtID))
+	// TODO: Move this to the server. We will need to change the CreateTopicRequest for this.
+	for ii := 1; ii <= numPartitions; ii++ {
+		prtIDs = append(prtIDs, int32(ii))
 	}
 	topic := &comm.Topic{
 		TopicName:    topicName,
@@ -110,13 +117,12 @@ func (client *Client) CreateTopic(topicName string, partitionIDs []int, ttlSecon
 		}
 		return false, nil
 	}
-	bfn := func(attempt int) {
-		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	}
-	return util.RetryWithContext(ctx, fn, bfn)
+	return util.RetryWithContext(ctx, fn, createBackoffFn())
 }
 
+// RemoveTopic is an admin API that can be used to remove an existing topic with eeylops.
 func (client *Client) RemoveTopic(topicName string) error {
+	// TODO: Change this to topic ID.
 	topicConfig, err := client.GetTopic(topicName)
 	if err != nil {
 		glog.Warningf("Unable to fetch topic config for: %s due to err: %s. Cannot remove topic",
@@ -146,16 +152,15 @@ func (client *Client) RemoveTopic(topicName string) error {
 		}
 		return false, nil
 	}
-	bfn := func(attempt int) {
-		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	}
-	return util.RetryWithContext(ctx, fn, bfn)
+	return util.RetryWithContext(ctx, fn, createBackoffFn())
 }
 
+// Close the client.
 func (client *Client) Close() {
 	client.cc.Close()
 }
 
+// registerConsumer registers the given consumer for a topic and partition with eeylops.
 func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDType, partitionId int) error {
 	var req comm.RegisterConsumerRequest
 	req.ConsumerId = consumerId
@@ -184,12 +189,10 @@ func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDTy
 		}
 		return false, nil
 	}
-	bfn := func(attempt int) {
-		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	}
-	return util.RetryWithContext(ctx, fn, bfn)
+	return util.RetryWithContext(ctx, fn, createBackoffFn())
 }
 
+// GetTopic fetches the given topic configuration from eeylops.
 func (client *Client) GetTopic(topicName string) (base.TopicConfig, error) {
 	var req comm.GetTopicRequest
 	req.TopicName = topicName
@@ -227,13 +230,11 @@ func (client *Client) GetTopic(topicName string) (base.TopicConfig, error) {
 		topicConfig.PartitionIDs = prtIDs
 		return false, nil
 	}
-	bfn := func(attempt int) {
-		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	}
-	retErr := util.RetryWithContext(ctx, fn, bfn)
+	retErr := util.RetryWithContext(ctx, fn, createBackoffFn())
 	return topicConfig, retErr
 }
 
+// getLastCommitted fetches the last committed offset by a consumer for a topic and partition.
 func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDType,
 	partitionID int) (base.Offset, error) {
 	var req comm.LastCommittedRequest
@@ -267,20 +268,6 @@ func (client *Client) getLastCommitted(consumerID string, topicID base.TopicIDTy
 		myOffset = base.Offset(resp.GetOffset())
 		return false, nil
 	}
-	bfn := func(attempt int) {
-		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	}
-	retErr := util.RetryWithContext(ctx, fn, bfn)
+	retErr := util.RetryWithContext(ctx, fn, createBackoffFn())
 	return myOffset, retErr
-}
-
-func isPartitionPresentInTopicConfig(topicCfg base.TopicConfig, partitionID int) (found bool) {
-	found = false
-	for _, prtID := range topicCfg.PartitionIDs {
-		if partitionID == prtID {
-			found = true
-			return
-		}
-	}
-	return
 }

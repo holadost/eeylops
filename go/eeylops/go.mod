@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/DataDog/zstd v1.4.8 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/dgraph-io/badger/v2 v2.2007.3
 	github.com/golang/glog v0.0.0-20210429001901-424d2337a529
 	github.com/golang/snappy v0.0.3 // indirect

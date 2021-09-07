@@ -34,7 +34,7 @@ func TestClient_AddRemoveTopic(t *testing.T) {
 	// Add topics.
 	for ii := 0; ii < numTopics; ii++ {
 		glog.Infof("Creating topic: %s", generateTopicName(ii+1))
-		err := client.CreateTopic(generateTopicName(ii+1), []int{1, 2, 3, 4}, 86400)
+		err := client.CreateTopic(generateTopicName(ii+1), 4, 86400)
 		if err != nil {
 			glog.Fatalf("Expected no error but got: %v. Unable to add topic", err)
 		}
@@ -53,7 +53,7 @@ func TestClient_AddRemoveTopic(t *testing.T) {
 
 	// Add same topics again. We should get an error.
 	for ii := 0; ii < numTopics; ii++ {
-		err := client.CreateTopic(generateTopicName(ii+1), []int{1, 2, 3, 4}, 86400)
+		err := client.CreateTopic(generateTopicName(ii+1), 4, 86400)
 		if err == nil {
 			glog.Fatalf("Expected error while adding same topic: %s, but got %v", generateTopicName(ii), err)
 		}
@@ -84,7 +84,7 @@ func TestClient_AddRemoveTopic(t *testing.T) {
 	// Add removed topics.
 	for ii := 0; ii < numTopics; ii += 2 {
 		glog.Infof("Creating topic: %s", generateTopicName(ii+1))
-		err := client.CreateTopic(generateTopicName(ii+1), []int{1, 2, 3, 4}, 86400)
+		err := client.CreateTopic(generateTopicName(ii+1), 4, 86400)
 		if err != nil {
 			glog.Fatalf("Expected no error but got: %v. Unable to add topic", err)
 		}
@@ -125,7 +125,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 	glog.Infof("Creating topic: %s", generateTopicName(1))
 	testTopicName := generateTopicName(1)
 	testPartitions := []int{1, 2, 3, 4}
-	err := client.CreateTopic(testTopicName, testPartitions, 86400)
+	err := client.CreateTopic(testTopicName, len(testPartitions), 86400)
 	if err != nil {
 		glog.Fatalf("Expected no error but got: %v. Unable to add topic", err)
 	}
