@@ -33,8 +33,7 @@ type Segment interface {
 	// GetMsgTimestampRange returns the first and last message timestamps(in nano seconds) in the segment. This is
 	//allowed only after the segment is open.
 	GetMsgTimestampRange() (int64, int64)
-	// SetMetadata sets the metadata. This is updated internally and by the partition when a segment is created. This
-	// is allowed only after the segment is open.
+	// SetMetadata sets the metadata. This is updated internally and by the partition when a segment is created.
 	SetMetadata(SegmentMetadata)
 	// MarkImmutable marks the segment as immutable. This is allowed only after the segment is open.
 	MarkImmutable()

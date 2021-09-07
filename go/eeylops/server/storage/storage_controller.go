@@ -170,7 +170,7 @@ func (sc *StorageController) GetPartition(topicID base.TopicIDType, partitionID 
 	defer sc.topicMapLock.RUnlock()
 	entry, exists := sc.topicMap[topicID]
 	if !exists {
-		sc.logger.Errorf("Unable to find topic: %d. Huhhhh???", topicID)
+		sc.logger.Errorf("Unable to find topic: %d", topicID)
 		return nil, ErrTopicNotFound
 	}
 	partition, exists := entry.partitionMap[partitionID]

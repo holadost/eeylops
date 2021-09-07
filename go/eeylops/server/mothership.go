@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/raft"
 	"path"
 	"time"
+	"unicode"
 )
 
 const kMotherShipDirName = "mothership"
@@ -47,10 +48,16 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 		ms.logger.Errorf("Invalid topic name. Req: %v", req)
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic name")
 	}
+	if !isTopicNameValid(topic.GetTopicName()) {
+		ms.logger.Errorf("Invalid topic name: %s. Topic names must have only digits, letters or _", req)
+		return makeResponse(comm.Error_KErrInvalidArg, nil,
+			"Invalid characters in topic name. Only digits, letters and _ are allowed")
+	}
 	if len(topic.GetPartitionIds()) == 0 {
 		ms.logger.Errorf("No partitions provided while creating topic")
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid partition ID")
 	}
+
 	// TODO: This must go through the replication controller and we must be the leader.
 	// Populate arg, command and log.
 	var prtIds []int
@@ -78,11 +85,11 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 		AppendedAt: time.Now(),
 	}
 
-	// Apply to BrokerFSM, wait for response and handle errors.
+	// Apply to MothershipFSM, wait for response and handle errors.
 	tmpResp := ms.fsm.Apply(&log)
 	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
-		ms.logger.Fatalf("Invalid response from BrokerFSM. Received: %v", tmpResp)
+		ms.logger.Fatalf("Invalid response from MothershipFSM. Received: %v", tmpResp)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicExists {
@@ -123,18 +130,18 @@ func (ms *MotherShip) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 		AppendedAt: time.Now(),
 	}
 
-	// Apply to BrokerFSM, wait for response and handle errors.
+	// Apply to MothershipFSM, wait for response and handle errors.
 	tmpResp := ms.fsm.Apply(&log)
 	fsmResp, ok := tmpResp.(*FSMResponse)
 	if !ok {
-		ms.logger.Fatalf("Unable to cast to BrokerFSM response. Received: %v", tmpResp)
+		ms.logger.Fatalf("Unable to cast to MothershipFSM response. Received: %v", tmpResp)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicNotFound {
 			return makeResponse(comm.Error_KErrTopicNotFound, nil,
 				fmt.Sprintf("Topic: %d does not exist", topicID))
 		}
-		ms.logger.Fatalf("Unexpected error from BrokerFSM while attempting to remove topic: %d. Error: %s",
+		ms.logger.Fatalf("Unexpected error from MothershipFSM while attempting to remove topic: %d. Error: %s",
 			req.GetTopicId(), fsmResp.Error.Error())
 	}
 	return makeResponse(comm.Error_KNoError, nil, "")
@@ -197,4 +204,14 @@ func (ms *MotherShip) GetAllTopics(ctx context.Context) *comm.GetAllTopicsRespon
 		resp.Topics = append(resp.Topics, &topicProto)
 	}
 	return &resp
+}
+
+func isTopicNameValid(name string) bool {
+	for _, cc := range name {
+		if unicode.IsDigit(cc) || unicode.IsLetter(cc) || cc == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }

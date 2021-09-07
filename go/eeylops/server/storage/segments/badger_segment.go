@@ -42,7 +42,7 @@ type BadgerSegment struct {
 	segmentClosedChan chan struct{} // A channel to ask background goroutines to exit.
 
 	// Segment metadata.
-	liveStateLock sync.RWMutex     // Protects access to nextOffset, firstMsgTs, lastMsgTs and lastRLogIdx
+	liveStateLock sync.RWMutex     // Protects access to nextOffset, firstMsgTs, lastMsgTs and lastRLogIdx. TODO: Come up with a better name for this.
 	metadata      *SegmentMetadata // Cached segment metadata.
 	nextOffset    int64            // Next start offset for new appends.
 	lastRLogIdx   int64            // Last replicated log index.
@@ -317,12 +317,12 @@ func (seg *BadgerSegment) GetMsgTimestampRange() (int64, int64) {
 	// Fast path. Just load and see if the values look sane and if they do, just return.
 	firstMsgTs := seg.getFirstMsgTs()
 	lastMsgTs := seg.getLastMsgTs()
-	if firstMsgTs <= lastMsgTs {
+	if (firstMsgTs == lastMsgTs) || ((firstMsgTs > 0) && (firstMsgTs < lastMsgTs)) {
 		return firstMsgTs, lastMsgTs
 	}
-
-	// The data did not make sense i.e. the firstMsg was greater than the lastMsg. This could have only  happened if
-	// we were racing with the very first append. Take the liveStateLock and then read the values.
+	// The data did not make sense i.e. the firstMsgTs was greater than the lastMsgTs or we had a lastMsgTs but not the
+	// firstMsgTs. This could have only happened if we were racing with the very first append to this segment.
+	// Take the liveStateLock and then read the values.
 	seg.liveStateLock.RLock()
 	defer seg.liveStateLock.RUnlock()
 	return seg.getFirstMsgTs(), seg.getLastMsgTs()
