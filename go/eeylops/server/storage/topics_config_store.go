@@ -100,8 +100,9 @@ func (tcs *TopicsConfigStore) initialize() {
 			tcs.logger.Fatalf("Unable to initialize topics config store due to err: %s", err.Error())
 		}
 		tcs.lastRLogIdx = -1
+	} else {
+		tcs.lastRLogIdx = int64(util.BytesToUint(lastVal))
 	}
-	tcs.lastRLogIdx = int64(util.BytesToUint(lastVal))
 	tcs.logger.Infof("Last replicated log index in topics config store: %d", tcs.lastRLogIdx)
 }
 

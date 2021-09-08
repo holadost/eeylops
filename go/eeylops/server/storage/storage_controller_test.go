@@ -2,6 +2,7 @@ package storage
 
 import (
 	"eeylops/server/base"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"os"
@@ -23,11 +24,11 @@ func createTestDirForInstanceManager(t *testing.T, testName string) string {
 }
 
 func TestStorageController(t *testing.T) {
-	glog.Infof("*******************************************************************************************\n\n")
-	glog.Infof("Starting TestStorageController")
+	testutil.LogTestMarker("TestStorageController")
+	testDir := testutil.CreateFreshTestDir("TestStorageController")
 	scanIntervalSecs := 5
 	opts := StorageControllerOpts{
-		RootDirectory:           createTestDirForInstanceManager(t, "TestStorageController"),
+		RootDirectory:           testDir,
 		ControllerID:            "1",
 		StoreGCScanIntervalSecs: scanIntervalSecs,
 	}
