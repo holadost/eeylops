@@ -217,7 +217,6 @@ func (kvStore *BadgerKVStore) internalMultiGet(txn *badger.Txn, keys [][]byte) (
 				kvStore.logger.Errorf("Unable to get key: %v due to err: %s", key, err.Error())
 				errs = append(errs, ErrKVStoreGeneric)
 			}
-			errs = append(errs, err)
 			values = append(values, nil)
 			continue
 		}
@@ -255,16 +254,11 @@ func (kvStore *BadgerKVStore) BatchPut(keys [][]byte, values [][]byte) error {
 }
 
 func (kvStore *BadgerKVStore) internalBatchPut(txn *badger.Txn, keys [][]byte, values [][]byte) error {
-	wb := kvStore.db.NewWriteBatch()
 	for ii := 0; ii < len(keys); ii++ {
-		if err := wb.Set(keys[ii], values[ii]); err != nil {
-			kvStore.logger.Errorf("Unable to perform batch put due to err: %s", err.Error())
+		if err := txn.Set(keys[ii], values[ii]); err != nil {
+			kvStore.logger.Errorf("Unable to set keys due to err: %s", err.Error())
 			return ErrKVStoreBackend
 		}
-	}
-	if err := wb.Flush(); err != nil {
-		kvStore.logger.Errorf("Unable to perform flush after batch put due to err: %s", err.Error())
-		return ErrKVStoreBackend
 	}
 	return nil
 }
@@ -322,7 +316,7 @@ func (kvStore *BadgerKVStore) CreateScanner(prefix []byte, startKey []byte, reve
 	return newBadgerScannerWithDb(kvStore.db, prefix, startKey, reverse)
 }
 
-func (kvStore *BadgerKVStore) NewTransaction(prefix []byte, startKey []byte, reverse bool) Transaction {
+func (kvStore *BadgerKVStore) NewTransaction() Transaction {
 	return newBadgerTransaction(kvStore)
 }
 
@@ -464,6 +458,10 @@ func (badgerKVTxn *BadgerKVStoreTxn) MultiGet(keys [][]byte) ([][]byte, []error)
 
 // BatchPut does batch Put i.e. combines all the updates into a single write.
 func (badgerKVTxn *BadgerKVStoreTxn) BatchPut(keys [][]byte, values [][]byte) error {
+	if badgerKVTxn.store.closed {
+		badgerKVTxn.store.logger.Errorf("KV store is closed")
+		return ErrKVStoreClosed
+	}
 	return badgerKVTxn.store.internalBatchPut(badgerKVTxn.txn, keys, values)
 }
 

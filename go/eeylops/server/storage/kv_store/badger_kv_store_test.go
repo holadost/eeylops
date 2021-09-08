@@ -123,6 +123,151 @@ func TestBadgerKVStore(t *testing.T) {
 	glog.Infof("Badger KV store test finished successfully")
 }
 
+func TestBadgerKVStoreTxn(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreTxn")
+	testDir := testutil.CreateTestDir(t, "TestBadgerKVStoreTxn")
+	opts := badger.DefaultOptions(testDir)
+	opts.MaxLevels = 7
+	opts.NumMemtables = 2
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	opts.NumCompactors = 2
+	opts.SyncWrites = true
+	store := NewBadgerKVStore(testDir, opts)
+
+	// Testing discard transaction.
+	glog.Infof("Testing transaction discards")
+	txn := store.NewTransaction()
+	failure_key := "failure_key"
+	failure_value := "failure_value"
+	var keys [][]byte
+	var values [][]byte
+	keys = append(keys, []byte(failure_key))
+	values = append(values, []byte(failure_value))
+
+	err := txn.BatchPut(keys, values)
+	if err != nil {
+		glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
+		return
+	}
+	txn.Discard()
+
+	_, errs := store.MultiGet(keys)
+	if errs[0] != ErrKVStoreKeyNotFound {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+
+	glog.Infof("Testing Batch Put")
+	keys = nil
+	values = nil
+	toBeDeletedKey := "to_be_deleted_key"
+	toBeDeletedValue := "to_be_deleted_value"
+	keys = append(keys, []byte(toBeDeletedKey))
+	values = append(values, []byte(toBeDeletedValue))
+	txn = store.NewTransaction()
+	err = txn.BatchPut(keys, values)
+	if err != nil {
+		glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
+		return
+	}
+	if txn.Commit() != nil {
+		glog.Fatalf("Failed to commit transaction due to err")
+	}
+	txn.Discard()
+
+	fetchedVals, errs := store.MultiGet(keys)
+	if errs[0] != nil {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+	if string(fetchedVals[0]) != toBeDeletedValue {
+		glog.Fatalf("Data mismatch. Expected: %s, got: %s", toBeDeletedValue, string(fetchedVals[0]))
+	}
+
+	// Test puts and delete in a single transaction and then discard it before committing.
+	glog.Infof("Testing batch put and delete in transaction failure")
+	successKey := "successKey"
+	successValue := "successValue"
+	var skeys [][]byte
+	var svalues [][]byte
+	skeys = append(skeys, []byte(successKey))
+	svalues = append(svalues, []byte(successValue))
+	testBatchPutAndDelete := func(txn Transaction) {
+		glog.Infof("Testing Batch Put and batch delete")
+		err = txn.BatchPut(skeys, svalues)
+		if err != nil {
+			glog.Fatalf("Batch put failed with error: %s", err)
+		}
+		if err := txn.BatchDelete(keys); err != nil {
+			glog.Fatalf("Unable to batch delete due to err: %s", err.Error())
+		}
+	}
+	txn = store.NewTransaction()
+	testBatchPutAndDelete(txn)
+	txn.Discard()
+	// Check if values are correct.
+	_, errs = store.MultiGet(skeys)
+	if errs[0] != ErrKVStoreKeyNotFound {
+		glog.Fatalf("Expected to not find toBeDeletedKey: %s", successKey)
+	}
+	fetchedVals, errs = store.MultiGet(keys)
+	if errs[0] != nil {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+	if string(fetchedVals[0]) != toBeDeletedValue {
+		glog.Fatalf("Data mismatch. Expected: %s, got: %s", toBeDeletedValue, string(fetchedVals[0]))
+	}
+
+	// Test puts and delete in a single transaction and then commit it.
+	glog.Infof("Testing batch put and delete in transaction success")
+	txn = store.NewTransaction()
+	testBatchPutAndDelete(txn)
+	if err := txn.Commit(); err != nil {
+		glog.Fatalf("Unable to commit transaction due to error")
+	}
+	txn.Discard()
+	fetchedVals, errs = store.MultiGet(skeys)
+	if errs[0] != nil {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+	if string(fetchedVals[0]) != successValue {
+		glog.Fatalf("Data mismatch. Expected: %s, got: %s", toBeDeletedValue, string(fetchedVals[0]))
+	}
+	_, errs = store.MultiGet(keys)
+	if errs[0] != ErrKVStoreKeyNotFound {
+		glog.Fatalf("Expected to not find toBeDeletedKey: %s", successKey)
+	}
+
+	glog.Infof("Testing Put and Delete and Get")
+	successKey2 := "successKey2"
+	successValue2 := "successValue2"
+	keys = nil
+	values = nil
+	keys = append(keys, []byte(successKey2))
+	values = append(values, []byte(successValue2))
+	txn = store.NewTransaction()
+	if err := txn.Put([]byte(successKey2), []byte(successValue2)); err != nil {
+		glog.Fatalf("Unable to put values due to err: %v", err)
+	}
+	if err := txn.Delete([]byte(successKey)); err != nil {
+		glog.Fatalf("Unable to delete value due to err: %v", err)
+	}
+	txn.Commit()
+	txn.Discard()
+	txn = store.NewTransaction()
+	fetchedVals, errs = txn.MultiGet(keys)
+	if errs[0] != nil {
+		glog.Fatalf("Unable to get value due to err: %v", errs[0])
+	}
+	if string(fetchedVals[0]) != successValue2 {
+		glog.Fatalf("Value mismatch. Expected: %s, got: %s", successValue2, string(fetchedVals[0]))
+	}
+	_, err = txn.Get([]byte(successKey))
+	if err != ErrKVStoreKeyNotFound {
+		glog.Fatalf("Got unexpected error: %v", err)
+	}
+	txn.Discard()
+}
+
 func TestBadgerKVStore_BatchPut(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerKVStore_BatchPut")
 	testDir := testutil.CreateTestDir(t, "TestBadgerKVStore_BatchPut")
