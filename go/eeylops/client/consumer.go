@@ -7,7 +7,6 @@ import (
 	"eeylops/util"
 	"errors"
 	"github.com/golang/glog"
-	"math/rand"
 	"time"
 )
 
@@ -208,10 +207,7 @@ func (consumer *Consumer) Consume(batchSize int, timeout time.Duration) ([]Messa
 		}
 		return false, nil
 	}
-	backoffFn := func(attempt int) {
-		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	}
-	retErr := util.RetryWithContext(ctx, consumeFn, backoffFn)
+	retErr := util.RetryWithContext(ctx, consumeFn, createBackoffFn())
 	return messages, retErr
 }
 
@@ -257,8 +253,5 @@ func (consumer *Consumer) CommitOffset(offset base.Offset) error {
 			return false, newError(resp.GetError().GetErrorCode(), resp.GetError().GetErrorMsg())
 		}
 	}
-	backoffFn := func(attempt int) {
-		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	}
-	return util.RetryWithContext(ctx, commitFn, backoffFn)
+	return util.RetryWithContext(ctx, commitFn, createBackoffFn())
 }

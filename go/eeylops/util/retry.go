@@ -10,12 +10,11 @@ import (
 // RetryFunc are functions that must be retried.
 type RetryFunc func(attempt int) (retry bool, err error)
 
-// BackoffFunc must backoff for a certain time interval before returning.
-type BackoffFunc func(attempt int)
+// BackoffFunc must return a timer channel that will fire once the backoff time has expired.
+type BackoffFunc func(attempt int) <-chan time.Time
 
 var (
-	ErrExhaustedAllRetryAttempts = errors.New("exhausted all attempts")
-	ErrRetryContextExpired       = errors.New("retry context/timeout expired")
+	ErrRetryContextExpired = errors.New("retry context/timeout expired")
 )
 
 func Retry(fn RetryFunc, bfn BackoffFunc) error {
@@ -23,9 +22,12 @@ func Retry(fn RetryFunc, bfn BackoffFunc) error {
 	for {
 		attempt++
 		retry, err := fn(attempt)
+		backoffChan := bfn(attempt)
 		if retry {
-			bfn(attempt)
-			continue
+			select {
+			case <-backoffChan:
+				continue
+			}
 		}
 		return err
 	}
@@ -46,11 +48,12 @@ func RetryWithContext(ctx context.Context, fn RetryFunc, bfn BackoffFunc) error 
 		attempt++
 		retry, err := fn(attempt)
 		if retry {
+			backoffChan := bfn(attempt)
 			select {
 			case <-ctx.Done():
 				return ErrRetryContextExpired
-			default:
-				bfn(attempt)
+			case <-backoffChan:
+				continue
 			}
 		}
 		return err

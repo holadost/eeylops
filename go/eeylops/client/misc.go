@@ -7,7 +7,7 @@ import (
 )
 
 // createBackoffFn is a helper function that returns a wrapped function which waits using exponential back offs.
-func createBackoffFn() func(int) {
+func createBackoffFn() func(int) <-chan time.Time {
 	b := &backoff.ExponentialBackOff{
 		InitialInterval:     time.Millisecond,
 		RandomizationFactor: 0.2,
@@ -16,8 +16,9 @@ func createBackoffFn() func(int) {
 		MaxElapsedTime:      0, // Never stop the timer.
 		Clock:               backoff.SystemClock,
 	}
-	bfn := func(attempt int) {
-		time.Sleep(b.NextBackOff())
+	b.Reset()
+	bfn := func(attempt int) <-chan time.Time {
+		return time.After(b.NextBackOff())
 	}
 	return bfn
 }
