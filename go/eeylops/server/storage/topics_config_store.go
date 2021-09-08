@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
+	"github.com/golang/glog"
 	"os"
 	"path"
 	"sync"
@@ -268,6 +269,7 @@ func (tcs *TopicsConfigStore) getNextTopicIDFromKVStore() base.TopicIDType {
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// No topics have been created yet.
+			glog.Infof("DID NOT find any topics in the topics store. Starting from topic ID: 1")
 			return 1
 		} else {
 			tcs.logger.Fatalf("Unable to initialize next topic ID due to err: %s", err.Error())

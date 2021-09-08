@@ -29,19 +29,18 @@ func TestTopicConfigStore(t *testing.T) {
 	numTopics := 100
 	closeReopenIterNum := 5
 	readVerifyIterNum := 5
-	ts := NewTopicsConfigStore(testDir)
+	ts := NewTopicsConfigStoreWithTopicIDGenerationEnabled(testDir)
 	topicNameGen := func(val int) string {
 		return fmt.Sprintf("topic-%d", val)
 	}
 	glog.Infof("Topic store initialized!")
-	for ii := 0; ii < numTopics; ii++ {
+	for ii := 1; ii <= numTopics; ii++ {
 		glog.Infof("Adding topic: %d", ii)
 		// Add a new topic.
 		var topic base.TopicConfig
 		topic.Name = topicNameGen(ii)
 		topic.PartitionIDs = []int{0, 1, 2, 3}
 		topic.TTLSeconds = 86400
-		topic.ID = base.TopicIDType(ii)
 		topic.CreatedAt = time.Now()
 		if err := ts.AddTopic(topic, int64(100+ii)); err != nil {
 			glog.Fatalf("Unable to add topic due to err: %s", err.Error())
@@ -54,11 +53,11 @@ func TestTopicConfigStore(t *testing.T) {
 				glog.Fatalf("Unable to close topic store due to err: %s", err.Error())
 				return
 			}
-			ts = NewTopicsConfigStore(testDir)
+			ts = NewTopicsConfigStoreWithTopicIDGenerationEnabled(testDir)
 		}
 		// Read and verify all the topics every readVerifyIterNum iterations.
 		if ii%readVerifyIterNum == 0 {
-			for jj := 0; jj < ii+1; jj++ {
+			for jj := 1; jj <= ii; jj++ {
 				topicName := topicNameGen(jj)
 				rtopic, err := ts.GetTopicByName(topicName)
 				if err != nil {
@@ -78,7 +77,7 @@ func TestTopicConfigStore(t *testing.T) {
 	}
 
 	// Remove topics.
-	for ii := 0; ii < numTopics; ii++ {
+	for ii := 1; ii <= numTopics; ii++ {
 		err := ts.RemoveTopic(base.TopicIDType(ii), int64(10000+ii))
 		if err != nil {
 			glog.Fatalf("Unable to remove topic due to err: %s", err.Error())
@@ -90,15 +89,16 @@ func TestTopicConfigStore(t *testing.T) {
 				glog.Fatalf("Unable to close topic store due to err: %s", err.Error())
 				return
 			}
-			ts = NewTopicsConfigStore(testDir)
+			ts = NewTopicsConfigStoreWithTopicIDGenerationEnabled(testDir)
 		}
 		if ii%readVerifyIterNum == 0 {
-			for jj := 0; jj < numTopics; jj++ {
+			for jj := 1; jj <= numTopics; jj++ {
 				topicName := topicNameGen(jj)
-				_, err := ts.GetTopicByName(topicName)
+				tpc, err := ts.GetTopicByName(topicName)
 				if jj <= ii {
 					if err != ErrTopicNotFound {
-						glog.Fatalf("Expected topic to not be found but got err: %v", err)
+						glog.Fatalf("Expected topic: %s to not be found but got err: %v. Topic: %s",
+							topicName, err, tpc.ToString())
 					}
 				} else {
 					if err != nil {

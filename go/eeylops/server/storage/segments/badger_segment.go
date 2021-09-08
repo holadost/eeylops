@@ -419,7 +419,7 @@ func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesR
 
 // computeStartOffsetForScan is a helper method for Scan that computes the first offset from where the scan should
 // start. If no such offset if found, or if an offset is found and that was the only offset requested(in which case we
-// populate ret and we can return early and avoid re-reading this message again), this method  will return an error.
+// populate ret and return early and avoid re-reading this message again), this method  will return an error.
 // Otherwise, it will return the start offset from where the scan should start. This method assumes that the segLock
 // has been acquired.
 func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *ScanEntriesRet) (base.Offset, error) {
@@ -427,40 +427,43 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 	firstUnexpiredMsgTs := now.UnixNano() - int64(seg.ttlSeconds)*(1e9)
 	var startOffset base.Offset
 	if arg.StartOffset >= 0 {
-		// A start offset has been provided. Check if we can scan from here and if not, move to the correct
-		// start offset.
-		msg, err := seg.getOffset(arg.StartOffset)
-		if err != nil {
-			ret.Error = err
-			return -1, ret.Error
-		}
+		firstMsgTs := seg.getFirstMsgTs()
 		startOffset = arg.StartOffset
-		// Check if message has expired.
-		if seg.hasValueExpired(msg.GetTimestamp(), now.UnixNano()) {
-			// The message has expired. Scan the index to find the first offset that hasn't expired.
-			startOffset, err = seg.findFirstOffsetWithTimestampGE(firstUnexpiredMsgTs)
+		if firstMsgTs < firstUnexpiredMsgTs {
+			// The message may have expired. Check if it has and if it has, move to the first unexpired offset.
+			msg, err := seg.getMsgAtOffset(arg.StartOffset)
 			if err != nil {
 				ret.Error = err
 				return -1, ret.Error
 			}
-			if startOffset == -1 {
-				seg.logger.Errorf("Unable to find any live records in the segment")
-				ret.Error = nil
-				ret.NextOffset = -1
-				return -1, ErrSegmentNoRecordsWithTimestamp
-			}
-		} else {
-			// The value hasn't expired. Check if only one value was requested and if so, we can return early here
-			// since we already have the message with us.
-			if arg.NumMessages == 1 {
-				ret.Values = append(ret.Values, &sbase.ScanValue{
-					Offset:    arg.StartOffset,
-					Value:     msg.GetBody(),
-					Timestamp: msg.GetTimestamp(),
-				})
-				ret.Error = nil
-				ret.NextOffset = arg.StartOffset + 1
-				return -1, errSegmentScanDoneEarly
+			startOffset = arg.StartOffset
+			// Check if message has expired.
+			if seg.hasValueExpired(msg.GetTimestamp(), now.UnixNano()) {
+				// The message has expired. Scan the index to find the first offset that hasn't expired.
+				startOffset, err = seg.findFirstOffsetWithTimestampGE(firstUnexpiredMsgTs)
+				if err != nil {
+					ret.Error = err
+					return -1, ret.Error
+				}
+				if startOffset == -1 {
+					seg.logger.Errorf("Unable to find any live records in the segment")
+					ret.Error = nil
+					ret.NextOffset = -1
+					return -1, ErrSegmentNoRecordsWithTimestamp
+				}
+			} else {
+				// The value hasn't expired. Check if only one value was requested and if so, we can return early here
+				// since we already have the message with us.
+				if arg.NumMessages == 1 {
+					ret.Values = append(ret.Values, &sbase.ScanValue{
+						Offset:    arg.StartOffset,
+						Value:     msg.GetBody(),
+						Timestamp: msg.GetTimestamp(),
+					})
+					ret.Error = nil
+					ret.NextOffset = arg.StartOffset + 1
+					return -1, errSegmentScanDoneEarly
+				}
 			}
 		}
 	} else {
@@ -543,8 +546,8 @@ func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet,
 	}
 }
 
-// getOffset fetches a single offset from the backend.
-func (seg *BadgerSegment) getOffset(offset base.Offset) (*Message, error) {
+// getMsgAtOffset fetches a single offset from the backend.
+func (seg *BadgerSegment) getMsgAtOffset(offset base.Offset) (*Message, error) {
 	val, err := seg.dataDB.Get(seg.offsetToKey(offset))
 	if err != nil {
 		seg.logger.Errorf("Unable to get offset: %d due to err: %s", offset, err.Error())
