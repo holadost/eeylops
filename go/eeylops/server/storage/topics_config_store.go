@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"eeylops/server/base"
+	sbase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
@@ -16,11 +17,9 @@ import (
 )
 
 const kTopicsConfigStoreDirectory = "topics_config_store"
-const kLastTopicIDKey = "last::::topic::::id"
-const kLastRLogIdx = "last::::rlog::::idx"
+const kLastTopicIDKey = "last::topic::id"
 
 var kLastTopicIDBytes = []byte(kLastTopicIDKey)
-var kLastRLogIdxBytes = []byte(kLastRLogIdx)
 
 // TopicsConfigStore holds all the topics for eeylops.
 type TopicsConfigStore struct {
@@ -33,8 +32,10 @@ type TopicsConfigStore struct {
 	topicMapLock             sync.RWMutex
 	topicIDGenerationEnabled bool
 	nextTopicID              base.TopicIDType
+	lastRLogIdx              int64
 }
 
+// NewTopicsConfigStore builds a new TopicsConfigStore instance. ID generation is disabled.
 func NewTopicsConfigStore(rootDir string) *TopicsConfigStore {
 	ts := new(TopicsConfigStore)
 	ts.rootDir = rootDir
@@ -49,6 +50,9 @@ func NewTopicsConfigStore(rootDir string) *TopicsConfigStore {
 	return ts
 }
 
+// NewTopicsConfigStoreWithTopicIDGenerationEnabled builds a new TopicsConfigStore instance with ID generation
+// enabled. When ID generation is enabled, the topics config store will automatically generate IDs for the topic.
+// It panics if new topics with IDs are added.
 func NewTopicsConfigStoreWithTopicIDGenerationEnabled(rootDir string) *TopicsConfigStore {
 	ts := new(TopicsConfigStore)
 	ts.rootDir = rootDir
@@ -63,6 +67,7 @@ func NewTopicsConfigStoreWithTopicIDGenerationEnabled(rootDir string) *TopicsCon
 	return ts
 }
 
+// initialize the topics config store.
 func (tcs *TopicsConfigStore) initialize() {
 	tcs.logger.Infof("Initializing topic store located at: %s", tcs.tsDir)
 	// Initialize KV store.
@@ -86,15 +91,35 @@ func (tcs *TopicsConfigStore) initialize() {
 	for _, topic := range allTopics {
 		tcs.addTopicToMaps(topic)
 	}
+
+	// Initialize last replicated log index key.
+	rLogKey, _ := sbase.PrepareRLogIDXKeyVal(0)
+	lastVal, err := tcs.kvStore.Get(rLogKey)
+	if err != nil {
+		if err != kv_store.ErrKVStoreKeyNotFound {
+			tcs.logger.Fatalf("Unable to initialize topics config store due to err: %s", err.Error())
+		}
+		tcs.lastRLogIdx = -1
+	}
+	tcs.lastRLogIdx = int64(util.BytesToUint(lastVal))
+	tcs.logger.Infof("Last replicated log index in topics config store: %d", tcs.lastRLogIdx)
 }
 
+// Close the topics store.
 func (tcs *TopicsConfigStore) Close() error {
 	return tcs.kvStore.Close()
 }
 
+// AddTopic adds the given topic to the store. This method is not concurrent-safe.
+// rLogIdx specifies the replicated log index for this request.
 func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) error {
 	tcs.topicMapLock.Lock()
 	defer tcs.topicMapLock.Unlock()
+	if rLogIdx <= tcs.lastRLogIdx {
+		tcs.logger.Warningf("A higher replicated log index: %d exists in the topics store. "+
+			"Ignoring this request with log index: %d to add topic: %s", tcs.lastRLogIdx, rLogIdx, topic.Name)
+		return ErrInvalidRLogIdx
+	}
 	_, exists := tcs.topicNameMap[topic.Name]
 	if exists {
 		tcs.logger.Warningf("Topic named: %s already exists. Not adding topic again", topic.Name)
@@ -116,9 +141,9 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) er
 	tcs.logger.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
 	var keys [][]byte
 	var values [][]byte
-	keys = append(keys, []byte(topic.Name), kLastTopicIDBytes, kLastRLogIdxBytes)
-	values = append(values, tcs.marshalTopic(&topic), util.UintToBytes(uint64(topic.ID)),
-		util.UintToBytes(uint64(rLogIdx)))
+	rLogKey, rLogVal := sbase.PrepareRLogIDXKeyVal(rLogIdx)
+	keys = append(keys, []byte(topic.Name), kLastTopicIDBytes, rLogKey)
+	values = append(values, tcs.marshalTopic(&topic), util.UintToBytes(uint64(topic.ID)), rLogVal)
 	err := tcs.kvStore.BatchPut(keys, values)
 	if err != nil {
 		tcs.logger.Errorf("Unable to add topic: %s due to err: %s", topic.Name, err.Error())
@@ -128,9 +153,12 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) er
 	if tcs.topicIDGenerationEnabled {
 		tcs.nextTopicID += 1
 	}
+	tcs.lastRLogIdx = rLogIdx
 	return nil
 }
 
+// RemoveTopic removes the given topic to the store. This method is not concurrent-safe.
+// rLogIdx specifies the replicated log index for this request.
 func (tcs *TopicsConfigStore) RemoveTopic(topicId base.TopicIDType, rLogIdx int64) error {
 	tcs.logger.Infof("Removing topic: %d from topic store", topicId)
 	tcs.topicMapLock.Lock()
@@ -143,16 +171,33 @@ func (tcs *TopicsConfigStore) RemoveTopic(topicId base.TopicIDType, rLogIdx int6
 	if !exists {
 		tcs.logger.Fatalf("Found topic named: %s in name map but not in ID map. Topic ID: %d", tpc.Name, tpc.ID)
 	}
+	if rLogIdx <= tcs.lastRLogIdx {
+		tcs.logger.Warningf("A higher log index already exists in the topics config store. " +
+			"Ignoring this request")
+		return ErrInvalidRLogIdx
+	}
 	key := []byte(topicConfig.Name)
-	err := tcs.kvStore.Delete(key)
-	if err != nil {
+	txn := tcs.kvStore.NewTransaction()
+	defer txn.Discard()
+	if err := txn.Delete(key); err != nil {
 		tcs.logger.Errorf("Unable to delete topic: %s due to err: %s", topicConfig.Name, err.Error())
 		return ErrTopicStore
 	}
+	if err := txn.Put(sbase.PrepareRLogIDXKeyVal(rLogIdx)); err != nil {
+		tcs.logger.Errorf("Unable to add replicated log index: %d due to err: %s", rLogIdx, err.Error())
+		return ErrTopicStore
+	}
+	if err := txn.Commit(); err != nil {
+		tcs.logger.Errorf("Unable to commit transaction to remove topic: %s due to err: %s", topicConfig.Name,
+			err.Error())
+		return ErrTopicStore
+	}
 	tcs.removeTopicFromMaps(tpc)
+	tcs.lastRLogIdx = rLogIdx
 	return nil
 }
 
+// GetTopicByName fetches the topic by its name.
 func (tcs *TopicsConfigStore) GetTopicByName(topicName string) (base.TopicConfig, error) {
 	tcs.topicMapLock.RLock()
 	defer tcs.topicMapLock.RUnlock()
@@ -163,6 +208,7 @@ func (tcs *TopicsConfigStore) GetTopicByName(topicName string) (base.TopicConfig
 	return *tpc, nil
 }
 
+// GetTopicByID fetches the topic by its ID.
 func (tcs *TopicsConfigStore) GetTopicByID(topicID base.TopicIDType) (base.TopicConfig, error) {
 	tcs.topicMapLock.RLock()
 	defer tcs.topicMapLock.RUnlock()
@@ -173,6 +219,7 @@ func (tcs *TopicsConfigStore) GetTopicByID(topicID base.TopicIDType) (base.Topic
 	return *tpc, nil
 }
 
+// GetAllTopics fetches all topics in the store.
 func (tcs *TopicsConfigStore) GetAllTopics() []base.TopicConfig {
 	tcs.topicMapLock.RLock()
 	defer tcs.topicMapLock.RUnlock()
@@ -184,18 +231,22 @@ func (tcs *TopicsConfigStore) GetAllTopics() []base.TopicConfig {
 	return topics
 }
 
+// GetLastTopicIDCreated returns the last topic ID that was created.
 func (tcs *TopicsConfigStore) GetLastTopicIDCreated() base.TopicIDType {
 	return tcs.nextTopicID - 1
 }
 
+// Snapshot creates a snapshot of the store.
 func (tcs *TopicsConfigStore) Snapshot() error {
 	return nil
 }
 
+// Restore restores the store from a given snapshot.
 func (tcs *TopicsConfigStore) Restore() error {
 	return nil
 }
 
+// getTopicsFromKVStore fetches all the topics from the underlying KV store.
 func (tcs *TopicsConfigStore) getTopicsFromKVStore() []*base.TopicConfig {
 	keys, values, _, err := tcs.kvStore.Scan(nil, -1, -1, false)
 	if err != nil {
@@ -205,8 +256,9 @@ func (tcs *TopicsConfigStore) getTopicsFromKVStore() []*base.TopicConfig {
 	if len(values) == 0 {
 		return topics
 	}
+	rLogKey, _ := sbase.PrepareRLogIDXKeyVal(0)
 	for ii := 0; ii < len(values); ii++ {
-		if bytes.Compare(keys[ii], kLastTopicIDBytes) == 0 || bytes.Compare(keys[ii], kLastRLogIdxBytes) == 0 {
+		if bytes.Compare(keys[ii], kLastTopicIDBytes) == 0 || bytes.Compare(keys[ii], rLogKey) == 0 {
 			continue
 		}
 		topics = append(topics, tcs.unmarshalTopic(values[ii]))
@@ -215,6 +267,7 @@ func (tcs *TopicsConfigStore) getTopicsFromKVStore() []*base.TopicConfig {
 	return topics
 }
 
+// marshalTopic serializes the given topic config.
 func (tcs *TopicsConfigStore) marshalTopic(topic *base.TopicConfig) []byte {
 	data, err := json.Marshal(topic)
 	if err != nil {
@@ -224,6 +277,7 @@ func (tcs *TopicsConfigStore) marshalTopic(topic *base.TopicConfig) []byte {
 	return data
 }
 
+// unmarshalTopic deserializes the given data to TopicConfig.
 func (tcs *TopicsConfigStore) unmarshalTopic(data []byte) *base.TopicConfig {
 	var topic base.TopicConfig
 	err := json.Unmarshal(data, &topic)
@@ -261,6 +315,7 @@ func (tcs *TopicsConfigStore) removeTopicFromMaps(topic *base.TopicConfig) {
 	delete(tcs.topicIDMap, topic.ID)
 }
 
+// getNextTopicIDFromKVStore fetches the next topic ID from the underlying KV store that will be used for new topics.
 func (tcs *TopicsConfigStore) getNextTopicIDFromKVStore() base.TopicIDType {
 	if !tcs.topicIDGenerationEnabled {
 		return 0
