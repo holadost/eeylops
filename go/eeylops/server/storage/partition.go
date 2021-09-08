@@ -709,8 +709,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 	var segID uint64
 	// A flag to indicate whether the current last segment is being marked as immutable.
 	isImmutizing := false
-	// Notification channel once last segment has been marked as immutable.
-	immutizeDone := make(chan struct{}, 1)
+	wg := sync.WaitGroup{}
 	// This helper function marks the current last segment as immutable.
 	immutize := func() {
 		seg := p.segments[len(p.segments)-1]
@@ -737,7 +736,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 		}
 		seg.Open()
 		p.segments[len(p.segments)-1] = seg
-		close(immutizeDone)
+		wg.Done()
 	}
 	if len(p.segments) == 0 {
 		// First ever segment in the partition.
@@ -748,6 +747,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 		seg := p.segments[len(p.segments)-1]
 		prevMetadata := seg.GetMetadata()
 		isImmutizing = true
+		wg.Add(1)
 		go immutize()
 		segID = prevMetadata.ID + 1
 		startOffset = prevMetadata.EndOffset + 1
@@ -760,11 +760,6 @@ func (p *Partition) createNewSegmentUnsafe() {
 		PartitionID: uint(p.partitionID),
 		TTLSeconds:  p.ttlSeconds,
 	}
-	newSeg, err := segments.NewBadgerSegment(&opts)
-	if err != nil {
-		p.logger.Fatalf("Unable to create new segment due to err: %s", err.Error())
-		return
-	}
 	metadata := segments.SegmentMetadata{
 		ID:               segID,
 		Immutable:        false,
@@ -772,19 +767,14 @@ func (p *Partition) createNewSegmentUnsafe() {
 		CreatedTimestamp: time.Now(),
 		StartOffset:      startOffset,
 	}
-	// Set the metadata and close and reopen the segment.
-	newSeg.SetMetadata(metadata)
-	err = newSeg.Close()
+	newSeg, err := segments.NewBadgerSegmentWithMetadata(&opts, metadata)
 	if err != nil {
-		p.logger.Fatalf("Error while closing and reopening new segment: %d", segID)
-	}
-	newSeg, err = segments.NewBadgerSegment(&opts)
-	if err != nil {
-		p.logger.Fatalf("Error while closing and reopening new segment: %d", segID)
+		p.logger.Fatalf("Unable to create new segment due to err: %s", err.Error())
+		return
 	}
 	newSeg.Open()
 	if isImmutizing {
-		<-immutizeDone
+		wg.Wait()
 	}
 	p.segments = append(p.segments, newSeg)
 }

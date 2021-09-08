@@ -93,11 +93,38 @@ func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
 	return seg, nil
 }
 
+func NewBadgerSegmentWithMetadata(opts *BadgerSegmentOpts, sm SegmentMetadata) (*BadgerSegment, error) {
+	if err := os.MkdirAll(path.Join(opts.RootDir, dataDirName), 0774); err != nil {
+		return nil, err
+	}
+	seg := new(BadgerSegment)
+	seg.rootDir = opts.RootDir
+	seg.topicName = opts.Topic
+	seg.partitionID = opts.PartitionID
+	seg.ttlSeconds = opts.TTLSeconds
+	// Set segment ID as root directory for now since we still haven't initialized the segment metadata.
+	if opts.Logger == nil {
+		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment:%s", opts.RootDir))
+	} else {
+		seg.logger = opts.Logger
+	}
+	seg.metadataDB = NewSegmentMetadataDB(seg.rootDir)
+	seg.SetMetadata(sm)
+	seg.initialize()
+	// Reinitialize logger with correct segment id.
+	if opts.Logger == nil {
+		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment:%d", seg.ID()))
+	}
+	return seg, nil
+}
+
 // Initialize implements the Segment interface. It initializes the segment.
 func (seg *BadgerSegment) initialize() {
 	seg.logger.Infof("Initializing badger segment located at: %s", seg.rootDir)
 	// Initialize metadata ddb.
-	seg.metadataDB = NewSegmentMetadataDB(seg.rootDir)
+	if seg.metadataDB == nil {
+		seg.metadataDB = NewSegmentMetadataDB(seg.rootDir)
+	}
 	seg.metadata = seg.metadataDB.GetMetadata()
 	if seg.metadata.ID == 0 {
 		seg.logger.Infof("Did not find any metadata associated with this segment. This must be a new segment!")
@@ -769,7 +796,7 @@ func (seg *BadgerSegment) open() {
 	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
 	opts.BlockCacheSize = 0 // Disable block cache.
-	opts.NumCompactors = 3  // Use 3 compactors.
+	opts.NumCompactors = 2  // Use 2 compactors.
 	opts.IndexCacheSize = 0
 	opts.Compression = options.None
 	opts.TableLoadingMode = options.FileIO
@@ -778,6 +805,7 @@ func (seg *BadgerSegment) open() {
 	opts.Logger = seg.logger
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
+		opts.NumMemtables = 0
 	}
 	opts.Logger = seg.logger
 	seg.dataDB = kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
