@@ -37,13 +37,6 @@ func newBadgerKVStore(rootDir string, logger *logging.PrefixLogger, opts badger.
 	return kvStore
 }
 
-func NewBadgerKVStoreWithDB(rootDir string, db *badger.DB) *BadgerKVStore {
-	kvStore := new(BadgerKVStore)
-	kvStore.rootDir = rootDir
-	kvStore.db = db
-	return kvStore
-}
-
 func (kvStore *BadgerKVStore) initialize(opts badger.Options) {
 	kvStore.logger.Infof("Initializing badger KV store located at: %s", kvStore.rootDir)
 	var err error
