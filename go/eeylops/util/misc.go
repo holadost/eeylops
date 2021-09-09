@@ -115,7 +115,7 @@ func MinIntSlice(a []int64) (int64, error) {
 
 func MinUintSlice(a []uint64) (uint64, error) {
 	if len(a) == 0 {
-		return -1, emptySliceErr
+		return 0, emptySliceErr
 	}
 	min := uint64(math.MaxUint64)
 	for _, e := range a {
