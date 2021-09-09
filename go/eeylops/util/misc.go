@@ -2,7 +2,9 @@ package util
 
 import (
 	"encoding/binary"
+	"errors"
 	"github.com/golang/glog"
+	"math"
 	"os"
 )
 
@@ -40,4 +42,86 @@ func ContainsInt(s []int, e int) bool {
 		}
 	}
 	return false
+}
+
+func MaxInt(a int64, b int64) int64 {
+	if a <= b {
+		return b
+	}
+	return a
+}
+
+func MaxUint(a uint64, b uint64) uint64 {
+	if a <= b {
+		return b
+	}
+	return a
+}
+
+func MinInt(a int64, b int64) int64 {
+	if a <= b {
+		return a
+	}
+	return b
+}
+
+func MinUint(a uint64, b uint64) uint64 {
+	if a <= b {
+		return a
+	}
+	return b
+}
+
+var emptySliceErr = errors.New("empty slice")
+
+func MaxIntSlice(a []int64) (int64, error) {
+	if len(a) == 0 {
+		return -1, emptySliceErr
+	}
+	max := int64(math.MinInt64)
+	for _, e := range a {
+		if e >= max {
+			max = e
+		}
+	}
+	return max, nil
+}
+
+func MaxUintSlice(a []uint64) (uint64, error) {
+	if len(a) == 0 {
+		return 0, emptySliceErr
+	}
+	max := uint64(0)
+	for _, e := range a {
+		if e >= max {
+			max = e
+		}
+	}
+	return max, nil
+}
+
+func MinIntSlice(a []int64) (int64, error) {
+	if len(a) == 0 {
+		return -1, emptySliceErr
+	}
+	min := int64(math.MaxInt64)
+	for _, e := range a {
+		if e <= min {
+			min = e
+		}
+	}
+	return min, nil
+}
+
+func MinUintSlice(a []uint64) (uint64, error) {
+	if len(a) == 0 {
+		return -1, emptySliceErr
+	}
+	min := uint64(math.MaxUint64)
+	for _, e := range a {
+		if e <= min {
+			min = e
+		}
+	}
+	return min, nil
 }

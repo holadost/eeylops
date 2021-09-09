@@ -380,7 +380,7 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	}
 	totalSize := int64((numIters * batchSize) * payloadSize)
 	totalIndexes := int64(len(bds.timestampBRI))
-	expectedIndexes := totalSize / kIndexEveryNBytes
+	expectedIndexes := totalSize / kBlockRangeIndexSizeBytes
 	if !((totalIndexes == expectedIndexes) || (totalIndexes == expectedIndexes+1) || (totalIndexes == expectedIndexes-1)) {
 		glog.Fatalf("Expected around %d indexes. Got: %d", expectedIndexes, totalIndexes)
 	}

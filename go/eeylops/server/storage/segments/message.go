@@ -75,7 +75,7 @@ func (msg *Message) Serialize() []byte {
 func prepareMessageValues(values [][]byte, ts int64, currIndexBatchSizeBytes int64, nextOffset base.Offset) ([][]byte, []TimestampIndexEntry, int64) {
 	var tse []TimestampIndexEntry
 	retValues := make([][]byte, len(values))
-	pendingBeforeNextIndex := kIndexEveryNBytes - currIndexBatchSizeBytes
+	pendingBeforeNextIndex := kBlockRangeIndexSizeBytes - currIndexBatchSizeBytes
 	for ii, value := range values {
 		var msg Message
 		msg.SetTimestamp(ts)
@@ -84,14 +84,14 @@ func prepareMessageValues(values [][]byte, ts int64, currIndexBatchSizeBytes int
 		valSize := int64(len(retValues[ii]))
 		pendingBeforeNextIndex -= valSize
 		if pendingBeforeNextIndex <= 0 {
-			pendingBeforeNextIndex = kIndexEveryNBytes
+			pendingBeforeNextIndex = kBlockRangeIndexSizeBytes
 			var entry TimestampIndexEntry
 			entry.SetOffset(nextOffset + base.Offset(ii))
 			entry.SetTimestamp(ts)
 			tse = append(tse, entry)
 		}
 	}
-	return retValues, tse, kIndexEveryNBytes - pendingBeforeNextIndex
+	return retValues, tse, kBlockRangeIndexSizeBytes - pendingBeforeNextIndex
 }
 
 type TimestampIndexEntry struct {

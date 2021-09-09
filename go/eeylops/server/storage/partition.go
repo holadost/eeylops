@@ -5,6 +5,7 @@ import (
 	"eeylops/server/base"
 	sbase "eeylops/server/storage/base"
 	"eeylops/server/storage/segments"
+	"eeylops/util"
 	"eeylops/util/logging"
 	"flag"
 	"fmt"
@@ -392,23 +393,33 @@ func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg
 		ret.NextOffset = -1
 		return
 	}
+	if arg.EndTimestamp > 0 {
+		if arg.StartTimestamp >= arg.EndTimestamp {
+			p.logger.Errorf("Invalid timestamps. Chosen Start TS: %d, Chosen End TS: %d",
+				arg.StartTimestamp, arg.EndTimestamp)
+			ret.Error = ErrPartitionScan
+			ret.NextOffset = -1
+			return
+		}
+	}
 	now := time.Now().UnixNano()
 	startTs := arg.StartTimestamp
-	firstUnexpiredTs := now - (int64(p.ttlSeconds) * (1e9))
-	if startTs < firstUnexpiredTs {
-		startTs = firstUnexpiredTs
+	firstSegTs, _ := p.segments[0].GetMsgTimestampRange()
+	startTsHint := util.MaxInt(now-(int64(p.ttlSeconds)*(1e9)), firstSegTs)
+	if startTs < startTsHint {
+		startTs = startTsHint
 	}
 	endTs := now
 	if arg.EndTimestamp > 0 {
 		endTs = arg.EndTimestamp
 	}
 	if startTs >= endTs {
-		p.logger.Errorf("Invalid timestamps. Chosen Start TS: %d, Chosen End TS: %d", startTs, endTs)
+		// This could have happened if the user explicitly asked for messages with an end timestamp, but we found
+		// that the first unexpired message in the partition has a timestamp >= the end timestamp.
 		ret.Error = nil
 		ret.NextOffset = -1
 		return
 	}
-
 	startIdx, endIdx := p.getSegmentsByTimestamp(startTs, endTs)
 	if startIdx == -1 {
 		// We didn't find any segments. The scan is complete.

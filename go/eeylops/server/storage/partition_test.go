@@ -10,6 +10,7 @@ import (
 	"github.com/golang/glog"
 	"math/rand"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -466,23 +467,26 @@ func TestPartitionManager(t *testing.T) {
 func TestPartitionScanTimestamp(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionScanTimestamp")
 	testDir := testutil.CreateTestDir(t, "TestPartitionScanTimestamp")
+	runtime.GOMAXPROCS(16)
+	ttlSeconds := 15
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
 		RootDirectory:                  testDir,
-		ExpiredSegmentPollIntervalSecs: 10,
-		LiveSegmentPollIntervalSecs:    2,
+		ExpiredSegmentPollIntervalSecs: 1,
+		LiveSegmentPollIntervalSecs:    1,
 		NumRecordsPerSegmentThreshold:  1000,
 		MaxScanSizeBytes:               15 * 1024 * 1024,
-		TTLSeconds:                     15,
+		TTLSeconds:                     ttlSeconds,
 	}
 	p := NewPartition(opts)
-	numIters := 5000
+	numIters := 5005
 	batchSize := 10
 	var timestamps []int64
 	token := make([]byte, 1024)
 	rand.Read(token)
 	producer := func() {
+		timestamps = nil
 		for ii := 0; ii < numIters; ii++ {
 			now := time.Now().UnixNano()
 			var arg sbase.AppendEntriesArg
@@ -507,6 +511,7 @@ func TestPartitionScanTimestamp(t *testing.T) {
 	sarg.NumMessages = uint64(batchSize)
 	sarg.StartOffset = -1
 	defCtx := context.Background()
+	now := time.Now()
 	for ii := 1; ii < len(timestamps); ii++ {
 		sarg.StartTimestamp = timestamps[ii-1]
 		sarg.EndTimestamp = timestamps[ii]
@@ -524,4 +529,72 @@ func TestPartitionScanTimestamp(t *testing.T) {
 			}
 		}
 	}
+	glog.Infof("Consumer done. Total time: %v", time.Since(now))
+	oldTimestamps := append([]int64{}, timestamps...)
+	totalDuration := time.Since(start)
+	glog.Infof("Waiting for segments to expire!")
+	time.Sleep(time.Duration(ttlSeconds)*time.Second - totalDuration + time.Duration(ttlSeconds-4)*time.Second)
+	glog.Infof("All segments must have expired. Starting producer again")
+	producer()
+
+	glog.Infof("Starting consumer but checking with old timestamps!")
+	sarg.NumMessages = uint64(batchSize)
+	sarg.StartOffset = -1
+	for ii := 1; ii < len(oldTimestamps); ii++ {
+		sarg.StartTimestamp = oldTimestamps[ii-1]
+		sarg.EndTimestamp = oldTimestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != 0 {
+			glog.Fatalf("Mismatch. Expected 0 values, got: %d. Iteration: %d", len(sret.Values), ii)
+		}
+		if sret.NextOffset != -1 {
+			glog.Fatalf("Next offset mismatch. Expected: %d, got: %d, iteration: %d",
+				-1, sret.NextOffset, ii)
+		}
+	}
+
+	glog.Infof("Starting consumer but checking with old start timestamps but new end timestamp")
+	sarg.NumMessages = uint64(batchSize)
+	sarg.StartOffset = -1
+	for ii := 1; ii < len(oldTimestamps); ii++ {
+		sarg.StartTimestamp = oldTimestamps[ii-1]
+		sarg.EndTimestamp = timestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != batchSize {
+			glog.Fatalf("Mismatch. Expected %d values, got: %d. Iteration: %d", batchSize, len(sret.Values), ii)
+		}
+		for jj := 0; jj < batchSize; jj++ {
+			expected := base.Offset(numIters*batchSize + jj)
+			got := sret.Values[jj].Offset
+			if got != expected {
+				glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expected, got)
+			}
+		}
+	}
+
+	glog.Infof("Starting consumer but checking with old new start and end timestamps")
+	for ii := 1; ii < len(timestamps); ii++ {
+		sarg.StartTimestamp = timestamps[ii-1]
+		sarg.EndTimestamp = timestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != batchSize {
+			glog.Fatalf("Mismatch. Expected %d values, got: %d. Iteration: %d", batchSize, len(sret.Values), ii)
+		}
+		for jj := 0; jj < batchSize; jj++ {
+			expected := base.Offset(numIters*batchSize) + base.Offset(((ii-1)*batchSize)+jj)
+			if sret.Values[jj].Offset != expected {
+				glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expected, sret.Values[jj].Offset)
+			}
+		}
+	}
+	glog.Infof("Partition timestamp test finished successfully!")
 }
