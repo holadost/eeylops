@@ -463,9 +463,9 @@ func TestPartitionManager(t *testing.T) {
 	p.Close()
 }
 
-func TestPartitionScan2(t *testing.T) {
-	testutil.LogTestMarker("TestPartitionScan2")
-	testDir := testutil.CreateTestDir(t, "TestPartitionScan2")
+func TestPartitionScanTimestamp(t *testing.T) {
+	testutil.LogTestMarker("TestPartitionScanTimestamp")
+	testDir := testutil.CreateTestDir(t, "TestPartitionScanTimestamp")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -474,10 +474,10 @@ func TestPartitionScan2(t *testing.T) {
 		LiveSegmentPollIntervalSecs:    2,
 		NumRecordsPerSegmentThreshold:  1000,
 		MaxScanSizeBytes:               15 * 1024 * 1024,
-		TTLSeconds:                     5,
+		TTLSeconds:                     15,
 	}
 	p := NewPartition(opts)
-	numIters := 50
+	numIters := 5000
 	batchSize := 10
 	var timestamps []int64
 	token := make([]byte, 1024)
@@ -502,7 +502,7 @@ func TestPartitionScan2(t *testing.T) {
 	start := time.Now()
 	producer()
 	glog.Infof("Producer done. Total time: %v", time.Since(start))
-
+	glog.Infof("Starting consumer!")
 	var sarg sbase.ScanEntriesArg
 	sarg.NumMessages = uint64(batchSize)
 	sarg.StartOffset = -1
@@ -515,7 +515,7 @@ func TestPartitionScan2(t *testing.T) {
 			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
 		}
 		if len(sret.Values) != batchSize {
-			glog.Fatalf("Mismatch. Expected %d values, got: %d", batchSize, len(sret.Values))
+			glog.Fatalf("Mismatch. Expected %d values, got: %d. Iteration: %d", batchSize, len(sret.Values), ii)
 		}
 		for jj := 0; jj < batchSize; jj++ {
 			expected := base.Offset(((ii - 1) * batchSize) + jj)
