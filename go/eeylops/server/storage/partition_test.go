@@ -10,7 +10,6 @@ import (
 	"github.com/golang/glog"
 	"math/rand"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -467,7 +466,6 @@ func TestPartitionManager(t *testing.T) {
 func TestPartitionScanTimestamp(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionScanTimestamp")
 	testDir := testutil.CreateTestDir(t, "TestPartitionScanTimestamp")
-	runtime.GOMAXPROCS(16)
 	ttlSeconds := 30
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
