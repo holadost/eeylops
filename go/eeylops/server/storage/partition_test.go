@@ -468,7 +468,7 @@ func TestPartitionScanTimestamp(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionScanTimestamp")
 	testDir := testutil.CreateTestDir(t, "TestPartitionScanTimestamp")
 	runtime.GOMAXPROCS(16)
-	ttlSeconds := 15
+	ttlSeconds := 30
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -480,7 +480,7 @@ func TestPartitionScanTimestamp(t *testing.T) {
 		TTLSeconds:                     ttlSeconds,
 	}
 	p := NewPartition(opts)
-	numIters := 5005
+	numIters := 5000
 	batchSize := 10
 	var timestamps []int64
 	token := make([]byte, 1024)
@@ -531,13 +531,15 @@ func TestPartitionScanTimestamp(t *testing.T) {
 	}
 	glog.Infof("Consumer done. Total time: %v", time.Since(now))
 	oldTimestamps := append([]int64{}, timestamps...)
-	totalDuration := time.Since(start)
-	glog.Infof("Waiting for segments to expire!")
-	time.Sleep(time.Duration(ttlSeconds)*time.Second - totalDuration + time.Duration(ttlSeconds-4)*time.Second)
-	glog.Infof("All segments must have expired. Starting producer again")
+	glog.Infof("Waiting for some segments to expire but not all")
+	time.Sleep(time.Duration(ttlSeconds-8) * time.Second)
+
+	glog.Infof("Some or all segments must have expired by now. Starting producer again")
 	producer()
+	glog.Infof("Producer has finished")
 
 	glog.Infof("Starting consumer but checking with old timestamps!")
+	now = time.Now()
 	sarg.NumMessages = uint64(batchSize)
 	sarg.StartOffset = -1
 	for ii := 1; ii < len(oldTimestamps); ii++ {
@@ -555,8 +557,10 @@ func TestPartitionScanTimestamp(t *testing.T) {
 				-1, sret.NextOffset, ii)
 		}
 	}
+	glog.Infof("Consumer with old timestamps finished. Total Time: %v", time.Since(now))
 
 	glog.Infof("Starting consumer but checking with old start timestamps but new end timestamp")
+	now = time.Now()
 	sarg.NumMessages = uint64(batchSize)
 	sarg.StartOffset = -1
 	for ii := 1; ii < len(oldTimestamps); ii++ {
@@ -573,12 +577,15 @@ func TestPartitionScanTimestamp(t *testing.T) {
 			expected := base.Offset(numIters*batchSize + jj)
 			got := sret.Values[jj].Offset
 			if got != expected {
-				glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expected, got)
+				glog.Fatalf("Offset mismatch. Expected: %d, got: %d, iteration: %d, Sarg: %v",
+					expected, got, ii, sarg)
 			}
 		}
 	}
+	glog.Infof("Consumer with old and new timestamps done. Total Time: %v", time.Since(now))
 
-	glog.Infof("Starting consumer but checking with old new start and end timestamps")
+	glog.Infof("Starting consumer but checking with new start and end timestamps")
+	now = time.Now()
 	for ii := 1; ii < len(timestamps); ii++ {
 		sarg.StartTimestamp = timestamps[ii-1]
 		sarg.EndTimestamp = timestamps[ii]
@@ -596,5 +603,6 @@ func TestPartitionScanTimestamp(t *testing.T) {
 			}
 		}
 	}
+	glog.Infof("Consumer has finished with new timestamps. Total Time: %v", time.Since(now))
 	glog.Infof("Partition timestamp test finished successfully!")
 }
