@@ -1,6 +1,7 @@
-package kv_store
+package cf_store
 
 import (
+	"eeylops/server/storage/kv_store"
 	"eeylops/util/logging"
 	"github.com/dgraph-io/badger/v2"
 	"os"
@@ -58,6 +59,43 @@ func (cfStore *BadgerCFStore) Size() int64 {
 	return cfStore.internalStore.Size()
 }
 
+func (cfStore *BadgerCFStore) Get(key *KVStoreKey) (*KVStoreEntry, error) {
+	return cfStore.internalStore.Get(key)
+}
+
+func (cfStore *BadgerCFStore) Put(entry *KVStoreEntry) error {
+	return cfStore.internalStore.Put(entry)
+}
+
+func (cfStore *BadgerCFStore) Delete(key *KVStoreKey) error {
+	return cfStore.internalStore.Delete(key)
+}
+
+func (cfStore *BadgerCFStore) Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
+	entries []*KVStoreEntry, nextKey []byte, retErr error) {
+	return cfStore.internalStore.Scan(cf, startKey, numValues, scanSizeBytes, reverse)
+}
+
+func (cfStore *BadgerCFStore) MultiGet(keys []*KVStoreKey) (values []*KVStoreEntry, errs []error) {
+	return cfStore.internalStore.MultiGet(keys)
+}
+
+func (cfStore *BadgerCFStore) BatchPut(entries []*KVStoreEntry) error {
+	return cfStore.internalStore.BatchPut(entries)
+}
+
+func (cfStore *BadgerCFStore) BatchDelete(keys []*KVStoreKey) error {
+	return cfStore.internalStore.BatchDelete(keys)
+}
+
+func (cfStore *BadgerCFStore) NewScanner(cf string, startKey []byte, reverse bool) kv_store.Scanner {
+	return nil
+}
+
+func (cfStore *BadgerCFStore) NewTransaction() Transaction {
+	return newBadgerCFStoreTransaction(cfStore.internalStore)
+}
+
 /*************************************************** INTERNAL CF STORE ************************************************/
 type internalBadgerCFStore struct {
 	db      *badger.DB
@@ -94,34 +132,34 @@ func (cfStore *internalBadgerCFStore) AddColumnFamily(cf string) error {
 // Get gets the value associated with the key.
 func (cfStore *internalBadgerCFStore) Get(key *KVStoreKey) (*KVStoreEntry, error) {
 	if cfStore.closed {
-		return nil, ErrKVStoreClosed
+		return nil, kv_store.ErrKVStoreClosed
 	}
 	txn := cfStore.db.NewTransaction(false)
 	defer txn.Discard()
-	return cfStore.GetWithTxn(txn, key.ColumnFamily, key.Key)
+	return cfStore.GetWithTxn(txn, key)
 }
 
 // GetWithTxn gets the value associated with the key. This method requires a transaction to be passed. Transaction
 // commits and rollbacks must be handled by the caller.
-func (cfStore *internalBadgerCFStore) GetWithTxn(txn *badger.Txn, cf string, key []byte) (*KVStoreEntry, error) {
+func (cfStore *internalBadgerCFStore) GetWithTxn(txn *badger.Txn, key *KVStoreKey) (*KVStoreEntry, error) {
 	if cfStore.closed {
-		return nil, ErrKVStoreClosed
+		return nil, kv_store.ErrKVStoreClosed
 	}
 	var val []byte
-	item, err := txn.Get(cfStore.buildCFKey(cf, key))
+	item, err := txn.Get(cfStore.buildCFKey(key.ColumnFamily, key.Key))
 	var entry KVStoreEntry
-	entry.Key = key
-	entry.ColumnFamily = cf
+	entry.Key = key.Key
+	entry.ColumnFamily = key.ColumnFamily
 	if err != nil {
 		if err == badger.ErrKeyNotFound {
-			return &entry, ErrKVStoreKeyNotFound
+			return &entry, kv_store.ErrKVStoreKeyNotFound
 		} else {
-			return &entry, ErrKVStoreBackend
+			return &entry, kv_store.ErrKVStoreBackend
 		}
 	}
 	val, err = item.ValueCopy(nil)
 	if err != nil {
-		return &entry, ErrKVStoreBackend
+		return &entry, kv_store.ErrKVStoreBackend
 	}
 	entry.Value = val
 	return &entry, nil
@@ -130,18 +168,18 @@ func (cfStore *internalBadgerCFStore) GetWithTxn(txn *badger.Txn, cf string, key
 // Put gets the value associated with the key.
 func (cfStore *internalBadgerCFStore) Put(entry *KVStoreEntry) error {
 	if cfStore.closed {
-		return ErrKVStoreClosed
+		return kv_store.ErrKVStoreClosed
 	}
 	txn := cfStore.db.NewTransaction(true)
 	defer txn.Discard()
 	var err error
-	if err = cfStore.PutWithTxn(txn, entry.ColumnFamily, entry.Key, entry.Value); err == nil {
+	if err = cfStore.PutWithTxn(txn, entry); err == nil {
 		if cErr := txn.Commit(); cErr != nil {
 			if cErr == badger.ErrConflict {
-				return ErrKVStoreConflict
+				return kv_store.ErrKVStoreConflict
 			}
 			cfStore.logger.Errorf("Unable to commit transaction due to err: %s", err.Error())
-			return ErrKVStoreBackend
+			return kv_store.ErrKVStoreBackend
 		}
 		return nil
 	}
@@ -150,15 +188,15 @@ func (cfStore *internalBadgerCFStore) Put(entry *KVStoreEntry) error {
 
 // PutWithTxn puts a key value pair in the DB. If the key already exists, it would be updated. This method
 // requires a transaction to be passed. Transaction commits and rollbacks must be handled by the caller.
-func (cfStore *internalBadgerCFStore) PutWithTxn(txn *badger.Txn, cf string, key []byte, value []byte) error {
+func (cfStore *internalBadgerCFStore) PutWithTxn(txn *badger.Txn, entry *KVStoreEntry) error {
 	if cfStore.closed {
 		cfStore.logger.Errorf("KV store is closed")
-		return ErrKVStoreClosed
+		return kv_store.ErrKVStoreClosed
 	}
-	err := txn.Set(cfStore.buildCFKey(cf, key), value)
+	err := txn.Set(cfStore.buildCFKey(entry.ColumnFamily, entry.Key), entry.Value)
 	if err != nil {
-		cfStore.logger.Errorf("Unable to put key: %v due to err: %s", key, err.Error())
-		return ErrKVStoreBackend
+		cfStore.logger.Errorf("Unable to put key: %v due to err: %s", entry.Key, err.Error())
+		return kv_store.ErrKVStoreBackend
 	}
 	return nil
 }
@@ -167,29 +205,29 @@ func (cfStore *internalBadgerCFStore) PutWithTxn(txn *badger.Txn, cf string, key
 func (cfStore *internalBadgerCFStore) Delete(key *KVStoreKey) error {
 	if cfStore.closed {
 		cfStore.logger.Errorf("KV store is closed")
-		return ErrKVStoreClosed
+		return kv_store.ErrKVStoreClosed
 	}
 	txn := cfStore.db.NewTransaction(true)
 	defer txn.Discard()
-	err := cfStore.DeleteWithTxn(txn, key.ColumnFamily, key.Key)
+	err := cfStore.DeleteWithTxn(txn, key)
 	if err != nil {
 		return err
 	}
 	err = txn.Commit()
 	if err != nil {
 		cfStore.logger.Errorf("Unable to commit transaction due to err: %s", err.Error())
-		return ErrKVStoreBackend
+		return kv_store.ErrKVStoreBackend
 	}
 	return nil
 }
 
 // DeleteWithTxn removes the given key value pair from the DB. This method requires a transaction to be passed.
 // Transaction commits and rollbacks must be handled by the caller.
-func (cfStore *internalBadgerCFStore) DeleteWithTxn(txn *badger.Txn, cf string, key []byte) error {
-	err := txn.Delete(cfStore.buildCFKey(cf, key))
+func (cfStore *internalBadgerCFStore) DeleteWithTxn(txn *badger.Txn, key *KVStoreKey) error {
+	err := txn.Delete(cfStore.buildCFKey(key.ColumnFamily, key.Key))
 	if err != nil {
 		cfStore.logger.Errorf("Unable to delete key: %v due to err: %s", key, err.Error())
-		return ErrKVStoreBackend
+		return kv_store.ErrKVStoreBackend
 	}
 	return nil
 }
@@ -257,7 +295,7 @@ func (cfStore *internalBadgerCFStore) MultiGet(keys []*KVStoreKey) (values []*KV
 		cfStore.logger.Errorf("KV store is closed")
 		for ii := 0; ii < len(keys); ii++ {
 			values = append(values, &KVStoreEntry{})
-			errs = append(errs, ErrKVStoreClosed)
+			errs = append(errs, kv_store.ErrKVStoreClosed)
 		}
 		return
 	}
@@ -274,10 +312,10 @@ func (cfStore *internalBadgerCFStore) MultiGetWithTxn(txn *badger.Txn, keys []*K
 		item, err := txn.Get(cfStore.buildCFKey(key.ColumnFamily, key.Key))
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
-				errs = append(errs, ErrKVStoreKeyNotFound)
+				errs = append(errs, kv_store.ErrKVStoreKeyNotFound)
 			} else {
 				cfStore.logger.Errorf("Unable to get key: %v due to err: %s", key, err.Error())
-				errs = append(errs, ErrKVStoreGeneric)
+				errs = append(errs, kv_store.ErrKVStoreGeneric)
 			}
 			values = append(values, nil)
 			continue
@@ -285,7 +323,7 @@ func (cfStore *internalBadgerCFStore) MultiGetWithTxn(txn *badger.Txn, keys []*K
 		tmpValue, err := item.ValueCopy(nil)
 		if err != nil {
 			cfStore.logger.Errorf("Unable to parse value for key: %v due to err: %s", key, err.Error())
-			errs = append(errs, ErrKVStoreGeneric)
+			errs = append(errs, kv_store.ErrKVStoreGeneric)
 			values = append(values, nil)
 			continue
 		}
@@ -303,7 +341,7 @@ func (cfStore *internalBadgerCFStore) MultiGetWithTxn(txn *badger.Txn, keys []*K
 func (cfStore *internalBadgerCFStore) BatchPut(entries []*KVStoreEntry) error {
 	if cfStore.closed {
 		cfStore.logger.Errorf("KV store is already closed")
-		return ErrKVStoreBackend
+		return kv_store.ErrKVStoreBackend
 	}
 	txn := cfStore.db.NewTransaction(true)
 	defer txn.Discard()
@@ -312,10 +350,10 @@ func (cfStore *internalBadgerCFStore) BatchPut(entries []*KVStoreEntry) error {
 		cerr := txn.Commit()
 		if cerr != nil {
 			if cerr == badger.ErrConflict {
-				return ErrKVStoreConflict
+				return kv_store.ErrKVStoreConflict
 			}
 			cfStore.logger.Errorf("Unable to commit transaction due to err: %s", cerr.Error())
-			return ErrKVStoreBackend
+			return kv_store.ErrKVStoreBackend
 		}
 		return nil
 	}
@@ -328,7 +366,7 @@ func (cfStore *internalBadgerCFStore) BatchPutWithTxn(txn *badger.Txn, entries [
 	for _, entry := range entries {
 		if err := txn.Set(cfStore.buildCFKey(entry.ColumnFamily, entry.Key), entry.Value); err != nil {
 			cfStore.logger.Errorf("Unable to set keys due to err: %s", err.Error())
-			return ErrKVStoreBackend
+			return kv_store.ErrKVStoreBackend
 		}
 	}
 	return nil
@@ -338,7 +376,7 @@ func (cfStore *internalBadgerCFStore) BatchPutWithTxn(txn *badger.Txn, entries [
 func (cfStore *internalBadgerCFStore) BatchDelete(keys []*KVStoreKey) error {
 	if cfStore.closed {
 		cfStore.logger.Errorf("KV store is closed")
-		return ErrKVStoreClosed
+		return kv_store.ErrKVStoreClosed
 	}
 	txn := cfStore.db.NewTransaction(true)
 	defer txn.Discard()
@@ -349,7 +387,7 @@ func (cfStore *internalBadgerCFStore) BatchDelete(keys []*KVStoreKey) error {
 	cerr := txn.Commit()
 	if cerr != nil {
 		cfStore.logger.Errorf("Unable to commit batch delete transaction due to err: %s", cerr.Error())
-		return ErrKVStoreBackend
+		return kv_store.ErrKVStoreBackend
 	}
 	return nil
 }
@@ -366,9 +404,13 @@ func (cfStore *internalBadgerCFStore) BatchDeleteWithTxn(txn *badger.Txn, keys [
 	}
 	if err != nil {
 		cfStore.logger.Errorf("Unable to batch delete keys: %v due to err: %s", keys, err.Error())
-		return ErrKVStoreBackend
+		return kv_store.ErrKVStoreBackend
 	}
 	return nil
+}
+
+func (cfStore *internalBadgerCFStore) NewTransaction() *badger.Txn {
+	return cfStore.db.NewTransaction(true)
 }
 
 // Close the DB.
