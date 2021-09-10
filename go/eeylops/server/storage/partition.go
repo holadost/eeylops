@@ -190,7 +190,7 @@ func NewPartition(opts PartitionOpts) *Partition {
 	return p
 }
 
-// initialize initializes the partition.
+// initialize the partition.
 func (p *Partition) initialize() {
 	p.backgroundJobDone = make(chan bool)
 	p.snapshotChan = make(chan bool)
