@@ -5,7 +5,7 @@ import (
 	"unicode"
 )
 
-// BuildCFKey is a helper method that creates the key based on the CF.
+// BuildCFKey is a helper function that creates the key based on the CF.
 func BuildCFKey(cf string, key []byte) []byte {
 	if len(key) == 0 {
 		glog.Fatalf("Unable to build key since key is empty")
@@ -13,6 +13,7 @@ func BuildCFKey(cf string, key []byte) []byte {
 	return append(BuildCFPrefixBytes(cf), key...)
 }
 
+// BuildCFKeyWithCFPrefixBytes is a helper function that creates the key based using the given CF prefix bytes.
 func BuildCFKeyWithCFPrefixBytes(cfPrefix []byte, key []byte) []byte {
 	if len(key) == 0 || len(cfPrefix) == 0 {
 		glog.Fatalf("Unable to build key since key is empty")
@@ -20,13 +21,13 @@ func BuildCFKeyWithCFPrefixBytes(cfPrefix []byte, key []byte) []byte {
 	return append(cfPrefix, key...)
 }
 
-// BuildFirstCFKey is a helper method that creates the first key for a column family.
+// BuildFirstCFKey is a helper function that creates the first key for a column family.
 func BuildFirstCFKey(cf string) []byte {
 	cfKey := BuildCFPrefixBytes(cf)
 	return append(cfKey, make([]byte, kInternalMaxKeyLength-len(cfKey))...)
 }
 
-// BuildLastCFKey is a helper method that creates the last key for a column family.
+// BuildLastCFKey is a helper function that creates the last key for a column family.
 func BuildLastCFKey(cf string) []byte {
 	cfKey := BuildCFPrefixBytes(cf)
 	remBytes := make([]byte, kInternalMaxKeyLength-len(cfKey))
@@ -36,7 +37,7 @@ func BuildLastCFKey(cf string) []byte {
 	return append(cfKey, remBytes...)
 }
 
-// BuildCFPrefixBytes is a helper method that creates the CF prefix bytes.
+// BuildCFPrefixBytes is a helper function that creates the CF prefix bytes.
 func BuildCFPrefixBytes(cf string) []byte {
 	if len(cf) == 0 {
 		glog.Fatalf("Unable to build CF prefix bytes since no CF name is give")
@@ -44,7 +45,7 @@ func BuildCFPrefixBytes(cf string) []byte {
 	return append([]byte(cf), kSeparatorBytes...)
 }
 
-// ExtractUserKey is a helper method that extracts the user key from the full key which also includes the CF name.
+// ExtractUserKey is a helper function that extracts the user key from the full key which also includes the CF name.
 func ExtractUserKey(cf string, key []byte) []byte {
 	if len(key) == 0 {
 		glog.Fatalf("Unable to extract user key since the given full key is empty")
