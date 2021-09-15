@@ -6,7 +6,6 @@ import (
 	"eeylops/util/logging"
 	"github.com/dgraph-io/badger/v2"
 	"os"
-	"unicode"
 )
 
 const kMaxKeyLength = 60000
@@ -16,32 +15,21 @@ const kAllColumnFamiliesCFName = "cf"
 
 var kSeparatorBytes = []byte("::")
 
-type KVStoreEntry struct {
-	Key          []byte // Key.
-	Value        []byte // Value.
-	ColumnFamily string // Name of the column family.
-}
-
-type KVStoreKey struct {
-	Key          []byte // Key.
-	ColumnFamily string // Name of the column family.
-}
-
-type BadgerKVStore struct {
+type BadgerCFStore struct {
 	internalStore *internalBadgerKVStore
 }
 
-func NewBadgerKVStore(rootDir string, opts badger.Options) *BadgerKVStore {
+func NewBadgerCFStore(rootDir string, opts badger.Options) *BadgerCFStore {
 	logger := logging.NewPrefixLogger("badger_cf_store")
-	return newBadgerKVStore(rootDir, logger, opts)
+	return newBadgerCFStore(rootDir, logger, opts)
 }
 
-func NewBadgerKVStoreWithLogger(rootDir string, logger *logging.PrefixLogger,
-	opts badger.Options) *BadgerKVStore {
-	return newBadgerKVStore(rootDir, logger, opts)
+func NewBadgerCFStoreWithLogger(rootDir string, logger *logging.PrefixLogger,
+	opts badger.Options) *BadgerCFStore {
+	return newBadgerCFStore(rootDir, logger, opts)
 }
 
-func newBadgerKVStore(rootDir string, logger *logging.PrefixLogger, opts badger.Options) *BadgerKVStore {
+func newBadgerCFStore(rootDir string, logger *logging.PrefixLogger, opts badger.Options) *BadgerCFStore {
 	kvStore := new(internalBadgerKVStore)
 	kvStore.rootDir = rootDir
 	kvStore.logger = logger
@@ -51,53 +39,59 @@ func newBadgerKVStore(rootDir string, logger *logging.PrefixLogger, opts badger.
 	}
 	opts.Logger = logging.NewPrefixLoggerWithParentAndDepth("", logger, 1)
 	kvStore.initialize(opts)
-	return &BadgerKVStore{internalStore: kvStore}
+	return &BadgerCFStore{internalStore: kvStore}
 }
 
-func (kvStore *BadgerKVStore) GetDataDir() string {
-	return kvStore.internalStore.GetDataDir()
+func (cfStore *BadgerCFStore) GetDataDir() string {
+	return cfStore.internalStore.GetDataDir()
 }
 
 // Size returns the size of the KV store in bytes.
-func (kvStore *BadgerKVStore) Size() int64 {
-	return kvStore.internalStore.Size()
+func (cfStore *BadgerCFStore) Size() int64 {
+	return cfStore.internalStore.Size()
 }
 
-func (kvStore *BadgerKVStore) Get(key *KVStoreKey) (*KVStoreEntry, error) {
-	return kvStore.internalStore.Get(key)
+func (cfStore *BadgerCFStore) Get(key *KVStoreKey) (*KVStoreEntry, error) {
+	return cfStore.internalStore.Get(key)
 }
 
-func (kvStore *BadgerKVStore) Put(entry *KVStoreEntry) error {
-	return kvStore.internalStore.Put(entry)
+func (cfStore *BadgerCFStore) Put(entry *KVStoreEntry) error {
+	return cfStore.internalStore.Put(entry)
 }
 
-func (kvStore *BadgerKVStore) Delete(key *KVStoreKey) error {
-	return kvStore.internalStore.Delete(key)
+func (cfStore *BadgerCFStore) Delete(key *KVStoreKey) error {
+	return cfStore.internalStore.Delete(key)
 }
 
-func (kvStore *BadgerKVStore) Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
+func (cfStore *BadgerCFStore) Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
 	entries []*KVStoreEntry, nextKey []byte, retErr error) {
-	return kvStore.internalStore.Scan(cf, startKey, numValues, scanSizeBytes, reverse)
+	return cfStore.internalStore.Scan(cf, startKey, numValues, scanSizeBytes, reverse)
 }
 
-func (kvStore *BadgerKVStore) MultiGet(keys []*KVStoreKey) (values []*KVStoreEntry, errs []error) {
-	return kvStore.internalStore.BatchGet(keys)
+func (cfStore *BadgerCFStore) BatchGet(keys []*KVStoreKey) (values []*KVStoreEntry, errs []error) {
+	return cfStore.internalStore.BatchGet(keys)
 }
 
-func (kvStore *BadgerKVStore) BatchPut(entries []*KVStoreEntry) error {
-	return kvStore.internalStore.BatchPut(entries)
+func (cfStore *BadgerCFStore) BatchPut(entries []*KVStoreEntry) error {
+	return cfStore.internalStore.BatchPut(entries)
 }
 
-func (kvStore *BadgerKVStore) BatchDelete(keys []*KVStoreKey) error {
-	return kvStore.internalStore.BatchDelete(keys)
+func (cfStore *BadgerCFStore) BatchDelete(keys []*KVStoreKey) error {
+	return cfStore.internalStore.BatchDelete(keys)
 }
 
-func (kvStore *BadgerKVStore) NewScanner(cf string, startKey []byte, reverse bool) kv_store.Scanner {
-	return nil
+func (cfStore *BadgerCFStore) NewScanner(cf string, startKey []byte, reverse bool) (Scanner, error) {
+	if len(cf) == 0 {
+		cf = kDefaultCFName
+	}
+	if !IsColumnFamilyNameValid(cf) {
+		return nil, kv_store.ErrInvalidColumnFamilyName
+	}
+	return newBadgerScanner(cfStore.internalStore, cf, startKey, reverse), nil
 }
 
-func (kvStore *BadgerKVStore) NewTransaction() Transaction {
-	return newBadgerCFStoreTransaction(kvStore.internalStore)
+func (cfStore *BadgerCFStore) NewTransaction() Transaction {
+	return newBadgerCFStoreTransaction(cfStore.internalStore)
 }
 
 /*************************************************** INTERNAL CF STORE ************************************************/
@@ -121,7 +115,7 @@ func (ikvStore *internalBadgerKVStore) initialize(opts badger.Options) {
 
 	// Check if the default column families exist and if not, create them.
 	err = ikvStore.db.View(func(txn *badger.Txn) error {
-		_, txnerr := txn.Get(ikvStore.buildFirstCFKey(kDefaultCFName))
+		_, txnerr := txn.Get(BuildFirstCFKey(kDefaultCFName))
 		if txnerr != nil {
 			return txnerr
 		}
@@ -130,19 +124,19 @@ func (ikvStore *internalBadgerKVStore) initialize(opts badger.Options) {
 	if err != nil {
 		if err == badger.ErrKeyNotFound {
 			updateErr := ikvStore.db.Update(func(txn *badger.Txn) error {
-				txnerr := txn.Set(ikvStore.buildFirstCFKey(kDefaultCFName), kSeparatorBytes)
+				txnerr := txn.Set(BuildFirstCFKey(kDefaultCFName), kSeparatorBytes)
 				if txnerr != nil {
 					return txnerr
 				}
-				txnerr = txn.Set(ikvStore.buildLastCFKey(kDefaultCFName), kSeparatorBytes)
+				txnerr = txn.Set(BuildLastCFKey(kDefaultCFName), kSeparatorBytes)
 				if txnerr != nil {
 					return txnerr
 				}
-				txnerr = txn.Set(ikvStore.buildFirstCFKey(kAllColumnFamiliesCFName), kSeparatorBytes)
+				txnerr = txn.Set(BuildFirstCFKey(kAllColumnFamiliesCFName), kSeparatorBytes)
 				if txnerr != nil {
 					return txnerr
 				}
-				txnerr = txn.Set(ikvStore.buildLastCFKey(kAllColumnFamiliesCFName), kSeparatorBytes)
+				txnerr = txn.Set(BuildLastCFKey(kAllColumnFamiliesCFName), kSeparatorBytes)
 				if txnerr != nil {
 					return txnerr
 				}
@@ -158,18 +152,18 @@ func (ikvStore *internalBadgerKVStore) initialize(opts badger.Options) {
 	// Load column family names into memory.
 	txn := ikvStore.db.NewTransaction(false)
 	itr := txn.NewIterator(badger.DefaultIteratorOptions)
-	itr.Seek(ikvStore.buildFirstCFKey(kAllColumnFamiliesCFName))
+	itr.Seek(BuildFirstCFKey(kAllColumnFamiliesCFName))
 	if itr.Valid() {
 		itr.Next()
 	}
-	for ; itr.ValidForPrefix(ikvStore.buildCFPrefixBytes(kAllColumnFamiliesCFName)); itr.Next() {
+	for ; itr.ValidForPrefix(BuildCFPrefixBytes(kAllColumnFamiliesCFName)); itr.Next() {
 		item := itr.Item()
 		key := item.KeyCopy(nil)
-		if bytes.Compare(key, ikvStore.buildLastCFKey(kAllColumnFamiliesCFName)) == 0 {
+		if bytes.Compare(key, BuildLastCFKey(kAllColumnFamiliesCFName)) == 0 {
 			// We have reached the end. Return
 			return
 		}
-		cfName := string(ikvStore.extractUserKey(kAllColumnFamiliesCFName, key))
+		cfName := string(ExtractUserKey(kAllColumnFamiliesCFName, key))
 		ikvStore.cfMap[cfName] = struct{}{}
 	}
 	ikvStore.logger.Infof("Found %d column families in KV store", len(ikvStore.cfMap))
@@ -190,7 +184,7 @@ func (ikvStore *internalBadgerKVStore) AddColumnFamily(cf string) error {
 	if cf == kDefaultCFName || cf == kAllColumnFamiliesCFName {
 		return kv_store.ErrReservedColumnFamilyNames
 	}
-	if !isCFNameValid(cf) {
+	if !IsColumnFamilyNameValid(cf) {
 		return kv_store.ErrInvalidColumnFamilyName
 	}
 	if ikvStore.doesCFExist(cf) {
@@ -202,15 +196,15 @@ func (ikvStore *internalBadgerKVStore) AddColumnFamily(cf string) error {
 func (ikvStore *internalBadgerKVStore) addColumnFamilyInternal(cf string) error {
 	ikvStore.logger.Infof("Adding column family: %s", cf)
 	err := ikvStore.db.Update(func(txn *badger.Txn) error {
-		txnerr := txn.Set(ikvStore.buildFirstCFKey(cf), kSeparatorBytes)
+		txnerr := txn.Set(BuildFirstCFKey(cf), kSeparatorBytes)
 		if txnerr != nil {
 			return txnerr
 		}
-		txnerr = txn.Set(ikvStore.buildLastCFKey(cf), kSeparatorBytes)
+		txnerr = txn.Set(BuildLastCFKey(cf), kSeparatorBytes)
 		if txnerr != nil {
 			return txnerr
 		}
-		txnerr = txn.Set(ikvStore.buildCFKey(kAllColumnFamiliesCFName, []byte(cf)), kSeparatorBytes)
+		txnerr = txn.Set(BuildCFKey(kAllColumnFamiliesCFName, []byte(cf)), kSeparatorBytes)
 		if txnerr != nil {
 			return txnerr
 		}
@@ -253,7 +247,7 @@ func (ikvStore *internalBadgerKVStore) GetWithTxn(txn *badger.Txn, key *KVStoreK
 	if err != nil {
 		return nil, err
 	}
-	item, err := txn.Get(ikvStore.buildCFKey(cf, key.Key))
+	item, err := txn.Get(BuildCFKey(cf, key.Key))
 	var entry KVStoreEntry
 	entry.Key = key.Key
 	entry.ColumnFamily = key.ColumnFamily
@@ -304,7 +298,7 @@ func (ikvStore *internalBadgerKVStore) PutWithTxn(txn *badger.Txn, entry *KVStor
 	if err != nil {
 		return err
 	}
-	err = txn.Set(ikvStore.buildCFKey(cf, entry.Key), entry.Value)
+	err = txn.Set(BuildCFKey(cf, entry.Key), entry.Value)
 	if err != nil {
 		ikvStore.logger.Errorf("Unable to put key: %v due to err: %s", entry.Key, err.Error())
 		return kv_store.ErrKVStoreBackend
@@ -341,7 +335,7 @@ func (ikvStore *internalBadgerKVStore) DeleteWithTxn(txn *badger.Txn, key *KVSto
 	if err != nil {
 		return err
 	}
-	err = txn.Delete(ikvStore.buildCFKey(cf, key.Key))
+	err = txn.Delete(BuildCFKey(cf, key.Key))
 	if err != nil {
 		ikvStore.logger.Errorf("Unable to delete key: %v due to err: %s", key, err.Error())
 		return kv_store.ErrKVStoreBackend
@@ -376,13 +370,13 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 	if (startKey == nil) || len(startKey) == 0 {
 		itr.Rewind()
 		if !reverse {
-			itr.Seek(ikvStore.buildFirstCFKey(cf))
+			itr.Seek(BuildFirstCFKey(cf))
 		} else {
-			itr.Seek(ikvStore.buildLastCFKey(cf))
+			itr.Seek(BuildLastCFKey(cf))
 		}
 
 	} else {
-		itr.Seek(ikvStore.buildCFKey(cf, startKey))
+		itr.Seek(BuildCFKey(cf, startKey))
 	}
 	currSizeBytes := int64(0)
 	for ; itr.Valid(); itr.Next() {
@@ -390,7 +384,7 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 		valSize := item.ValueSize()
 		currSizeBytes += valSize
 		fullKey := item.KeyCopy(nil)
-		key := ikvStore.extractUserKey(cf, fullKey)
+		key := ExtractUserKey(cf, fullKey)
 		val, err := item.ValueCopy(nil)
 		if err != nil {
 			ikvStore.logger.Errorf("Unable to scan KV store due to err: %s", err)
@@ -438,7 +432,7 @@ func (ikvStore *internalBadgerKVStore) BatchGetWithTxn(txn *badger.Txn, keys []*
 		return
 	}
 	for _, key := range keys {
-		item, err := txn.Get(ikvStore.buildCFKey(key.ColumnFamily, key.Key))
+		item, err := txn.Get(BuildCFKey(key.ColumnFamily, key.Key))
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
 				errs = append(errs, kv_store.ErrKVStoreKeyNotFound)
@@ -492,7 +486,7 @@ func (ikvStore *internalBadgerKVStore) BatchPut(entries []*KVStoreEntry) error {
 // commits and rollbacks must be handled by the caller.
 func (ikvStore *internalBadgerKVStore) BatchPutWithTxn(txn *badger.Txn, entries []*KVStoreEntry) error {
 	for _, entry := range entries {
-		if err := txn.Set(ikvStore.buildCFKey(entry.ColumnFamily, entry.Key), entry.Value); err != nil {
+		if err := txn.Set(BuildCFKey(entry.ColumnFamily, entry.Key), entry.Value); err != nil {
 			ikvStore.logger.Errorf("Unable to set keys due to err: %s", err.Error())
 			return kv_store.ErrKVStoreBackend
 		}
@@ -525,7 +519,7 @@ func (ikvStore *internalBadgerKVStore) BatchDelete(keys []*KVStoreKey) error {
 func (ikvStore *internalBadgerKVStore) BatchDeleteWithTxn(txn *badger.Txn, keys []*KVStoreKey) error {
 	var err error
 	for _, key := range keys {
-		err := txn.Delete(ikvStore.buildCFKey(key.ColumnFamily, key.Key))
+		err := txn.Delete(BuildCFKey(key.ColumnFamily, key.Key))
 		if err != nil {
 			break
 		}
@@ -553,47 +547,6 @@ func (ikvStore *internalBadgerKVStore) Close() error {
 	return err
 }
 
-// buildFirstCFKey is a helper method that creates the first key for a column family.
-func (ikvStore *internalBadgerKVStore) buildFirstCFKey(cf string) []byte {
-	cfKey := ikvStore.buildCFPrefixBytes(cf)
-	return append(cfKey, make([]byte, kInternalMaxKeyLength-len(cfKey))...)
-}
-
-// buildLastCFKey is a helper method that creates the last key for a column family.
-func (ikvStore *internalBadgerKVStore) buildLastCFKey(cf string) []byte {
-	cfKey := ikvStore.buildCFPrefixBytes(cf)
-	remBytes := make([]byte, kInternalMaxKeyLength-len(cfKey))
-	for ii := 0; ii < len(remBytes); ii++ {
-		remBytes[ii] = byte(255)
-	}
-	return append(cfKey, remBytes...)
-}
-
-// buildCFKey is a helper method that creates the key based on the CF.
-func (ikvStore *internalBadgerKVStore) buildCFKey(cf string, key []byte) []byte {
-	if len(key) == 0 {
-		ikvStore.logger.Fatalf("Unable to build key since key is empty")
-	}
-	return append(ikvStore.buildCFPrefixBytes(cf), key...)
-}
-
-// extractUserKey is a helper method that extracts the user key from the full key which also includes the CF name.
-func (ikvStore *internalBadgerKVStore) extractUserKey(cf string, key []byte) []byte {
-	if len(key) == 0 {
-		ikvStore.logger.Fatalf("Unable to extract user key since the given full key is empty")
-	}
-	cfKey := ikvStore.buildCFPrefixBytes(cf)
-	return key[len(cfKey):]
-}
-
-// buildCFPrefixBytes is a helper method that creates the CF prefix bytes.
-func (ikvStore *internalBadgerKVStore) buildCFPrefixBytes(cf string) []byte {
-	if len(cf) == 0 {
-		ikvStore.logger.Fatalf("Unable to build CF prefix bytes since no CF name is give")
-	}
-	return append([]byte(cf), kSeparatorBytes...)
-}
-
 // sanitizeCFName returns the sanitized CF name. It also returns a bool indicating whether the sanitization was
 // successful or not!
 func (ikvStore *internalBadgerKVStore) sanitizeCFName(name string) (string, error) {
@@ -603,21 +556,8 @@ func (ikvStore *internalBadgerKVStore) sanitizeCFName(name string) (string, erro
 	} else {
 		cf = name
 	}
-	if isCFNameValid(cf) {
+	if IsColumnFamilyNameValid(cf) {
 		return name, nil
 	}
 	return "", kv_store.ErrInvalidColumnFamilyName
-}
-
-func isCFNameValid(name string) bool {
-	if len(name) == 0 {
-		return false
-	}
-	for _, cc := range name {
-		if unicode.IsDigit(cc) || unicode.IsLetter(cc) || cc == '_' {
-			continue
-		}
-		return false
-	}
-	return true
 }
