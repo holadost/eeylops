@@ -18,4 +18,17 @@ var (
 	// ErrKVStoreConflict is returned when there is a conflict error. This can happen when there are simultaneous
 	// transactions.
 	ErrKVStoreConflict = errors.New("ErrKVStoreConflict: kv store conflict error")
+
+	// ErrReservedColumnFamilyNames is returned when the CF name provided is reserved.
+	ErrReservedColumnFamilyNames = errors.New("ErrReservedColumnFamilyNames: cannot use reserved column " +
+		"family names")
+
+	// ErrInvalidColumnFamilyName is returned when the CF name provided is invalid.
+	ErrInvalidColumnFamilyName = errors.New("ErrInvalidColumnFamilyName: invalid CF name")
+
+	// ErrColumnFamilyExists is returned when the CF already exists.
+	ErrColumnFamilyExists = errors.New("ErrColumnFamilyExists: column family already exists")
+
+	// ErrColumnFamilyNotFound is returned when the CF already exists.
+	ErrColumnFamilyNotFound = errors.New("ErrColumnFamilyNotFound: column family not found")
 )

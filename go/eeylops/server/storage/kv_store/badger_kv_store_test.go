@@ -49,7 +49,7 @@ func TestBadgerKVStore(t *testing.T) {
 	}
 
 	// Batch read and verify values
-	glog.Infof("Testing MultiGet")
+	glog.Infof("Testing BatchGet")
 	for iter := 0; iter < numIters; iter++ {
 		var keys [][]byte
 		var values [][]byte

@@ -5,11 +5,11 @@ import (
 )
 
 type BadgerCFStoreTransaction struct {
-	store *internalBadgerCFStore
+	store *internalBadgerKVStore
 	txn   *badger.Txn
 }
 
-func newBadgerCFStoreTransaction(store *internalBadgerCFStore) *BadgerCFStoreTransaction {
+func newBadgerCFStoreTransaction(store *internalBadgerKVStore) *BadgerCFStoreTransaction {
 	btxn := &BadgerCFStoreTransaction{
 		store: store,
 		txn:   store.NewTransaction(),
@@ -35,7 +35,7 @@ func (txn *BadgerCFStoreTransaction) Scan(cf string, startKey []byte, numValues 
 }
 
 func (txn *BadgerCFStoreTransaction) MultiGet(keys []*KVStoreKey) (values []*KVStoreEntry, errs []error) {
-	return txn.store.MultiGetWithTxn(txn.txn, keys)
+	return txn.store.BatchGetWithTxn(txn.txn, keys)
 }
 
 func (txn *BadgerCFStoreTransaction) BatchPut(entries []*KVStoreEntry) error {
