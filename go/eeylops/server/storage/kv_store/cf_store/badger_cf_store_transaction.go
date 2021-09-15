@@ -17,32 +17,32 @@ func newBadgerCFStoreTransaction(store *internalBadgerKVStore) *BadgerCFStoreTra
 	return btxn
 }
 
-func (txn *BadgerCFStoreTransaction) Get(key *KVStoreKey) (*KVStoreEntry, error) {
+func (txn *BadgerCFStoreTransaction) Get(key *CFStoreKey) (*CFStoreEntry, error) {
 	return txn.store.GetWithTxn(txn.badgerTxn, key)
 }
 
-func (txn *BadgerCFStoreTransaction) Put(entry *KVStoreEntry) error {
+func (txn *BadgerCFStoreTransaction) Put(entry *CFStoreEntry) error {
 	return txn.store.PutWithTxn(txn.badgerTxn, entry)
 }
 
-func (txn *BadgerCFStoreTransaction) Delete(key *KVStoreKey) error {
+func (txn *BadgerCFStoreTransaction) Delete(key *CFStoreKey) error {
 	return txn.store.DeleteWithTxn(txn.badgerTxn, key)
 }
 
 func (txn *BadgerCFStoreTransaction) Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
-	entries []*KVStoreEntry, nextKey []byte, retErr error) {
+	entries []*CFStoreEntry, nextKey []byte, retErr error) {
 	return txn.store.ScanWithTxn(txn.badgerTxn, cf, startKey, numValues, scanSizeBytes, reverse)
 }
 
-func (txn *BadgerCFStoreTransaction) BatchGet(keys []*KVStoreKey) (values []*KVStoreEntry, errs []error) {
+func (txn *BadgerCFStoreTransaction) BatchGet(keys []*CFStoreKey) (values []*CFStoreEntry, errs []error) {
 	return txn.store.BatchGetWithTxn(txn.badgerTxn, keys)
 }
 
-func (txn *BadgerCFStoreTransaction) BatchPut(entries []*KVStoreEntry) error {
+func (txn *BadgerCFStoreTransaction) BatchPut(entries []*CFStoreEntry) error {
 	return txn.store.BatchPutWithTxn(txn.badgerTxn, entries)
 }
 
-func (txn *BadgerCFStoreTransaction) BatchDelete(keys []*KVStoreKey) error {
+func (txn *BadgerCFStoreTransaction) BatchDelete(keys []*CFStoreKey) error {
 	return txn.store.BatchDeleteWithTxn(txn.badgerTxn, keys)
 }
 

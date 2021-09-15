@@ -1,12 +1,12 @@
 package cf_store
 
-type KVStoreEntry struct {
+type CFStoreEntry struct {
 	Key          []byte // Key.
 	Value        []byte // Value.
 	ColumnFamily string // Name of the column family.
 }
 
-type KVStoreKey struct {
+type CFStoreKey struct {
 	Key          []byte // Key.
 	ColumnFamily string // Name of the column family.
 }
@@ -17,21 +17,21 @@ type CFStore interface {
 	// Size returns the total size(in bytes) of the backing store.
 	Size() int64
 	// Get fetches the given key from the backing store.
-	Get(key *KVStoreKey) (*KVStoreEntry, error)
+	Get(key *CFStoreKey) (*CFStoreEntry, error)
 	// Put inserts/updates the given entry in the backing store.
-	Put(entry *KVStoreEntry) error
+	Put(entry *CFStoreEntry) error
 	// Delete deletes the given key from the backing store.
-	Delete(key *KVStoreKey) error
+	Delete(key *CFStoreKey) error
 	// Scan iterates over a column family from the given startKey and fetches the required number of
 	// values. Scans can be in the forward or reverse directions.
 	Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
-		entries []*KVStoreEntry, nextKey []byte, retErr error)
+		entries []*CFStoreEntry, nextKey []byte, retErr error)
 	// BatchGet multiple keys from the backing store.
-	BatchGet(keys []*KVStoreKey) (values []*KVStoreEntry, errs []error)
+	BatchGet(keys []*CFStoreKey) (values []*CFStoreEntry, errs []error)
 	// BatchPut multiple entries in the backing store.
-	BatchPut(entries []*KVStoreEntry) error
+	BatchPut(entries []*CFStoreEntry) error
 	// BatchDelete multiple entries from the backing store.
-	BatchDelete(keys []*KVStoreKey) error
+	BatchDelete(keys []*CFStoreKey) error
 	// NewScanner returns a new scanner than can be used to iterate over a column family in the backing store.
 	NewScanner(cf string, startKey []byte, reverse bool) (Scanner, error)
 	// NewTransaction returns a new Transaction.
@@ -54,21 +54,21 @@ type Scanner interface {
 }
 
 type Transaction interface {
-	Get(key *KVStoreKey) (*KVStoreEntry, error)
+	Get(key *CFStoreKey) (*CFStoreEntry, error)
 	// Put and puts the value for the given key in the store.
-	Put(entry *KVStoreEntry) error
+	Put(entry *CFStoreEntry) error
 	// Delete and deletes the key from the store.
-	Delete(key *KVStoreKey) error
+	Delete(key *CFStoreKey) error
 	// BatchGet and does batch Gets.
-	BatchGet(keys []*KVStoreKey) (values []*KVStoreEntry, errs []error)
+	BatchGet(keys []*CFStoreKey) (values []*CFStoreEntry, errs []error)
 	// BatchPut and does batch Puts.
-	BatchPut(entries []*KVStoreEntry) error
+	BatchPut(entries []*CFStoreEntry) error
 	// BatchDelete and does Deletes.
-	BatchDelete(keys []*KVStoreKey) error
+	BatchDelete(keys []*CFStoreKey) error
 	// Scan and scans values from the store starting from the given start key and num keys. Every scan call
 	// returns a slice of keys, values, the next key and scan error(if any).
 	Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
-		entries []*KVStoreEntry, nextKey []byte, retErr error)
+		entries []*CFStoreEntry, nextKey []byte, retErr error)
 	// Commit the transaction.
 	Commit() error
 	// Discard the transaction.
