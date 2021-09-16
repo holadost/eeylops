@@ -392,12 +392,14 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 	defer itr.Close()
 
 	// Seek to the correct entry.
+	firstCFKey := BuildFirstCFKey(actualCf)
+	lastCFKey := BuildLastCFKey(actualCf)
 	if (startKey == nil) || len(startKey) == 0 {
 		itr.Rewind()
 		if !reverse {
-			itr.Seek(BuildFirstCFKey(actualCf))
+			itr.Seek(firstCFKey)
 		} else {
-			itr.Seek(BuildLastCFKey(actualCf))
+			itr.Seek(lastCFKey)
 		}
 
 	} else {
@@ -409,6 +411,15 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 		valSize := item.ValueSize()
 		currSizeBytes += valSize
 		fullKey := item.KeyCopy(nil)
+		if !reverse {
+			if bytes.Compare(lastCFKey, fullKey) == 0 {
+				return entries, nil, nil
+			}
+		} else {
+			if bytes.Compare(firstCFKey, fullKey) == 0 {
+				return entries, nil, nil
+			}
+		}
 		key := ExtractUserKey(actualCf, fullKey)
 		val, err := item.ValueCopy(nil)
 		if err != nil {
@@ -612,6 +623,9 @@ func (ikvStore *internalBadgerKVStore) getCFIfExists(name string) (string, error
 	cf, err := ikvStore.sanitizeCFName(name)
 	if err != nil {
 		return "", err
+	}
+	if cf == kDefaultCFName {
+		return cf, nil
 	}
 	if ikvStore.doesCFExist(cf) {
 		return cf, nil
