@@ -308,8 +308,8 @@ func TestBadgerCFStoreTxnIO(t *testing.T) {
 }
 
 func TestBadgerCFStoreConcurrentTxnIO(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreTxnIO")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxnIO")
+	testutil.LogTestMarker("TestBadgerCFStoreConcurrentTxnIO")
+	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreConcurrentTxnIO")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -337,6 +337,73 @@ func TestBadgerCFStoreConcurrentTxnIO(t *testing.T) {
 	glog.Infof("Started all workers. Waiting for them to finish")
 	wg.Wait()
 }
+
+//func TestBadgerCFStoreConflictingTxn(t *testing.T) {
+//	testutil.LogTestMarker("TestBadgerCFStoreConflictingTxn")
+//	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreConflictingTxn")
+//	opts := badger.DefaultOptions(testDir)
+//	opts.MaxLevels = 7
+//	opts.NumMemtables = 2
+//	opts.SyncWrites = true
+//	opts.VerifyValueChecksum = true
+//	opts.NumCompactors = 2
+//	opts.SyncWrites = true
+//	store := NewBadgerCFStore(testDir, opts)
+//	txn1 := store.NewTransaction()
+//	txn2 := store.NewTransaction()
+//	entry1 := &CFStoreEntry{
+//		Key:          []byte("key1"),
+//		Value:        []byte("value1"),
+//		ColumnFamily: "",
+//	}
+//	entry2 := &CFStoreEntry{
+//		Key:          []byte("key1"),
+//		Value:        []byte("value2"),
+//		ColumnFamily: "",
+//	}
+//
+//	// First do transaction 2.
+//	err := txn2.Put(entry2)
+//	if err != nil {
+//		glog.Fatalf("Error while putting value: %v", err)
+//	}
+//	entries, err := store.Get(&CFStoreKey{
+//		Key:          []byte("key1"),
+//		ColumnFamily: "",
+//	})
+//	if err != kv_store.ErrKVStoreKeyNotFound {
+//		glog.Fatalf("Unexpected err: %v", err)
+//	}
+//
+//	cerr := txn2.Commit()
+//	if cerr != nil {
+//		glog.Fatalf("Unable to commit transaction due to err: %v", err)
+//	}
+//	entries, err = store.Get(&CFStoreKey{
+//		Key:          []byte("key1"),
+//		ColumnFamily: "",
+//	})
+//	if err != nil {
+//		glog.Fatalf("Unexpected err: %v", err)
+//	}
+//	glog.Infof("Value after TXN 2 commit: %s", string(entries.Value))
+//
+//	// Now do transaction 1.
+//	err = txn1.Put(entry1)
+//	if err != nil {
+//		glog.Fatalf("Error while putting value: %v", err)
+//	}
+//	cerr = txn1.Commit()
+//	glog.Infof("Commit error after transaction 2: %v", cerr)
+//	entries, err = store.Get(&CFStoreKey{
+//		Key:          []byte("key1"),
+//		ColumnFamily: "",
+//	})
+//	if err != nil {
+//		glog.Fatalf("Unexpected err: %v", err)
+//	}
+//	glog.Infof("Value after TXN 1 commit: %s", string(entries.Value))
+//}
 
 func doStoreSingleActorIO(testDir string, cf string) {
 	opts := badger.DefaultOptions(testDir)
