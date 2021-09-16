@@ -63,7 +63,9 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 func TestBadgerCFStoreNewCF(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerCFStoreNewCF")
 	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreNewCF")
-	doPutsAndGets(testDir, "cf_2")
+	cfName := "cf_2"
+	createColumnFamily(testDir, cfName)
+	doPutsAndGets(testDir, cfName)
 	glog.Infof("Badger KV store test finished successfully")
 }
 
@@ -133,4 +135,18 @@ func doPutsAndGets(testDir string, cf string) {
 		}
 	}
 	store.Close()
+}
+
+func createColumnFamily(testDir string, cfname string) {
+	opts := badger.DefaultOptions(testDir)
+	opts.MaxLevels = 7
+	opts.NumMemtables = 2
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	opts.NumCompactors = 2
+	store := NewBadgerCFStore(testDir, opts)
+	defer store.Close()
+	if err := store.AddColumnFamily(cfname); err != nil {
+		glog.Fatalf("Unable to add column family due to err: %v", err)
+	}
 }

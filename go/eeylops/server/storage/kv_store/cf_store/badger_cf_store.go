@@ -291,8 +291,8 @@ func (ikvStore *internalBadgerKVStore) Put(entry *CFStoreEntry) error {
 	}
 	txn := ikvStore.db.NewTransaction(true)
 	defer txn.Discard()
-	var err error
-	if err = ikvStore.PutWithTxn(txn, entry); err == nil {
+	err := ikvStore.PutWithTxn(txn, entry)
+	if err == nil {
 		if cErr := txn.Commit(); cErr != nil {
 			if cErr == badger.ErrConflict {
 				return kv_store.ErrKVStoreConflict
@@ -337,6 +337,9 @@ func (ikvStore *internalBadgerKVStore) Delete(key *CFStoreKey) error {
 	}
 	err = txn.Commit()
 	if err != nil {
+		if err == badger.ErrConflict {
+			return kv_store.ErrKVStoreConflict
+		}
 		ikvStore.logger.Errorf("Unable to commit transaction due to err: %s", err.Error())
 		return kv_store.ErrKVStoreBackend
 	}
@@ -454,7 +457,14 @@ func (ikvStore *internalBadgerKVStore) BatchGetWithTxn(txn *badger.Txn, keys []*
 		return
 	}
 	for _, key := range keys {
-		item, err := txn.Get(BuildCFKey(key.ColumnFamily, key.Key))
+		actualCf, err := ikvStore.getCFIfExists(key.ColumnFamily)
+		if err != nil {
+			values = append(values, nil)
+			errs = append(errs, err)
+			continue
+		}
+
+		item, err := txn.Get(BuildCFKey(actualCf, key.Key))
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
 				errs = append(errs, kv_store.ErrKVStoreKeyNotFound)
@@ -508,7 +518,11 @@ func (ikvStore *internalBadgerKVStore) BatchPut(entries []*CFStoreEntry) error {
 // commits and rollbacks must be handled by the caller.
 func (ikvStore *internalBadgerKVStore) BatchPutWithTxn(txn *badger.Txn, entries []*CFStoreEntry) error {
 	for _, entry := range entries {
-		if err := txn.Set(BuildCFKey(entry.ColumnFamily, entry.Key), entry.Value); err != nil {
+		actualCf, err := ikvStore.getCFIfExists(entry.ColumnFamily)
+		if err != nil {
+			return err
+		}
+		if err := txn.Set(BuildCFKey(actualCf, entry.Key), entry.Value); err != nil {
 			ikvStore.logger.Errorf("Unable to set keys due to err: %s", err.Error())
 			return kv_store.ErrKVStoreBackend
 		}
@@ -530,6 +544,9 @@ func (ikvStore *internalBadgerKVStore) BatchDelete(keys []*CFStoreKey) error {
 	}
 	cerr := txn.Commit()
 	if cerr != nil {
+		if cerr == badger.ErrConflict {
+			return kv_store.ErrKVStoreConflict
+		}
 		ikvStore.logger.Errorf("Unable to commit batch delete transaction due to err: %s", cerr.Error())
 		return kv_store.ErrKVStoreBackend
 	}
@@ -541,7 +558,12 @@ func (ikvStore *internalBadgerKVStore) BatchDelete(keys []*CFStoreKey) error {
 func (ikvStore *internalBadgerKVStore) BatchDeleteWithTxn(txn *badger.Txn, keys []*CFStoreKey) error {
 	var err error
 	for _, key := range keys {
-		err := txn.Delete(BuildCFKey(key.ColumnFamily, key.Key))
+		var actualCf string
+		actualCf, err = ikvStore.getCFIfExists(key.ColumnFamily)
+		if err != nil {
+			return err
+		}
+		err = txn.Delete(BuildCFKey(actualCf, key.Key))
 		if err != nil {
 			break
 		}
