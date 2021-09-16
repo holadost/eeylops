@@ -19,16 +19,16 @@ var (
 	// transactions.
 	ErrKVStoreConflict = errors.New("ErrKVStoreConflict: kv store conflict error")
 
-	// ErrReservedColumnFamilyNames is returned when the CF name provided is reserved.
-	ErrReservedColumnFamilyNames = errors.New("ErrReservedColumnFamilyNames: cannot use reserved column " +
-		"family names")
+	// ErrKVStoreReservedColumnFamilyNames is returned when the CF name provided is reserved.
+	ErrKVStoreReservedColumnFamilyNames = errors.New("ErrKVStoreReservedColumnFamilyNames: cannot use " +
+		"reserved column family names")
 
-	// ErrInvalidColumnFamilyName is returned when the CF name provided is invalid.
-	ErrInvalidColumnFamilyName = errors.New("ErrInvalidColumnFamilyName: invalid CF name")
+	// ErrKVStoreInvalidColumnFamilyName is returned when the CF name provided is invalid.
+	ErrKVStoreInvalidColumnFamilyName = errors.New("ErrKVStoreInvalidColumnFamilyName: invalid CF name")
 
-	// ErrColumnFamilyExists is returned when the CF already exists.
-	ErrColumnFamilyExists = errors.New("ErrColumnFamilyExists: column family already exists")
+	// ErrKVStoreColumnFamilyExists is returned when the CF already exists.
+	ErrKVStoreColumnFamilyExists = errors.New("ErrKVStoreColumnFamilyExists: column family already exists")
 
-	// ErrColumnFamilyNotFound is returned when the CF already exists.
-	ErrColumnFamilyNotFound = errors.New("ErrColumnFamilyNotFound: column family not found")
+	// ErrKVStoreColumnFamilyNotFound is returned when the CF already exists.
+	ErrKVStoreColumnFamilyNotFound = errors.New("ErrKVStoreColumnFamilyNotFound: column family not found")
 )

@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/golang/glog"
+	"sync"
 	"testing"
 )
 
 func TestBadgerCFStoreDefault(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerCFStore")
 	testDir := testutil.CreateTestDir(t, "TestBadgerCFStore")
-	doIO(testDir, "")
+	doSingleActorIO(testDir, "")
 	glog.Infof("Badger KV store test finished successfully")
 }
 
@@ -31,7 +32,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 		glog.Fatalf("Unable to add column family due to err: %v", err)
 	}
 	err := store.AddColumnFamily("cf1")
-	if err != kv_store.ErrColumnFamilyExists {
+	if err != kv_store.ErrKVStoreColumnFamilyExists {
 		glog.Fatalf("Tried to create column family again but it succeeded. Got err: %v", err)
 	}
 	err = store.Close()
@@ -41,7 +42,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 
 	store = NewBadgerCFStore(testDir, opts)
 	err = store.AddColumnFamily(kDefaultCFName)
-	if err != kv_store.ErrReservedColumnFamilyNames {
+	if err != kv_store.ErrKVStoreReservedColumnFamilyNames {
 		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
 	}
 	err = store.Close()
@@ -51,7 +52,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 
 	store = NewBadgerCFStore(testDir, opts)
 	err = store.AddColumnFamily(kAllColumnFamiliesCFName)
-	if err != kv_store.ErrReservedColumnFamilyNames {
+	if err != kv_store.ErrKVStoreReservedColumnFamilyNames {
 		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
 	}
 	err = store.Close()
@@ -61,7 +62,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 
 	store = NewBadgerCFStore(testDir, opts)
 	err = store.AddColumnFamily("default-1") // - not allowed in CF names. Only letters, digits and underscores.
-	if err != kv_store.ErrInvalidColumnFamilyName {
+	if err != kv_store.ErrKVStoreInvalidColumnFamilyName {
 		glog.Fatalf("Tried to create invalid column family. Got err: %v", err)
 	}
 	err = store.Close()
@@ -75,11 +76,18 @@ func TestBadgerCFStoreNewCF(t *testing.T) {
 	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreNewCF")
 	cfName := "cf_2"
 	createColumnFamily(testDir, cfName)
-	doIO(testDir, cfName)
+	doSingleActorIO(testDir, cfName)
 	glog.Infof("Badger KV store test finished successfully")
 }
 
-func doIO(testDir string, cf string) {
+func TestBadgerCFStoreMultiCF(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerCFStoreMultiCF")
+	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreMultiCF")
+	doConcurrentIO(testDir, 8)
+	glog.Infof("Badger KV store test finished successfully")
+}
+
+func doSingleActorIO(testDir string, cf string) {
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -88,19 +96,44 @@ func doIO(testDir string, cf string) {
 	opts.NumCompactors = 2
 	store := NewBadgerCFStore(testDir, opts)
 	defer store.Close()
+	doIO(store, cf)
+}
+
+func doConcurrentIO(testDir string, numWorkers int) {
+	opts := badger.DefaultOptions(testDir)
+	opts.MaxLevels = 7
+	opts.NumMemtables = 2
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	opts.NumCompactors = 2
+	store := NewBadgerCFStore(testDir, opts)
+	defer store.Close()
+	wg := sync.WaitGroup{}
+	workload := func(idx int) {
+		cfName := fmt.Sprintf("column_family_%d", idx)
+		err := store.AddColumnFamily(cfName)
+		if err != nil {
+			if err != kv_store.ErrKVStoreColumnFamilyExists {
+				glog.Fatalf("Unable to add column family due to err: %v", err)
+			}
+		}
+		doIO(store, cfName)
+		wg.Done()
+	}
+	for ii := 0; ii < numWorkers; ii++ {
+		wg.Add(1)
+		go workload(ii)
+	}
+	glog.Infof("Started all workers. Waiting for them to finish")
+	wg.Wait()
+}
+
+func doIO(store CFStore, cf string) {
 	batchSize := 10
 	numIters := 20
 	// Batch write values
 	glog.Infof("Testing Batch Put")
 	for iter := 0; iter < numIters; iter++ {
-		if iter%5 == 0 {
-			err := store.Close()
-			if err != nil {
-				glog.Fatalf("Hit an unexpected error while closing store. Err: %s", err.Error())
-				return
-			}
-			store = NewBadgerCFStore(testDir, opts)
-		}
 		var entries []*CFStoreEntry
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
@@ -253,75 +286,6 @@ func doIO(testDir string, cf string) {
 		glog.Fatalf("Hit an unexpected error while reading single key. Err: %v", err)
 		return
 	}
-	glog.Infof("Badger KV store test finished successfully")
-}
-
-func doConcurrentIO(testDir string, cf string) {
-	opts := badger.DefaultOptions(testDir)
-	opts.MaxLevels = 7
-	opts.NumMemtables = 2
-	opts.SyncWrites = true
-	opts.VerifyValueChecksum = true
-	opts.NumCompactors = 2
-	store := NewBadgerCFStore(testDir, opts)
-	batchSize := 10
-	numIters := 20
-	// Batch write values
-	glog.Infof("Testing Batch Put")
-	for iter := 0; iter < numIters; iter++ {
-		if iter%5 == 0 {
-			err := store.Close()
-			if err != nil {
-				glog.Fatalf("Hit an unexpected error while closing store. Err: %s", err.Error())
-				return
-			}
-			store = NewBadgerCFStore(testDir, opts)
-		}
-		var entries []*CFStoreEntry
-		for ii := 0; ii < batchSize; ii++ {
-			meraVal := iter*batchSize + ii
-			var entry CFStoreEntry
-			entry.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
-			entry.Value = []byte(fmt.Sprintf("value-%03d", meraVal))
-			entry.ColumnFamily = cf
-			entries = append(entries, &entry)
-		}
-		err := store.BatchPut(entries)
-		if err != nil {
-			glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
-			return
-		}
-	}
-
-	// Batch read and verify values
-	glog.Infof("Testing BatchGet")
-	for iter := 0; iter < numIters; iter++ {
-		var keys []*CFStoreKey
-		for ii := 0; ii < batchSize; ii++ {
-			meraVal := iter*batchSize + ii
-			var key CFStoreKey
-			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
-			key.ColumnFamily = cf
-			keys = append(keys, &key)
-		}
-		entries, errs := store.BatchGet(keys)
-		for ii := 0; ii < len(keys); ii++ {
-			if errs[ii] != nil {
-				glog.Fatalf("Hit an unexpected error: %s", errs[ii].Error())
-				return
-			}
-			exVal := []byte(fmt.Sprintf("value-%03d", iter*batchSize+ii))
-			val := entries[ii].Value
-			if bytes.Compare(exVal, val) != 0 {
-				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", exVal, val)
-				return
-			}
-			if entries[ii].ColumnFamily != cf {
-				glog.Fatalf("CF mismatch. Expected: %s, Got: %s", cf, entries[ii].ColumnFamily)
-			}
-		}
-	}
-	store.Close()
 }
 
 func createColumnFamily(testDir string, cfname string) {

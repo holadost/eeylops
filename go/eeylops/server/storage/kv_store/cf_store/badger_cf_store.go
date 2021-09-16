@@ -96,7 +96,7 @@ func (cfStore *BadgerCFStore) NewScanner(cf string, startKey []byte, reverse boo
 		cf = kDefaultCFName
 	}
 	if !IsColumnFamilyNameValid(cf) {
-		return nil, kv_store.ErrInvalidColumnFamilyName
+		return nil, kv_store.ErrKVStoreInvalidColumnFamilyName
 	}
 	return newBadgerScanner(cfStore.internalStore, cf, startKey, reverse), nil
 }
@@ -195,13 +195,13 @@ func (ikvStore *internalBadgerKVStore) Size() int64 {
 // AddColumnFamily adds the column family(if it does not exist) to the KV store.
 func (ikvStore *internalBadgerKVStore) AddColumnFamily(cf string) error {
 	if cf == kDefaultCFName || cf == kAllColumnFamiliesCFName {
-		return kv_store.ErrReservedColumnFamilyNames
+		return kv_store.ErrKVStoreReservedColumnFamilyNames
 	}
 	if !IsColumnFamilyNameValid(cf) {
-		return kv_store.ErrInvalidColumnFamilyName
+		return kv_store.ErrKVStoreInvalidColumnFamilyName
 	}
 	if ikvStore.doesCFExist(cf) {
-		return kv_store.ErrColumnFamilyExists
+		return kv_store.ErrKVStoreColumnFamilyExists
 	}
 	return ikvStore.addColumnFamilyInternal(cf)
 }
@@ -614,7 +614,7 @@ func (ikvStore *internalBadgerKVStore) sanitizeCFName(name string) (string, erro
 	if IsColumnFamilyNameValid(cf) {
 		return name, nil
 	}
-	return "", kv_store.ErrInvalidColumnFamilyName
+	return "", kv_store.ErrKVStoreInvalidColumnFamilyName
 }
 
 // sanitizeCFName returns the sanitized CF name. It also returns a bool indicating whether the sanitization was
@@ -630,5 +630,5 @@ func (ikvStore *internalBadgerKVStore) getCFIfExists(name string) (string, error
 	if ikvStore.doesCFExist(cf) {
 		return cf, nil
 	}
-	return "", kv_store.ErrColumnFamilyNotFound
+	return "", kv_store.ErrKVStoreColumnFamilyNotFound
 }
