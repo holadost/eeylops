@@ -16,6 +16,8 @@ type CFStore interface {
 	GetDataDir() string
 	// Size returns the total size(in bytes) of the backing store.
 	Size() int64
+	// AddColumnFamily creates a new column family in the backing store.
+	AddColumnFamily(cf string) error
 	// Get fetches the given key from the backing store.
 	Get(key *CFStoreKey) (*CFStoreEntry, error)
 	// Put inserts/updates the given entry in the backing store.

@@ -14,7 +14,7 @@ import (
 func TestBadgerCFStoreDefault(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerCFStore")
 	testDir := testutil.CreateTestDir(t, "TestBadgerCFStore")
-	doSingleActorIO(testDir, "")
+	doStoreSingleActorIO(testDir, "")
 	glog.Infof("Badger KV store test finished successfully")
 }
 
@@ -76,18 +76,269 @@ func TestBadgerCFStoreNewCF(t *testing.T) {
 	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreNewCF")
 	cfName := "cf_2"
 	createColumnFamily(testDir, cfName)
-	doSingleActorIO(testDir, cfName)
+	doStoreSingleActorIO(testDir, cfName)
 	glog.Infof("Badger KV store test finished successfully")
 }
 
 func TestBadgerCFStoreMultiCF(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerCFStoreMultiCF")
 	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreMultiCF")
-	doConcurrentIO(testDir, 8)
+	doStoreMultiConcurrentActorIO(testDir, 8)
 	glog.Infof("Badger KV store test finished successfully")
 }
 
-func doSingleActorIO(testDir string, cf string) {
+func TestBadgerCFStoreTxn(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerCFStoreTxn")
+	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxn")
+	opts := badger.DefaultOptions(testDir)
+	opts.MaxLevels = 7
+	opts.NumMemtables = 2
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	opts.NumCompactors = 2
+	opts.SyncWrites = true
+	store := NewBadgerCFStore(testDir, opts)
+
+	// Testing discard transaction.
+	glog.Infof("Testing batch put failures")
+	txn := store.NewTransaction()
+	failureKey := "failureKey"
+	failureValue := "failureValue"
+	entry := CFStoreEntry{
+		Key:          []byte(failureKey),
+		Value:        []byte(failureValue),
+		ColumnFamily: "",
+	}
+	failureKVStoreKey := CFStoreKey{
+		Key:          []byte(failureKey),
+		ColumnFamily: "",
+	}
+	var entries []*CFStoreEntry
+	var keys []*CFStoreKey
+	entries = append(entries, &entry)
+	keys = append(keys, &failureKVStoreKey)
+	err := txn.BatchPut(entries)
+	if err != nil {
+		glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
+		return
+	}
+	txn.Discard()
+
+	_, errs := store.BatchGet(keys)
+	if errs[0] != kv_store.ErrKVStoreKeyNotFound {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+
+	glog.Infof("Testing Batch Put success")
+	keys = nil
+	entries = nil
+	toBeDeletedKey := "to_be_deleted_key"
+	toBeDeletedValue := "to_be_deleted_value"
+	keys = append(keys, &CFStoreKey{
+		Key:          []byte(toBeDeletedKey),
+		ColumnFamily: "",
+	})
+	entries = append(entries, &CFStoreEntry{
+		Key:          []byte(toBeDeletedKey),
+		Value:        []byte(toBeDeletedValue),
+		ColumnFamily: "",
+	})
+	txn = store.NewTransaction()
+	err = txn.BatchPut(entries)
+	if err != nil {
+		glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
+		return
+	}
+	if txn.Commit() != nil {
+		glog.Fatalf("Failed to commit transaction due to err")
+	}
+	txn.Discard()
+
+	fetchedVals, errs := store.BatchGet(keys)
+	if errs[0] != nil {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+	if string(fetchedVals[0].Value) != toBeDeletedValue {
+		glog.Fatalf("Data mismatch. Expected: %s, got: %s", toBeDeletedValue, string(fetchedVals[0].Value))
+	}
+
+	// Test puts and delete in a single transaction and then discard it before committing.
+	glog.Infof("Testing batch put and delete in transaction failure")
+	successKey := "successKey"
+	successValue := "successValue"
+	var skeys []*CFStoreKey
+	var sentries []*CFStoreEntry
+	skeys = append(skeys, &CFStoreKey{
+		Key:          []byte(successKey),
+		ColumnFamily: "",
+	})
+	sentries = append(sentries, &CFStoreEntry{
+		Key:          []byte(successKey),
+		Value:        []byte(successValue),
+		ColumnFamily: "",
+	})
+	testBatchPutAndDelete := func(txn Transaction) {
+		glog.Infof("Testing Batch Put and batch delete")
+		err = txn.BatchPut(sentries)
+		if err != nil {
+			glog.Fatalf("Batch put failed with error: %s", err)
+		}
+		if err := txn.BatchDelete(keys); err != nil {
+			glog.Fatalf("Unable to batch delete due to err: %s", err.Error())
+		}
+	}
+	txn = store.NewTransaction()
+	testBatchPutAndDelete(txn)
+	txn.Discard()
+
+	// Check if values are correct.
+	_, errs = store.BatchGet(skeys)
+	if errs[0] != kv_store.ErrKVStoreKeyNotFound {
+		glog.Fatalf("Expected to not find toBeDeletedKey: %s", successKey)
+	}
+	fetchedVals, errs = store.BatchGet(keys)
+	if errs[0] != nil {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+	if string(fetchedVals[0].Value) != toBeDeletedValue {
+		glog.Fatalf("Data mismatch. Expected: %s, got: %s", toBeDeletedValue, string(fetchedVals[0].Value))
+	}
+
+	// Test puts and delete in a single transaction and then commit it.
+	glog.Infof("Testing batch put and delete in transaction success")
+	txn = store.NewTransaction()
+	testBatchPutAndDelete(txn)
+	if err := txn.Commit(); err != nil {
+		glog.Fatalf("Unable to commit transaction due to error")
+	}
+	txn.Discard()
+	fetchedVals, errs = store.BatchGet(skeys)
+	if errs[0] != nil {
+		glog.Fatalf("Hit an unexpected error: %v", errs[0])
+	}
+	if string(fetchedVals[0].Value) != successValue {
+		glog.Fatalf("Data mismatch. Expected: %s, got: %s", toBeDeletedValue, string(fetchedVals[0].Value))
+	}
+	_, errs = store.BatchGet(keys)
+	if errs[0] != kv_store.ErrKVStoreKeyNotFound {
+		glog.Fatalf("Expected to not find toBeDeletedKey: %s", successKey)
+	}
+
+	glog.Infof("Testing Put and Delete and Get")
+	successKey2 := "successKey2"
+	successValue2 := "successValue2"
+	keys = nil
+	entries = nil
+	keys = append(keys, &CFStoreKey{
+		Key:          []byte(successKey2),
+		ColumnFamily: "",
+	})
+	entries = append(entries, &CFStoreEntry{
+		Key:          []byte(successKey2),
+		Value:        []byte(successValue2),
+		ColumnFamily: "",
+	})
+	txn = store.NewTransaction()
+	if err := txn.Put(entries[0]); err != nil {
+		glog.Fatalf("Unable to put values due to err: %v", err)
+	}
+	if err := txn.Delete(skeys[0]); err != nil {
+		glog.Fatalf("Unable to delete value due to err: %v", err)
+	}
+	txn.Commit()
+	txn.Discard()
+	txn = store.NewTransaction()
+	fetchedVals, errs = txn.BatchGet(keys)
+	if errs[0] != nil {
+		glog.Fatalf("Unable to get value due to err: %v", errs[0])
+	}
+	if string(fetchedVals[0].Value) != successValue2 {
+		glog.Fatalf("Value mismatch. Expected: %s, got: %s", successValue2, string(fetchedVals[0].Value))
+	}
+	_, err = txn.Get(skeys[0])
+	if err != kv_store.ErrKVStoreKeyNotFound {
+		glog.Fatalf("Got unexpected error: %v", err)
+	}
+	txn.Discard()
+
+	txn = store.NewTransaction()
+	entries[0].ColumnFamily = "cf2"
+	keys[0].ColumnFamily = "cf2"
+	err = txn.Put(entries[0])
+	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+	}
+	err = txn.BatchPut(entries)
+	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+	}
+	err = txn.BatchDelete(keys)
+	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+	}
+	err = txn.Delete(keys[0])
+	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+	}
+	_, err = txn.Get(keys[0])
+	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+	}
+	_, errs = txn.BatchGet(keys)
+	if errs[0] != kv_store.ErrKVStoreColumnFamilyNotFound {
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+	}
+	txn.Discard()
+}
+
+func TestBadgerCFStoreTxnIO(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerCFStoreTxnIO")
+	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxnIO")
+	opts := badger.DefaultOptions(testDir)
+	opts.MaxLevels = 7
+	opts.NumMemtables = 2
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	opts.NumCompactors = 2
+	opts.SyncWrites = true
+	cfName := "cf1"
+	createColumnFamily(testDir, cfName)
+	store := NewBadgerCFStore(testDir, opts)
+	doTransactionIO(store, cfName)
+}
+
+func TestBadgerCFStoreConcurrentTxnIO(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerCFStoreTxnIO")
+	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxnIO")
+	opts := badger.DefaultOptions(testDir)
+	opts.MaxLevels = 7
+	opts.NumMemtables = 2
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	opts.NumCompactors = 2
+	opts.SyncWrites = true
+	var cfNames []string
+	store := NewBadgerCFStore(testDir, opts)
+	numWorkers := 8
+	for ii := 0; ii < numWorkers; ii++ {
+		cfName := fmt.Sprintf("cf_%d", ii)
+		createColumnFamilyWithStore(store, cfName)
+		cfNames = append(cfNames, cfName)
+	}
+	wg := sync.WaitGroup{}
+	workload := func(cf string) {
+		doTransactionIO(store, cf)
+		wg.Done()
+	}
+	for _, cf := range cfNames {
+		wg.Add(1)
+		go workload(cf)
+	}
+	glog.Infof("Started all workers. Waiting for them to finish")
+	wg.Wait()
+}
+
+func doStoreSingleActorIO(testDir string, cf string) {
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -99,7 +350,7 @@ func doSingleActorIO(testDir string, cf string) {
 	doStoreIO(store, cf)
 }
 
-func doConcurrentIO(testDir string, numWorkers int) {
+func doStoreMultiConcurrentActorIO(testDir string, numWorkers int) {
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -369,6 +620,146 @@ func doStoreIO(store CFStore, cf string) {
 	}
 }
 
+func doTransactionIO(store CFStore, cf string) {
+	batchSize := 10
+	numIters := 20
+	// Batch write values
+	glog.Infof("Testing Batch Put")
+	for iter := 0; iter < numIters; iter++ {
+		var entries []*CFStoreEntry
+		for ii := 0; ii < batchSize; ii++ {
+			meraVal := iter*batchSize + ii
+			var entry CFStoreEntry
+			entry.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
+			entry.Value = []byte(fmt.Sprintf("value-%03d", meraVal))
+			entry.ColumnFamily = cf
+			entries = append(entries, &entry)
+		}
+		txn := store.NewTransaction()
+		err := txn.BatchPut(entries)
+		if err != nil {
+			glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
+			return
+		}
+		err = txn.Commit()
+		if err != nil {
+			glog.Fatalf("Unable to commit transaction due to err: %v", err)
+		}
+		txn.Discard()
+	}
+
+	// Batch read and verify values
+	glog.Infof("Testing BatchGet")
+	for iter := 0; iter < numIters; iter++ {
+		var keys []*CFStoreKey
+		for ii := 0; ii < batchSize; ii++ {
+			meraVal := iter*batchSize + ii
+			var key CFStoreKey
+			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
+			key.ColumnFamily = cf
+			keys = append(keys, &key)
+		}
+		txn := store.NewTransaction()
+		entries, errs := txn.BatchGet(keys)
+		for ii := 0; ii < len(keys); ii++ {
+			if errs[ii] != nil {
+				glog.Fatalf("Hit an unexpected error: %s", errs[ii].Error())
+				return
+			}
+			exVal := []byte(fmt.Sprintf("value-%03d", iter*batchSize+ii))
+			val := entries[ii].Value
+			if bytes.Compare(exVal, val) != 0 {
+				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", exVal, val)
+				return
+			}
+			if entries[ii].ColumnFamily != cf {
+				glog.Fatalf("CF mismatch. Expected: %s, Got: %s", cf, entries[ii].ColumnFamily)
+			}
+		}
+		txn.Discard()
+	}
+
+	// Scan and verify values
+	glog.Infof("Testing Scan")
+	for iter := 0; iter < numIters; iter++ {
+		meraVal := iter * batchSize
+		expectedNextKey := []byte(fmt.Sprintf("key-%03d", (iter+1)*batchSize))
+		sk := []byte(fmt.Sprintf("key-%03d", meraVal))
+		txn := store.NewTransaction()
+		entries, nk, err := txn.Scan(cf, sk, batchSize, 1024*1024, false)
+		if err != nil {
+			glog.Fatalf("Unexpected error while scanning: %v", err)
+		}
+		for ii := 0; ii < len(entries); ii++ {
+			meraSingleVal := meraVal + ii
+			expectedKey := []byte(fmt.Sprintf("key-%03d", meraSingleVal))
+			expectedVal := []byte(fmt.Sprintf("value-%03d", meraSingleVal))
+			if bytes.Compare(expectedKey, entries[ii].Key) != 0 {
+				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedKey),
+					string(entries[ii].Key))
+			}
+			if bytes.Compare(expectedVal, entries[ii].Value) != 0 {
+				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedVal),
+					string(entries[ii].Value))
+			}
+		}
+		if iter == numIters-1 {
+			if nk != nil {
+				glog.Fatalf("Next key is not nil!")
+			}
+		} else {
+			if bytes.Compare(nk, expectedNextKey) != 0 {
+				glog.Fatalf("Unexpected next key: %s", string(nk))
+			}
+		}
+		txn.Discard()
+	}
+
+	// Batch delete keys.
+	glog.Infof("Testing BatchDelete")
+	for iter := 0; iter < numIters; iter++ {
+		var keys []*CFStoreKey
+		for ii := 0; ii < batchSize; ii++ {
+			meraVal := iter*batchSize + ii
+			var key CFStoreKey
+			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
+			key.ColumnFamily = cf
+			keys = append(keys, &key)
+		}
+		txn := store.NewTransaction()
+		err := txn.BatchDelete(keys)
+		if err != nil {
+			glog.Fatalf("Unable to delete keys due to err: %v", err)
+		}
+		err = txn.Commit()
+		if err != nil {
+			glog.Fatalf("Unable to commit transaction due to err: %v", err)
+		}
+		txn.Discard()
+	}
+
+	// Batch read and verify values
+	glog.Infof("Testing BatchGet")
+	for iter := 0; iter < numIters; iter++ {
+		var keys []*CFStoreKey
+		for ii := 0; ii < batchSize; ii++ {
+			meraVal := iter*batchSize + ii
+			var key CFStoreKey
+			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
+			key.ColumnFamily = cf
+			keys = append(keys, &key)
+		}
+		txn := store.NewTransaction()
+		_, errs := txn.BatchGet(keys)
+		for ii := 0; ii < len(keys); ii++ {
+			if errs[ii] != kv_store.ErrKVStoreKeyNotFound {
+				glog.Fatalf("Hit an unexpected error: %v", errs[ii])
+			}
+		}
+		txn.Discard()
+	}
+}
+
 func createColumnFamily(testDir string, cfname string) {
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
@@ -378,6 +769,12 @@ func createColumnFamily(testDir string, cfname string) {
 	opts.NumCompactors = 2
 	store := NewBadgerCFStore(testDir, opts)
 	defer store.Close()
+	if err := store.AddColumnFamily(cfname); err != nil {
+		glog.Fatalf("Unable to add column family due to err: %v", err)
+	}
+}
+
+func createColumnFamilyWithStore(store CFStore, cfname string) {
 	if err := store.AddColumnFamily(cfname); err != nil {
 		glog.Fatalf("Unable to add column family due to err: %v", err)
 	}
