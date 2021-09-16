@@ -40,7 +40,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 	}
 
 	store = NewBadgerCFStore(testDir, opts)
-	err = store.AddColumnFamily("default")
+	err = store.AddColumnFamily(kDefaultCFName)
 	if err != kv_store.ErrReservedColumnFamilyNames {
 		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
 	}
@@ -50,7 +50,17 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 	}
 
 	store = NewBadgerCFStore(testDir, opts)
-	err = store.AddColumnFamily("default-1")
+	err = store.AddColumnFamily(kAllColumnFamiliesCFName)
+	if err != kv_store.ErrReservedColumnFamilyNames {
+		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
+	}
+	err = store.Close()
+	if err != nil {
+		glog.Fatalf("Unable to close the store due to err: %v", err)
+	}
+
+	store = NewBadgerCFStore(testDir, opts)
+	err = store.AddColumnFamily("default-1") // - not allowed in CF names. Only letters, digits and underscores.
 	if err != kv_store.ErrInvalidColumnFamilyName {
 		glog.Fatalf("Tried to create invalid column family. Got err: %v", err)
 	}
