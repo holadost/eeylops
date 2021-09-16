@@ -206,44 +206,6 @@ func (ikvStore *internalBadgerKVStore) AddColumnFamily(cf string) error {
 	return ikvStore.addColumnFamilyInternal(cf)
 }
 
-func (ikvStore *internalBadgerKVStore) addColumnFamilyInternal(cf string) error {
-	ikvStore.logger.Infof("Adding column family: %s", cf)
-	err := ikvStore.db.Update(func(txn *badger.Txn) error {
-		txnerr := txn.Set(BuildFirstCFKey(cf), kSeparatorBytes)
-		if txnerr != nil {
-			return txnerr
-		}
-		txnerr = txn.Set(BuildLastCFKey(cf), kSeparatorBytes)
-		if txnerr != nil {
-			return txnerr
-		}
-		txnerr = txn.Set(BuildCFKey(kAllColumnFamiliesCFName, []byte(cf)), kSeparatorBytes)
-		if txnerr != nil {
-			return txnerr
-		}
-
-		return nil
-	})
-	if err != nil {
-		if err == badger.ErrConflict {
-			return kv_store.ErrKVStoreConflict
-		}
-		ikvStore.logger.Errorf("Unable to add column family due to badger err: %v", err)
-		return kv_store.ErrKVStoreBackend
-	}
-	ikvStore.cfMapLock.Lock()
-	defer ikvStore.cfMapLock.Unlock()
-	ikvStore.cfMap[cf] = struct{}{}
-	return nil
-}
-
-func (ikvStore *internalBadgerKVStore) doesCFExist(cf string) bool {
-	ikvStore.cfMapLock.RLock()
-	defer ikvStore.cfMapLock.RUnlock()
-	_, exists := ikvStore.cfMap[cf]
-	return exists
-}
-
 // Get gets the value associated with the key.
 func (ikvStore *internalBadgerKVStore) Get(key *CFStoreKey) (*CFStoreEntry, error) {
 	if ikvStore.closed {
@@ -525,21 +487,23 @@ func (ikvStore *internalBadgerKVStore) BatchPut(entries []*CFStoreEntry) error {
 	if ikvStore.closed {
 		return kv_store.ErrKVStoreBackend
 	}
-	txn := ikvStore.db.NewTransaction(true)
-	defer txn.Discard()
-	err := ikvStore.BatchPutWithTxn(txn, entries)
-	if err == nil {
-		cerr := txn.Commit()
-		if cerr != nil {
-			if cerr == badger.ErrConflict {
-				return kv_store.ErrKVStoreConflict
-			}
-			ikvStore.logger.Errorf("Unable to commit transaction due to err: %s", cerr.Error())
+	wb := ikvStore.db.NewWriteBatch()
+	for ii := 0; ii < len(entries); ii++ {
+		cf, err := ikvStore.getCFIfExists(entries[ii].ColumnFamily)
+		if err != nil {
+			return err
+		}
+		key := BuildCFKey(cf, entries[ii].Key)
+		if err := wb.Set(key, entries[ii].Value); err != nil {
+			ikvStore.logger.Errorf("Unable to perform batch put due to err: %s", err.Error())
 			return kv_store.ErrKVStoreBackend
 		}
-		return nil
 	}
-	return err
+	if err := wb.Flush(); err != nil {
+		ikvStore.logger.Errorf("Unable to perform flush after batch put due to err: %s", err.Error())
+		return kv_store.ErrKVStoreBackend
+	}
+	return nil
 }
 
 // BatchPutWithTxn sets multiple key value pairs in the DB. This method needs a transaction to be passed. Transaction
@@ -623,6 +587,44 @@ func (ikvStore *internalBadgerKVStore) Close() error {
 	ikvStore.closed = true
 	ikvStore.db = nil
 	return err
+}
+
+func (ikvStore *internalBadgerKVStore) addColumnFamilyInternal(cf string) error {
+	ikvStore.logger.Infof("Adding column family: %s", cf)
+	err := ikvStore.db.Update(func(txn *badger.Txn) error {
+		txnerr := txn.Set(BuildFirstCFKey(cf), kSeparatorBytes)
+		if txnerr != nil {
+			return txnerr
+		}
+		txnerr = txn.Set(BuildLastCFKey(cf), kSeparatorBytes)
+		if txnerr != nil {
+			return txnerr
+		}
+		txnerr = txn.Set(BuildCFKey(kAllColumnFamiliesCFName, []byte(cf)), kSeparatorBytes)
+		if txnerr != nil {
+			return txnerr
+		}
+
+		return nil
+	})
+	if err != nil {
+		if err == badger.ErrConflict {
+			return kv_store.ErrKVStoreConflict
+		}
+		ikvStore.logger.Errorf("Unable to add column family due to badger err: %v", err)
+		return kv_store.ErrKVStoreBackend
+	}
+	ikvStore.cfMapLock.Lock()
+	defer ikvStore.cfMapLock.Unlock()
+	ikvStore.cfMap[cf] = struct{}{}
+	return nil
+}
+
+func (ikvStore *internalBadgerKVStore) doesCFExist(cf string) bool {
+	ikvStore.cfMapLock.RLock()
+	defer ikvStore.cfMapLock.RUnlock()
+	_, exists := ikvStore.cfMap[cf]
+	return exists
 }
 
 // sanitizeCFName returns the sanitized CF name. It also returns a bool indicating whether the sanitization was
