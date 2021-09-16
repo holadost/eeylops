@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/golang/glog"
+	"github.com/stretchr/testify/require"
+	"strconv"
 	"sync"
 	"testing"
 )
@@ -338,72 +340,88 @@ func TestBadgerCFStoreConcurrentTxnIO(t *testing.T) {
 	wg.Wait()
 }
 
-//func TestBadgerCFStoreConflictingTxn(t *testing.T) {
-//	testutil.LogTestMarker("TestBadgerCFStoreConflictingTxn")
-//	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreConflictingTxn")
-//	opts := badger.DefaultOptions(testDir)
-//	opts.MaxLevels = 7
-//	opts.NumMemtables = 2
-//	opts.SyncWrites = true
-//	opts.VerifyValueChecksum = true
-//	opts.NumCompactors = 2
-//	opts.SyncWrites = true
-//	store := NewBadgerCFStore(testDir, opts)
-//	txn1 := store.NewTransaction()
-//	txn2 := store.NewTransaction()
-//	entry1 := &CFStoreEntry{
-//		Key:          []byte("key1"),
-//		Value:        []byte("value1"),
-//		ColumnFamily: "",
-//	}
-//	entry2 := &CFStoreEntry{
-//		Key:          []byte("key1"),
-//		Value:        []byte("value2"),
-//		ColumnFamily: "",
-//	}
-//
-//	// First do transaction 2.
-//	err := txn2.Put(entry2)
-//	if err != nil {
-//		glog.Fatalf("Error while putting value: %v", err)
-//	}
-//	entries, err := store.Get(&CFStoreKey{
-//		Key:          []byte("key1"),
-//		ColumnFamily: "",
-//	})
-//	if err != kv_store.ErrKVStoreKeyNotFound {
-//		glog.Fatalf("Unexpected err: %v", err)
-//	}
-//
-//	cerr := txn2.Commit()
-//	if cerr != nil {
-//		glog.Fatalf("Unable to commit transaction due to err: %v", err)
-//	}
-//	entries, err = store.Get(&CFStoreKey{
-//		Key:          []byte("key1"),
-//		ColumnFamily: "",
-//	})
-//	if err != nil {
-//		glog.Fatalf("Unexpected err: %v", err)
-//	}
-//	glog.Infof("Value after TXN 2 commit: %s", string(entries.Value))
-//
-//	// Now do transaction 1.
-//	err = txn1.Put(entry1)
-//	if err != nil {
-//		glog.Fatalf("Error while putting value: %v", err)
-//	}
-//	cerr = txn1.Commit()
-//	glog.Infof("Commit error after transaction 2: %v", cerr)
-//	entries, err = store.Get(&CFStoreKey{
-//		Key:          []byte("key1"),
-//		ColumnFamily: "",
-//	})
-//	if err != nil {
-//		glog.Fatalf("Unexpected err: %v", err)
-//	}
-//	glog.Infof("Value after TXN 1 commit: %s", string(entries.Value))
-//}
+func TestBadgerCFStoreTxnConflict(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerCFStoreTxnConflict")
+	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxnConflict")
+	opts := badger.DefaultOptions(testDir)
+	opts.MaxLevels = 7
+	opts.NumMemtables = 2
+	opts.SyncWrites = true
+	opts.VerifyValueChecksum = true
+	opts.NumCompactors = 2
+	opts.SyncWrites = true
+	store := NewBadgerCFStore(testDir, opts)
+	ax := []byte("x")
+	ay := []byte("y")
+
+	// Set balance to $100 in each account.
+	txn := store.NewTransaction()
+	defer txn.Discard()
+	val := []byte(strconv.Itoa(100))
+	require.NoError(t, txn.Put(&CFStoreEntry{
+		Key:          ax,
+		Value:        val,
+		ColumnFamily: "",
+	}))
+	require.NoError(t, txn.Put(&CFStoreEntry{
+		Key:          ay,
+		Value:        val,
+		ColumnFamily: "",
+	}))
+	require.NoError(t, txn.Commit())
+
+	getBal := func(txn Transaction, key []byte) (bal int) {
+		storeKey := &CFStoreKey{
+			Key:          key,
+			ColumnFamily: "",
+		}
+		val, err := txn.Get(storeKey)
+		require.NoError(t, err)
+		bal, err = strconv.Atoi(string(val.Value))
+		require.NoError(t, err)
+		return bal
+	}
+
+	// Start two transactions, each would read both accounts and deduct from one account.
+	txn1 := store.NewTransaction()
+
+	sum := getBal(txn1, ax)
+	sum += getBal(txn1, ay)
+	require.Equal(t, 200, sum)
+	require.NoError(t, txn1.Put(&CFStoreEntry{
+		Key:          ax,
+		Value:        []byte("0"),
+		ColumnFamily: "",
+	})) // Deduct 100 from ax.
+
+	// Let's read this back.
+	sum = getBal(txn1, ax)
+	require.Equal(t, 0, sum)
+	sum += getBal(txn1, ay)
+	require.Equal(t, 100, sum)
+	// Don't commit yet.
+
+	txn2 := store.NewTransaction()
+
+	sum = getBal(txn2, ax)
+	sum += getBal(txn2, ay)
+	require.Equal(t, 200, sum)
+	require.NoError(t, txn2.Put(&CFStoreEntry{
+		Key:          ay,
+		Value:        []byte("0"),
+		ColumnFamily: "",
+	})) // Deduct 100 from ay.
+
+	// Let's read this back.
+	sum = getBal(txn2, ax)
+	require.Equal(t, 100, sum)
+	sum += getBal(txn2, ay)
+	require.Equal(t, 100, sum)
+
+	// Commit both now.
+	require.NoError(t, txn1.Commit())
+	require.Error(t, txn2.Commit()) // This should fail.
+}
 
 func doStoreSingleActorIO(testDir string, cf string) {
 	opts := badger.DefaultOptions(testDir)
