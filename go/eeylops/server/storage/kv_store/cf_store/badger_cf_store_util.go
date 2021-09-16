@@ -40,7 +40,7 @@ func BuildLastCFKey(cf string) []byte {
 // BuildCFPrefixBytes is a helper function that creates the CF prefix bytes.
 func BuildCFPrefixBytes(cf string) []byte {
 	if len(cf) == 0 {
-		glog.Fatalf("Unable to build CF prefix bytes since no CF name is give")
+		cf = kDefaultCFName
 	}
 	return append([]byte(cf), kSeparatorBytes...)
 }

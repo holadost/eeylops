@@ -6,6 +6,7 @@ import (
 	"eeylops/util/logging"
 	"github.com/dgraph-io/badger/v2"
 	"os"
+	"sync"
 )
 
 const kMaxKeyLength = 60000
@@ -49,6 +50,16 @@ func (cfStore *BadgerCFStore) GetDataDir() string {
 // Size returns the size of the KV store in bytes.
 func (cfStore *BadgerCFStore) Size() int64 {
 	return cfStore.internalStore.Size()
+}
+
+// Close the KV store.
+func (cfStore *BadgerCFStore) Close() error {
+	return cfStore.internalStore.Close()
+}
+
+// AddColumnFamily adds the column family(if it does not exist) to the KV store.
+func (cfStore *BadgerCFStore) AddColumnFamily(cf string) error {
+	return cfStore.internalStore.AddColumnFamily(cf)
 }
 
 func (cfStore *BadgerCFStore) Get(key *CFStoreKey) (*CFStoreEntry, error) {
@@ -96,11 +107,12 @@ func (cfStore *BadgerCFStore) NewTransaction() Transaction {
 
 /*************************************************** INTERNAL CF STORE ************************************************/
 type internalBadgerKVStore struct {
-	db      *badger.DB
-	rootDir string
-	closed  bool
-	logger  *logging.PrefixLogger
-	cfMap   map[string]struct{}
+	db        *badger.DB
+	rootDir   string
+	closed    bool
+	logger    *logging.PrefixLogger
+	cfMap     map[string]struct{}
+	cfMapLock sync.RWMutex
 }
 
 func (ikvStore *internalBadgerKVStore) initialize(opts badger.Options) {
@@ -145,8 +157,9 @@ func (ikvStore *internalBadgerKVStore) initialize(opts badger.Options) {
 			if updateErr != nil {
 				ikvStore.logger.Fatalf("Unable to create default column families due to err: %v", updateErr)
 			}
+		} else {
+			ikvStore.logger.Fatalf("Unexpected error while checking if default column families exist: %v", err)
 		}
-		ikvStore.logger.Fatalf("Unexpected error while checking if default column families exist: %v", err)
 	}
 
 	// Load column family names into memory.
@@ -208,7 +221,7 @@ func (ikvStore *internalBadgerKVStore) addColumnFamilyInternal(cf string) error 
 		if txnerr != nil {
 			return txnerr
 		}
-		ikvStore.cfMap[cf] = struct{}{}
+
 		return nil
 	})
 	if err != nil {
@@ -218,10 +231,15 @@ func (ikvStore *internalBadgerKVStore) addColumnFamilyInternal(cf string) error 
 		ikvStore.logger.Errorf("Unable to add column family due to badger err: %v", err)
 		return kv_store.ErrKVStoreBackend
 	}
+	ikvStore.cfMapLock.Lock()
+	defer ikvStore.cfMapLock.Unlock()
+	ikvStore.cfMap[cf] = struct{}{}
 	return nil
 }
 
 func (ikvStore *internalBadgerKVStore) doesCFExist(cf string) bool {
+	ikvStore.cfMapLock.RLock()
+	defer ikvStore.cfMapLock.RUnlock()
 	_, exists := ikvStore.cfMap[cf]
 	return exists
 }
@@ -243,7 +261,7 @@ func (ikvStore *internalBadgerKVStore) GetWithTxn(txn *badger.Txn, key *CFStoreK
 		return nil, kv_store.ErrKVStoreClosed
 	}
 	var val []byte
-	cf, err := ikvStore.sanitizeCFName(key.ColumnFamily)
+	cf, err := ikvStore.getCFIfExists(key.ColumnFamily)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +312,7 @@ func (ikvStore *internalBadgerKVStore) PutWithTxn(txn *badger.Txn, entry *CFStor
 		ikvStore.logger.Errorf("KV store is closed")
 		return kv_store.ErrKVStoreClosed
 	}
-	cf, err := ikvStore.sanitizeCFName(entry.ColumnFamily)
+	cf, err := ikvStore.getCFIfExists(entry.ColumnFamily)
 	if err != nil {
 		return err
 	}
@@ -331,7 +349,7 @@ func (ikvStore *internalBadgerKVStore) DeleteWithTxn(txn *badger.Txn, key *CFSto
 	if ikvStore.closed {
 		return kv_store.ErrKVStoreClosed
 	}
-	cf, err := ikvStore.sanitizeCFName(key.ColumnFamily)
+	cf, err := ikvStore.getCFIfExists(key.ColumnFamily)
 	if err != nil {
 		return err
 	}
@@ -361,6 +379,10 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 	if ikvStore.closed {
 		return nil, nil, kv_store.ErrKVStoreClosed
 	}
+	actualCf, err := ikvStore.getCFIfExists(cf)
+	if err != nil {
+		return nil, nil, err
+	}
 	opts := badger.DefaultIteratorOptions
 	opts.Reverse = reverse
 	itr := txn.NewIterator(opts)
@@ -370,13 +392,13 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 	if (startKey == nil) || len(startKey) == 0 {
 		itr.Rewind()
 		if !reverse {
-			itr.Seek(BuildFirstCFKey(cf))
+			itr.Seek(BuildFirstCFKey(actualCf))
 		} else {
-			itr.Seek(BuildLastCFKey(cf))
+			itr.Seek(BuildLastCFKey(actualCf))
 		}
 
 	} else {
-		itr.Seek(BuildCFKey(cf, startKey))
+		itr.Seek(BuildCFKey(actualCf, startKey))
 	}
 	currSizeBytes := int64(0)
 	for ; itr.Valid(); itr.Next() {
@@ -384,7 +406,7 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 		valSize := item.ValueSize()
 		currSizeBytes += valSize
 		fullKey := item.KeyCopy(nil)
-		key := ExtractUserKey(cf, fullKey)
+		key := ExtractUserKey(actualCf, fullKey)
 		val, err := item.ValueCopy(nil)
 		if err != nil {
 			ikvStore.logger.Errorf("Unable to scan KV store due to err: %s", err)
@@ -399,7 +421,7 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 		entries = append(entries, &CFStoreEntry{
 			Key:          key,
 			Value:        val,
-			ColumnFamily: cf,
+			ColumnFamily: actualCf,
 		})
 	}
 	// We have reached the end of the DB and there are no more keys.
@@ -552,7 +574,7 @@ func (ikvStore *internalBadgerKVStore) Close() error {
 func (ikvStore *internalBadgerKVStore) sanitizeCFName(name string) (string, error) {
 	var cf string
 	if name == "" {
-		cf = "default"
+		return kDefaultCFName, nil
 	} else {
 		cf = name
 	}
@@ -560,4 +582,17 @@ func (ikvStore *internalBadgerKVStore) sanitizeCFName(name string) (string, erro
 		return name, nil
 	}
 	return "", kv_store.ErrInvalidColumnFamilyName
+}
+
+// sanitizeCFName returns the sanitized CF name. It also returns a bool indicating whether the sanitization was
+// successful or not!
+func (ikvStore *internalBadgerKVStore) getCFIfExists(name string) (string, error) {
+	cf, err := ikvStore.sanitizeCFName(name)
+	if err != nil {
+		return "", err
+	}
+	if ikvStore.doesCFExist(cf) {
+		return cf, nil
+	}
+	return "", kv_store.ErrColumnFamilyNotFound
 }

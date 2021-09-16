@@ -99,7 +99,7 @@ func (scanner *BadgerScanner) Next() {
 
 func (scanner *BadgerScanner) GetItem() (key []byte, val []byte, err error) {
 	item := scanner.iter.Item()
-	key = item.KeyCopy(nil)
+	key = ExtractUserKey(scanner.cf, item.KeyCopy(nil))
 	val, err = item.ValueCopy(nil)
 	return
 }
