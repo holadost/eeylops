@@ -17,6 +17,7 @@ type BadgerScanner struct {
 	fkBytes       []byte
 	lkBytes       []byte
 	cfPrefixBytes []byte
+	currEntry     *CFStoreEntry
 }
 
 func newBadgerScanner(store *internalBadgerKVStore, cf string, startKey []byte, reverse bool) *BadgerScanner {
@@ -25,7 +26,11 @@ func newBadgerScanner(store *internalBadgerKVStore, cf string, startKey []byte, 
 	scanner.iter = nil
 	scanner.reverse = reverse
 	scanner.cf = cf
-	scanner.startKey = BuildCFKey(scanner.cf, startKey)
+	if startKey == nil || len(startKey) == 0 {
+		scanner.startKey = nil
+	} else {
+		scanner.startKey = BuildCFKey(scanner.cf, startKey)
+	}
 	scanner.initialize()
 	return scanner
 }
@@ -38,8 +43,12 @@ func newBadgerScannerWithTxn(store *internalBadgerKVStore, txn *badger.Txn, cf s
 	scanner.localTxn = false // set local transaction to false since another global transaction has been passed.
 	scanner.iter = nil
 	scanner.cf = cf
-	scanner.startKey = BuildCFKey(scanner.cf, startKey)
 	scanner.reverse = reverse
+	if startKey == nil || len(startKey) == 0 {
+		scanner.startKey = nil
+	} else {
+		scanner.startKey = BuildCFKey(scanner.cf, startKey)
+	}
 	scanner.initialize()
 	return scanner
 }
@@ -71,11 +80,13 @@ func (scanner *BadgerScanner) Rewind() {
 		} else {
 			scanner.iter.Seek(scanner.fkBytes)
 		}
+		// Skip boundary key.
+		scanner.iter.Next()
 	}
 }
 
 func (scanner *BadgerScanner) Valid() bool {
-	if scanner.iter.ValidForPrefix(BuildCFPrefixBytes(scanner.cf)) {
+	if scanner.iter.ValidForPrefix(scanner.cfPrefixBytes) {
 		item := scanner.iter.Item()
 		key := item.KeyCopy(nil)
 		var cmpKey []byte
@@ -86,8 +97,20 @@ func (scanner *BadgerScanner) Valid() bool {
 		}
 		if bytes.Compare(key, cmpKey) == 0 {
 			// We have reached the last key. The scanner is no longer valid.
+			scanner.currEntry = nil
 			return false
 		}
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			scanner.currEntry = nil
+			return false
+		}
+		entry := CFStoreEntry{
+			Key:          ExtractUserKey(scanner.cf, key),
+			Value:        val,
+			ColumnFamily: scanner.cf,
+		}
+		scanner.currEntry = &entry
 		return true
 	}
 	return false
@@ -95,9 +118,14 @@ func (scanner *BadgerScanner) Valid() bool {
 
 func (scanner *BadgerScanner) Next() {
 	scanner.iter.Next()
+	scanner.currEntry = nil
 }
 
 func (scanner *BadgerScanner) GetItem() (key []byte, val []byte, err error) {
+	if scanner.currEntry != nil {
+		defer func() { scanner.currEntry = nil }()
+		return scanner.currEntry.Key, scanner.currEntry.Value, nil
+	}
 	item := scanner.iter.Item()
 	key = ExtractUserKey(scanner.cf, item.KeyCopy(nil))
 	val, err = item.ValueCopy(nil)

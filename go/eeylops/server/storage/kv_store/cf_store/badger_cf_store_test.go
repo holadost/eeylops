@@ -96,7 +96,7 @@ func doSingleActorIO(testDir string, cf string) {
 	opts.NumCompactors = 2
 	store := NewBadgerCFStore(testDir, opts)
 	defer store.Close()
-	doIO(store, cf)
+	doStoreIO(store, cf)
 }
 
 func doConcurrentIO(testDir string, numWorkers int) {
@@ -117,7 +117,7 @@ func doConcurrentIO(testDir string, numWorkers int) {
 				glog.Fatalf("Unable to add column family due to err: %v", err)
 			}
 		}
-		doIO(store, cfName)
+		doStoreIO(store, cfName)
 		wg.Done()
 	}
 	for ii := 0; ii < numWorkers; ii++ {
@@ -128,7 +128,7 @@ func doConcurrentIO(testDir string, numWorkers int) {
 	wg.Wait()
 }
 
-func doIO(store CFStore, cf string) {
+func doStoreIO(store CFStore, cf string) {
 	batchSize := 10
 	numIters := 20
 	// Batch write values
@@ -215,7 +215,87 @@ func doIO(store CFStore, cf string) {
 		}
 	}
 
-	// Batch read and verify values
+	// Scan using scanner and verify values
+	glog.Infof("Testing forward scanner!")
+	scanner, err := store.NewScanner(cf, nil, false)
+	if err != nil {
+		glog.Fatalf("Unable to initialize scanner due to err: %v", err)
+	}
+	count := -1
+	for scanner.Rewind(); scanner.Valid(); scanner.Next() {
+		count++
+		if count == numIters*batchSize {
+			glog.Fatalf("Scan is continuing even when it should have finished!")
+		}
+		key, val, err := scanner.GetItem()
+		if err != nil {
+			glog.Fatalf("Unable to scan item due to err: %v", err)
+		}
+		expectedKey := []byte(fmt.Sprintf("key-%03d", count))
+		expectedVal := []byte(fmt.Sprintf("value-%03d", count))
+		if bytes.Compare(key, expectedKey) != 0 {
+			glog.Fatalf("Key mismatch. Expected: %s, Got: %s", string(expectedKey), string(key))
+		}
+		if bytes.Compare(val, expectedVal) != 0 {
+			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedVal), string(val))
+		}
+	}
+	scanner.Close()
+
+	glog.Infof("Testing forward scanner with start key")
+	count = 4
+	scanner, err = store.NewScanner(cf, []byte(fmt.Sprintf("key-%03d", count+1)), false)
+	if err != nil {
+		glog.Fatalf("Unable to initialize scanner due to err: %v", err)
+	}
+	for scanner.Rewind(); scanner.Valid(); scanner.Next() {
+		count++
+		if count == numIters*batchSize {
+			glog.Fatalf("Scan is continuing even when it should have finished!")
+		}
+		key, val, err := scanner.GetItem()
+		if err != nil {
+			glog.Fatalf("Unable to scan item due to err: %v", err)
+		}
+		expectedKey := []byte(fmt.Sprintf("key-%03d", count))
+		expectedVal := []byte(fmt.Sprintf("value-%03d", count))
+		if bytes.Compare(key, expectedKey) != 0 {
+			glog.Fatalf("Key mismatch. Expected: %s, Got: %s", string(expectedKey), string(key))
+		}
+		if bytes.Compare(val, expectedVal) != 0 {
+			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedVal), string(val))
+		}
+	}
+	scanner.Close()
+
+	// Scan using scanner in reverse and verify values
+	glog.Infof("Testing reverse scanner!")
+	scanner, err = store.NewScanner(cf, nil, true)
+	if err != nil {
+		glog.Fatalf("Unable to initialize scanner due to err: %v", err)
+	}
+	count = numIters * batchSize
+	for scanner.Rewind(); scanner.Valid(); scanner.Next() {
+		count--
+		if count < 0 {
+			glog.Fatalf("Scan is continuing even when it should have finished!")
+		}
+		key, val, err := scanner.GetItem()
+		if err != nil {
+			glog.Fatalf("Unable to scan item due to err: %v", err)
+		}
+		expectedKey := []byte(fmt.Sprintf("key-%03d", count))
+		expectedVal := []byte(fmt.Sprintf("value-%03d", count))
+		if bytes.Compare(key, expectedKey) != 0 {
+			glog.Fatalf("Key mismatch. Expected: %s, Got: %s", string(expectedKey), string(key))
+		}
+		if bytes.Compare(val, expectedVal) != 0 {
+			glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedVal), string(val))
+		}
+	}
+	scanner.Close()
+
+	// Batch delete keys.
 	glog.Infof("Testing BatchDelete")
 	for iter := 0; iter < numIters; iter++ {
 		var keys []*CFStoreKey
@@ -252,6 +332,7 @@ func doIO(store CFStore, cf string) {
 		}
 	}
 
+	// Test single put, get, delete.
 	glog.Infof("Testing single put, get and delete")
 	singleKey := []byte("singleKey")
 	singleVal := []byte("singleVal")
@@ -262,7 +343,7 @@ func doIO(store CFStore, cf string) {
 	var key CFStoreKey
 	key.Key = singleKey
 	key.ColumnFamily = cf
-	err := store.Put(&entry)
+	err = store.Put(&entry)
 	if err != nil {
 		glog.Fatalf("Hit an unexpected error while loading single key. Err: %s", err.Error())
 		return
