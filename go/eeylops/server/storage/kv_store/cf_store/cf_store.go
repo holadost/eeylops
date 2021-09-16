@@ -12,6 +12,8 @@ type CFStoreKey struct {
 }
 
 type CFStore interface {
+	// Close the store.
+	Close() error
 	// GetDataDir returns the data directory of the store.
 	GetDataDir() string
 	// Size returns the total size(in bytes) of the backing store.

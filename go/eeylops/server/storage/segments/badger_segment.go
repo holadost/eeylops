@@ -6,6 +6,7 @@ import (
 	"eeylops/server/base"
 	sbase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
+	"eeylops/server/storage/kv_store/cf_store"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"errors"
@@ -20,9 +21,8 @@ import (
 )
 
 var (
-	kLastRLogIdxKeyBytes          = sbase.KLastRLogIdxKeyBytes
-	kTimestampIndexPrefixKeyBytes = []byte(kTimestampIndexKeyPrefix)
-	KOffSetPrefixBytes            = []byte(kOffsetKeyPrefix)
+	kLastRLogIdxKeyBytes = sbase.KLastRLogIdxKeyBytes
+	kNextIndexKeyBytes   = []byte("next_index_key")
 )
 
 // BadgerSegment implements Segment where the data is backed using badger db.
@@ -32,7 +32,7 @@ type BadgerSegment struct {
 	topicName   string             // Topic name.
 	partitionID uint               // Partition ID.
 	ttlSeconds  int                // TTL seconds for a message.
-	dataDB      kv_store.KVStore   // Backing KV store to hold the data.
+	dataDB      cf_store.CFStore   // Backing KV store to hold the data.
 	metadataDB  *SegmentMetadataDB // Segment metadata DB.
 	startOffset int64              // Segment start offset
 
@@ -58,6 +58,7 @@ type BadgerSegment struct {
 	timestampIndexLock         sync.RWMutex               // This protects timestampBRI
 	timestampIndexChan         chan []TimestampIndexEntry // The channel where the timestamp indexes are forwarded.
 	rebuildIndexOnce           sync.Once                  // Mutex to protect us from building indexes only once.
+	nextTimestampIndexKey      int                        // Next timestamp index key.
 
 }
 
@@ -167,7 +168,7 @@ func (seg *BadgerSegment) Close() error {
 	seg.metadataDB.Close()
 	var err error
 	if seg.dataDB != nil {
-		err = seg.dataDB.Close()
+		seg.dataDB.Close()
 	}
 	seg.metadataDB = nil
 	seg.closed = true
@@ -211,22 +212,41 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	keys := seg.generateKeys(nextOff, base.Offset(len(arg.Entries)))
 	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp,
 		seg.currentIndexBatchSizeBytes, nextOff)
-
-	// Add an index entry if required.
-	currIndexSize := len(seg.timestampBRI)
-	for ii, tse := range tsEntries {
-		keys = append(keys, append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(currIndexSize+ii))...))
-		tse.SetTimestamp(arg.Timestamp)
-		tse.SetOffset(nextOff)
-		values = append(values, tse.Serialize())
+	var entries []*cf_store.CFStoreEntry
+	for ii, key := range keys {
+		entry := &cf_store.CFStoreEntry{
+			Key:          key,
+			Value:        values[ii],
+			ColumnFamily: kOffsetColumnFamily,
+		}
+		entries = append(entries, entry)
 	}
 
-	// Update replicated log index as well.
-	keys = append(keys, kLastRLogIdxKeyBytes)
-	values = append(values, util.UintToBytes(uint64(arg.RLogIdx)))
+	// Add index entries if required.
+	nextIndexKey := seg.getNextIndexKey()
+	for _, tse := range tsEntries {
+		entries = append(entries, &cf_store.CFStoreEntry{
+			Key:          util.UintToBytes(uint64(nextIndexKey)),
+			Value:        tse.Serialize(),
+			ColumnFamily: kTimestampIndexColumnFamily,
+		})
+		nextIndexKey++
+	}
+
+	// Update replicated log index and next index key as well.
+	entries = append(entries,
+		&cf_store.CFStoreEntry{
+			Key:          kLastRLogIdxKeyBytes,
+			Value:        util.UintToBytes(uint64(arg.RLogIdx)),
+			ColumnFamily: kMiscColumnFamily},
+		&cf_store.CFStoreEntry{
+			Key:          kNextIndexKeyBytes,
+			Value:        util.UintToBytes(uint64(nextIndexKey)),
+			ColumnFamily: kMiscColumnFamily,
+		})
 
 	// Persist entries.
-	err := seg.dataDB.BatchPut(keys, values)
+	err := seg.dataDB.BatchPut(entries)
 	if err != nil {
 		seg.logger.Errorf("Unable to append entries in segment: %d due to err: %s", seg.ID(), err.Error())
 		ret.Error = ErrSegmentBackend
@@ -413,6 +433,17 @@ func (seg *BadgerSegment) setLastMsgTs(ts int64) {
 	atomic.StoreInt64(&seg.lastMsgTs, ts)
 }
 
+func (seg *BadgerSegment) getNextIndexKey() int {
+	return seg.nextTimestampIndexKey
+}
+
+func (seg *BadgerSegment) setNextIndexKey(key int) {
+	if key <= seg.nextTimestampIndexKey {
+		seg.logger.Fatalf("Key: %d must be greater than the next index key: %d", key, seg.nextTimestampIndexKey)
+	}
+	seg.nextTimestampIndexKey = key
+}
+
 // sanitizeScanArg is a helper method to Scan that checks if the arguments provided are fine. If not, it populates
 // ret and returns an error. This method assumes that the segLock has been acquired.
 func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesRet) error {
@@ -534,7 +565,14 @@ func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet,
 	}
 	endOffset = startOffset + tmpNumMsgs - 1
 	sk = seg.offsetToKey(startOffset)
-	scanner := seg.dataDB.CreateScanner(KOffSetPrefixBytes, sk, false)
+	scanner, err := seg.dataDB.NewScanner(kOffsetColumnFamily, sk, false)
+	if err != nil {
+		seg.logger.Errorf("Failed to create scanner while reading segment due to err: %v", err)
+		ret.Error = ErrSegmentBackend
+		ret.Values = nil
+		ret.NextOffset = -1
+		return
+	}
 	defer scanner.Close()
 	bytesScannedSoFar := int64(0)
 	// now := time.Now().UnixNano()
@@ -575,13 +613,16 @@ func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet,
 
 // getMsgAtOffset fetches a single offset from the backend.
 func (seg *BadgerSegment) getMsgAtOffset(offset base.Offset) (*Message, error) {
-	val, err := seg.dataDB.Get(seg.offsetToKey(offset))
+	entry, err := seg.dataDB.Get(&cf_store.CFStoreKey{
+		Key:          seg.offsetToKey(offset),
+		ColumnFamily: kOffsetColumnFamily,
+	})
 	if err != nil {
 		seg.logger.Errorf("Unable to get offset: %d due to err: %s", offset, err.Error())
 		return nil, ErrSegmentBackend
 	}
 	var msg Message
-	msg.InitializeFromRaw(val)
+	msg.InitializeFromRaw(entry.Value)
 	return &msg, nil
 }
 
@@ -592,7 +633,11 @@ func (seg *BadgerSegment) findFirstOffsetWithTimestampGE(ts int64) (base.Offset,
 	if startOffsetHint == -1 {
 		return -1, ErrSegmentInvalidTimestamp
 	}
-	scanner := seg.dataDB.CreateScanner(KOffSetPrefixBytes, seg.offsetToKey(startOffsetHint), false)
+	scanner, err := seg.dataDB.NewScanner(kOffsetColumnFamily, seg.offsetToKey(startOffsetHint), false)
+	if err != nil {
+		seg.logger.Errorf("Unable to initialize scanner due to err: %v", err)
+		return -1, ErrSegmentBackend
+	}
 	for ; scanner.Valid(); scanner.Next() {
 		key, val, err := scanner.GetItem()
 		if err != nil {
@@ -623,28 +668,28 @@ func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base
 
 // offsetToKey converts the given offset to a key representation for dataDB.
 func (seg *BadgerSegment) offsetToKey(offset base.Offset) []byte {
-	return append(KOffSetPrefixBytes, util.UintToBytes(uint64(offset))...)
+	return util.UintToBytes(uint64(offset))
 }
 
 // keyToOffset converts the key representation of the offset(from dataDB) to base.Offset type.
 func (seg *BadgerSegment) keyToOffset(key []byte) base.Offset {
-	if len(key) != len(KOffSetPrefixBytes)+8 {
+	if len(key) != 8 {
 		seg.logger.Fatalf("Given key: %s is not an offset key", string(key))
 	}
-	return base.Offset(util.BytesToUint(key[len(KOffSetPrefixBytes):]))
+	return base.Offset(util.BytesToUint(key))
 }
 
 // numToIndexKey converts the given number to a key representation for dataDB.
 func (seg *BadgerSegment) numToIndexKey(num int) []byte {
-	return append(kTimestampIndexPrefixKeyBytes, util.UintToBytes(uint64(num))...)
+	return util.UintToBytes(uint64(num))
 }
 
 // indexKeyToNum converts the given index key to its numeric representation.
 func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
-	if len(key) != len(kTimestampIndexPrefixKeyBytes)+8 {
+	if len(key) != 8 {
 		seg.logger.Fatalf("Expected timestamp index key. Got: %s", string(key))
 	}
-	return int(util.BytesToUint(key[len(kTimestampIndexPrefixKeyBytes):]))
+	return int(util.BytesToUint(key))
 }
 
 // A helper method that lets us know if a key has started with the given prefix.
@@ -713,7 +758,7 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 		return seg.timestampBRI[len(seg.timestampBRI)-1].GetOffset()
 	}
 
-	// Binary search index to find nearest offset lesser than the given timestamp.
+	// Binary search index to find the nearest offset lesser than the given timestamp.
 	left := 0
 	right := len(seg.timestampBRI) - 1
 	nearestIdx := -1
@@ -725,9 +770,6 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 		if seg.timestampBRI[mid].GetTimestamp() >= ts {
 			right = mid - 1
 		} else {
-			// mid now could be the potential nearest index as the given timestamp is definitely not present to the
-			// leftside of mid(as all elements would be smaller than mid and hence couldn't be nearer than we are now).
-			// It is still possible that we might find a candidate to the right of mid in subsequent iterations.
 			nearestIdx = mid
 			left = mid + 1
 		}
@@ -746,7 +788,10 @@ func (seg *BadgerSegment) rebuildIndexes() {
 	seg.rebuildIndexOnce.Do(func() {
 		seg.logger.VInfof(1, "Rebuilding segment indexes")
 		startIdxKey := seg.numToIndexKey(0)
-		_, err := seg.dataDB.Get(startIdxKey)
+		_, err := seg.dataDB.Get(&cf_store.CFStoreKey{
+			Key:          startIdxKey,
+			ColumnFamily: kTimestampIndexColumnFamily,
+		})
 		if err != nil {
 			if err == kv_store.ErrKVStoreKeyNotFound {
 				seg.logger.VInfof(1, "No indexes found. Nothing to rebuild")
@@ -760,7 +805,10 @@ func (seg *BadgerSegment) rebuildIndexes() {
 		seg.timestampBRI = nil
 
 		// Scan the DB for keys with the timestamp index prefix and rebuild timestampBRI.
-		itr := seg.dataDB.CreateScanner(kTimestampIndexPrefixKeyBytes, startIdxKey, false)
+		itr, err := seg.dataDB.NewScanner(kTimestampIndexColumnFamily, nil, false)
+		if err != nil {
+			seg.logger.Fatalf("Unable to initialize scanner to rebuild indexes due to err: %v", err)
+		}
 		defer itr.Close()
 		itr.Seek(startIdxKey)
 		count := 0
@@ -768,10 +816,6 @@ func (seg *BadgerSegment) rebuildIndexes() {
 			key, val, err := itr.GetItem()
 			if err != nil {
 				seg.logger.Fatalf("Unable to initialize index due to scan err: %s", err.Error())
-			}
-			// Sanity check to make sure that the key is of the expected type.
-			if !seg.doesKeyStartWithPrefix(key, kTimestampIndexPrefixKeyBytes) {
-				seg.logger.Fatalf("Did not expect other keys in index prefix scan. Got key: %s", string(key))
 			}
 			idxNum := seg.indexKeyToNum(key)
 			// Sanity check to make sure that the entry is monotonically increasing.
@@ -789,28 +833,45 @@ func (seg *BadgerSegment) rebuildIndexes() {
 
 // Opens the segment. This method assumes that segLock has been acquired.
 func (seg *BadgerSegment) open() {
+	// Initialize KV store.
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
 	opts.SyncWrites = true
 	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
 	opts.BlockCacheSize = 0 // Disable block cache.
 	opts.NumCompactors = 2  // Use 2 compactors.
-	opts.IndexCacheSize = 0
+	opts.IndexCacheSize = 32 * (1024 * 1024)
 	opts.Compression = options.None
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.CompactL0OnClose = false
+	opts.LoadBloomsOnOpen = false
 	opts.Logger = seg.logger
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
 		opts.NumMemtables = 0
 	}
 	opts.Logger = seg.logger
-	seg.dataDB = kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
+	seg.dataDB = cf_store.NewBadgerCFStore(path.Join(seg.rootDir, dataDirName), opts)
 
-	go seg.indexer()
+	// Create column families.
+	cfs := []string{kOffsetColumnFamily, kTimestampIndexColumnFamily, kMiscColumnFamily}
+	for _, cf := range cfs {
+		err := seg.dataDB.AddColumnFamily(cf)
+		if err == nil {
+			continue
+		}
+		if err == kv_store.ErrKVStoreColumnFamilyExists {
+			continue
+		}
+		seg.logger.Fatalf("Unable to add column family: %s due to err: %v", cf, err)
+	}
+
 	// Gather the last replicated log index in the segment.
-	val, err := seg.dataDB.Get(kLastRLogIdxKeyBytes)
+	entry, err := seg.dataDB.Get(&cf_store.CFStoreKey{
+		Key:          kLastRLogIdxKeyBytes,
+		ColumnFamily: kMiscColumnFamily,
+	})
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// Segment is empty.
@@ -818,40 +879,50 @@ func (seg *BadgerSegment) open() {
 			seg.firstMsgTs = -1
 			seg.lastMsgTs = -1
 			seg.lastRLogIdx = -1
-			return
 		} else {
 			seg.logger.Fatalf("Error while getting last log index. Error: %s", err.Error())
 		}
 	} else {
-		seg.lastRLogIdx = int64(util.BytesToUint(val))
+		seg.lastRLogIdx = int64(util.BytesToUint(entry.Value))
 	}
 
+	// Gather the next index key.
+	entry, err = seg.dataDB.Get(&cf_store.CFStoreKey{
+		Key:          kNextIndexKeyBytes,
+		ColumnFamily: kMiscColumnFamily,
+	})
+	if err != nil {
+		if err == kv_store.ErrKVStoreKeyNotFound {
+			// Segment is empty.
+			seg.nextTimestampIndexKey = 0
+		} else {
+			seg.logger.Fatalf("Error while getting last log index. Error: %s", err.Error())
+		}
+	} else {
+		seg.nextTimestampIndexKey = int(util.BytesToUint(entry.Value))
+	}
+
+	// Start indexer.
+	go seg.indexer()
+
+	if seg.nextOffset == int64(seg.metadata.StartOffset) {
+		// Segment is empty. Return early.
+		return
+	}
 	// Gather first and last message timestamps by scanning in both forward and reverse directions. Also gather the
 	// last offset appended and hence the nextOffset in the segment.
 	dirs := []bool{false, true}
 	for _, dir := range dirs {
-		var sk []byte
-		// TODO: Ugly hack here currently. When scanning in forward direction, the timestamp index keys come first.
-		// TODO: Prefix scans as a result return immediately since the very first key does not contain our prefix.
-		// TODO: So for forward scans, we set the start key forcefully. For reverse scans, we luck out because
-		// TODO: the offset keys are the last keys in the DB and hence no start key is required. If we did, this would
-		// TODO: fail since we don't know the last key(this method in fact initializes the last offset in the segment).
-		// TODO: The clean fix would be to have the KV store provide a CF notion that would protect us from these
-		// TODO: sort of scenarios.
-		if !dir {
-			sk = seg.offsetToKey(seg.metadata.StartOffset)
+		itr, err := seg.dataDB.NewScanner(kOffsetColumnFamily, nil, dir)
+		if err != nil {
+			seg.logger.Fatalf("Unable to create scanner due to err: %v", err)
 		}
-		itr := seg.dataDB.CreateScanner(KOffSetPrefixBytes, sk, dir)
 		for ; itr.Valid(); itr.Next() {
 			key, item, err := itr.GetItem()
 			if err != nil {
 				seg.logger.Fatalf("Unable to initialize next offset, first and last message timestamps due to "+
 					"scan err: %s", err.Error())
 			}
-			if bytes.Compare(key[0:len(KOffSetPrefixBytes)], KOffSetPrefixBytes) != 0 {
-				seg.logger.Fatalf("Expected key with offset prefix. Got: %s", string(key))
-			}
-
 			// Set next offset and last appended timestamp for segment.
 			var msg Message
 			msg.InitializeFromRaw(item)
