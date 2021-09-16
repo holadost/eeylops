@@ -266,27 +266,27 @@ func TestBadgerCFStoreTxn(t *testing.T) {
 	keys[0].ColumnFamily = "cf2"
 	err = txn.Put(entries[0])
 	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
-		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existent CF: %v", err)
 	}
 	err = txn.BatchPut(entries)
 	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
-		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existent CF: %v", err)
 	}
 	err = txn.BatchDelete(keys)
 	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
-		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existent CF: %v", err)
 	}
 	err = txn.Delete(keys[0])
 	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
-		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existent CF: %v", err)
 	}
 	_, err = txn.Get(keys[0])
 	if err != kv_store.ErrKVStoreColumnFamilyNotFound {
-		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existent CF: %v", err)
 	}
 	_, errs = txn.BatchGet(keys)
 	if errs[0] != kv_store.ErrKVStoreColumnFamilyNotFound {
-		glog.Fatalf("Hit an unexpected exception while attempting to put to non existen CF: %v", err)
+		glog.Fatalf("Hit an unexpected exception while attempting to put to non existent CF: %v", err)
 	}
 	txn.Discard()
 }
