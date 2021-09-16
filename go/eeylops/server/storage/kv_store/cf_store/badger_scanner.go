@@ -2,22 +2,25 @@ package cf_store
 
 import (
 	"bytes"
+	"eeylops/server/storage/kv_store"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/golang/glog"
 )
 
+// BadgerScanner allows the user to scan a column family from the KV store.
 type BadgerScanner struct {
-	store         *internalBadgerKVStore
-	iter          *badger.Iterator
-	txn           *badger.Txn
-	localTxn      bool
-	startKey      []byte
-	cf            string
-	reverse       bool
-	fkBytes       []byte
-	lkBytes       []byte
-	cfPrefixBytes []byte
-	currEntry     *CFStoreEntry
+	store         *internalBadgerKVStore // Internal store.
+	iter          *badger.Iterator       // Badger iterator.
+	txn           *badger.Txn            // Badger transaction.
+	localTxn      bool                   // Flag to indicate whether scanner is using a local transaction.
+	startKey      []byte                 // Start key for scan.
+	cf            string                 // Name of the column family.
+	reverse       bool                   // Reverse flag.
+	fkBytes       []byte                 // First CF marker key.
+	lkBytes       []byte                 // Last CF marker key.
+	cfPrefixBytes []byte                 // CF prefix bytes.
+	currEntry     *CFStoreEntry          // Current entry.
+	currErr       error                  // Current error.
 }
 
 func newBadgerScanner(store *internalBadgerKVStore, cf string, startKey []byte, reverse bool) *BadgerScanner {
@@ -80,60 +83,43 @@ func (scanner *BadgerScanner) Rewind() {
 		} else {
 			scanner.iter.Seek(scanner.fkBytes)
 		}
-		// Skip boundary key.
+		// Skip CF marker key.
 		scanner.iter.Next()
 	}
+	scanner.mayBeFetchNextItem()
 }
 
 func (scanner *BadgerScanner) Valid() bool {
-	if scanner.iter.ValidForPrefix(scanner.cfPrefixBytes) {
-		item := scanner.iter.Item()
-		key := item.KeyCopy(nil)
-		var cmpKey []byte
-		if scanner.reverse {
-			cmpKey = scanner.fkBytes
-		} else {
-			cmpKey = scanner.lkBytes
-		}
-		if bytes.Compare(key, cmpKey) == 0 {
-			// We have reached the last key. The scanner is no longer valid.
-			scanner.currEntry = nil
-			return false
-		}
-		val, err := item.ValueCopy(nil)
-		if err != nil {
-			scanner.currEntry = nil
-			return false
-		}
-		entry := CFStoreEntry{
-			Key:          ExtractUserKey(scanner.cf, key),
-			Value:        val,
-			ColumnFamily: scanner.cf,
-		}
-		scanner.currEntry = &entry
-		return true
+	if scanner.currEntry == nil {
+		return false
 	}
-	return false
+	return true
 }
 
 func (scanner *BadgerScanner) Next() {
-	scanner.iter.Next()
 	scanner.currEntry = nil
+	scanner.currErr = nil
+	scanner.iter.Next()
+	if !scanner.iter.ValidForPrefix(scanner.cfPrefixBytes) {
+		return
+	}
+	scanner.mayBeFetchNextItem()
 }
 
 func (scanner *BadgerScanner) GetItem() (key []byte, val []byte, err error) {
+	defer func() {
+		scanner.currEntry = nil
+		scanner.currErr = nil
+	}()
 	if scanner.currEntry != nil {
-		defer func() { scanner.currEntry = nil }()
-		return scanner.currEntry.Key, scanner.currEntry.Value, nil
+		return scanner.currEntry.Key, scanner.currEntry.Value, scanner.currErr
 	}
-	item := scanner.iter.Item()
-	key = ExtractUserKey(scanner.cf, item.KeyCopy(nil))
-	val, err = item.ValueCopy(nil)
-	return
+	return nil, nil, nil
 }
 
 func (scanner *BadgerScanner) Seek(key []byte) {
 	scanner.iter.Seek(BuildCFKeyWithCFPrefixBytes(scanner.cfPrefixBytes, key))
+	scanner.mayBeFetchNextItem()
 }
 
 func (scanner *BadgerScanner) Close() {
@@ -142,4 +128,31 @@ func (scanner *BadgerScanner) Close() {
 		// Discard the transaction iff we created it. If it was passed from outside, skip discarding.
 		scanner.txn.Discard()
 	}
+}
+
+func (scanner *BadgerScanner) mayBeFetchNextItem() {
+	item := scanner.iter.Item()
+	key := item.KeyCopy(nil)
+	var cmpKey []byte
+	if scanner.reverse {
+		cmpKey = scanner.fkBytes
+	} else {
+		cmpKey = scanner.lkBytes
+	}
+	if bytes.Compare(key, cmpKey) == 0 {
+		// We have reached the last key. Nothing more to fetch.
+		return
+	}
+	var entry CFStoreEntry
+	scanner.currEntry = &entry
+	scanner.currErr = nil
+	entry.Key = ExtractUserKey(scanner.cf, key)
+	entry.ColumnFamily = scanner.cf
+	val, err := item.ValueCopy(nil)
+	if err != nil {
+		glog.Errorf("Unable to read value due to err: %v", err)
+		scanner.currErr = kv_store.ErrKVStoreBackend
+		return
+	}
+	entry.Value = val
 }

@@ -67,3 +67,18 @@ func IsColumnFamilyNameValid(name string) bool {
 	}
 	return true
 }
+
+// IsKeyValid is a helper function that checks if the key is valid. skipLowerBound flag can be used if we want
+// to just check the upper bound and skip the lower bound.
+func IsKeyValid(key []byte, skipLowerBound bool) bool {
+	if len(key) > kMaxKeyLength {
+		return false
+	}
+	if skipLowerBound {
+		return true
+	}
+	if len(key) == 0 {
+		return false
+	}
+	return true
+}

@@ -261,6 +261,9 @@ func (ikvStore *internalBadgerKVStore) GetWithTxn(txn *badger.Txn, key *CFStoreK
 		return nil, kv_store.ErrKVStoreClosed
 	}
 	var val []byte
+	if !IsKeyValid(key.Key, false) {
+		return nil, kv_store.ErrKVStoreInvalidKey
+	}
 	cf, err := ikvStore.getCFIfExists(key.ColumnFamily)
 	if err != nil {
 		return nil, err
@@ -312,6 +315,9 @@ func (ikvStore *internalBadgerKVStore) PutWithTxn(txn *badger.Txn, entry *CFStor
 		ikvStore.logger.Errorf("KV store is closed")
 		return kv_store.ErrKVStoreClosed
 	}
+	if !IsKeyValid(entry.Key, false) {
+		return kv_store.ErrKVStoreInvalidKey
+	}
 	cf, err := ikvStore.getCFIfExists(entry.ColumnFamily)
 	if err != nil {
 		return err
@@ -352,6 +358,9 @@ func (ikvStore *internalBadgerKVStore) DeleteWithTxn(txn *badger.Txn, key *CFSto
 	if ikvStore.closed {
 		return kv_store.ErrKVStoreClosed
 	}
+	if !IsKeyValid(key.Key, false) {
+		return kv_store.ErrKVStoreInvalidKey
+	}
 	cf, err := ikvStore.getCFIfExists(key.ColumnFamily)
 	if err != nil {
 		return err
@@ -381,6 +390,9 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 	scanSizeBytes int, reverse bool) (entries []*CFStoreEntry, nextKey []byte, retErr error) {
 	if ikvStore.closed {
 		return nil, nil, kv_store.ErrKVStoreClosed
+	}
+	if !IsKeyValid(startKey, true) {
+		return nil, nil, kv_store.ErrKVStoreInvalidKey
 	}
 	actualCf, err := ikvStore.getCFIfExists(cf)
 	if err != nil {
@@ -468,6 +480,11 @@ func (ikvStore *internalBadgerKVStore) BatchGetWithTxn(txn *badger.Txn, keys []*
 		return
 	}
 	for _, key := range keys {
+		if !IsKeyValid(key.Key, false) {
+			values = append(values, nil)
+			errs = append(errs, kv_store.ErrKVStoreInvalidKey)
+			continue
+		}
 		actualCf, err := ikvStore.getCFIfExists(key.ColumnFamily)
 		if err != nil {
 			values = append(values, nil)
@@ -529,6 +546,9 @@ func (ikvStore *internalBadgerKVStore) BatchPut(entries []*CFStoreEntry) error {
 // commits and rollbacks must be handled by the caller.
 func (ikvStore *internalBadgerKVStore) BatchPutWithTxn(txn *badger.Txn, entries []*CFStoreEntry) error {
 	for _, entry := range entries {
+		if !IsKeyValid(entry.Key, false) {
+			return kv_store.ErrKVStoreInvalidKey
+		}
 		actualCf, err := ikvStore.getCFIfExists(entry.ColumnFamily)
 		if err != nil {
 			return err
@@ -569,6 +589,9 @@ func (ikvStore *internalBadgerKVStore) BatchDelete(keys []*CFStoreKey) error {
 func (ikvStore *internalBadgerKVStore) BatchDeleteWithTxn(txn *badger.Txn, keys []*CFStoreKey) error {
 	var err error
 	for _, key := range keys {
+		if !IsKeyValid(key.Key, false) {
+			return kv_store.ErrKVStoreInvalidKey
+		}
 		var actualCf string
 		actualCf, err = ikvStore.getCFIfExists(key.ColumnFamily)
 		if err != nil {

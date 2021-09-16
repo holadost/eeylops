@@ -31,4 +31,8 @@ var (
 
 	// ErrKVStoreColumnFamilyNotFound is returned when the CF already exists.
 	ErrKVStoreColumnFamilyNotFound = errors.New("ErrKVStoreColumnFamilyNotFound: column family not found")
+
+	// ErrKVStoreInvalidKey is returned when the key is invalid.
+	ErrKVStoreInvalidKey = errors.New("ErrKVStoreInvalidKey: invalid key. key must be > 0 bytes and " +
+		"<= 60000 bytes")
 )
