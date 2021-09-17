@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
+	"github.com/golang/glog"
 	"os"
 	"path"
 	"sync"
@@ -264,6 +265,9 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	seg.setLastMsgTs(arg.Timestamp)
 	nextOff += base.Offset(len(arg.Entries))
 	seg.setNextOffset(nextOff)
+	if len(tsEntries) > 0 {
+		seg.setNextIndexKey(nextIndexKey)
+	}
 	seg.liveStateLock.Unlock()
 
 	if len(tsEntries) > 0 {
@@ -525,10 +529,13 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 		}
 	} else {
 		startTs := arg.StartTimestamp
+		glog.Infof("Arg Start Ts: %d, First Unexpired Ts: %d, First msg ts: %d",
+			arg.StartTimestamp, firstUnexpiredMsgTs, firstMsgTs)
 		mayBeStartTs := util.MaxInt(firstUnexpiredMsgTs, firstMsgTs)
 		if mayBeStartTs >= startTs {
 			startTs = mayBeStartTs
 		}
+		glog.Infof("Chosen start ts: %d", startTs)
 		var err error
 		startOffset, err = seg.findFirstOffsetWithTimestampGE(startTs)
 		if err != nil {
@@ -833,6 +840,7 @@ func (seg *BadgerSegment) rebuildIndexes() {
 
 // Opens the segment. This method assumes that segLock has been acquired.
 func (seg *BadgerSegment) open() {
+	segEmpty := false
 	// Initialize KV store.
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))
 	opts.SyncWrites = true
@@ -840,12 +848,12 @@ func (seg *BadgerSegment) open() {
 	opts.VerifyValueChecksum = true
 	opts.BlockCacheSize = 0 // Disable block cache.
 	opts.NumCompactors = 2  // Use 2 compactors.
-	opts.IndexCacheSize = 32 * (1024 * 1024)
+	opts.IndexCacheSize = 0
 	opts.Compression = options.None
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.CompactL0OnClose = false
-	opts.LoadBloomsOnOpen = false
+	opts.LoadBloomsOnOpen = true
 	opts.Logger = seg.logger
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
@@ -875,10 +883,13 @@ func (seg *BadgerSegment) open() {
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// Segment is empty.
+			seg.logger.Infof("Did not find any records in segment. Assuming it is empty!")
+			segEmpty = true
 			seg.nextOffset = int64(seg.metadata.StartOffset)
 			seg.firstMsgTs = -1
 			seg.lastMsgTs = -1
 			seg.lastRLogIdx = -1
+			seg.nextTimestampIndexKey = 0
 		} else {
 			seg.logger.Fatalf("Error while getting last log index. Error: %s", err.Error())
 		}
@@ -905,10 +916,11 @@ func (seg *BadgerSegment) open() {
 	// Start indexer.
 	go seg.indexer()
 
-	if seg.nextOffset == int64(seg.metadata.StartOffset) {
+	if segEmpty {
 		// Segment is empty. Return early.
 		return
 	}
+
 	// Gather first and last message timestamps by scanning in both forward and reverse directions. Also gather the
 	// last offset appended and hence the nextOffset in the segment.
 	dirs := []bool{false, true}
@@ -938,6 +950,6 @@ func (seg *BadgerSegment) open() {
 		}
 		itr.Close()
 	}
-	seg.logger.VInfof(1, "First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
+	seg.logger.Infof("First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
 		"Last RLog Index: %d", seg.firstMsgTs, seg.lastMsgTs, seg.nextOffset, seg.lastRLogIdx)
 }

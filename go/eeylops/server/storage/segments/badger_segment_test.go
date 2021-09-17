@@ -358,6 +358,11 @@ func TestBadgerSegment_Scan(t *testing.T) {
 		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
 	bds.SetMetadata(initialMeta)
+	bds.Close()
+	bds, err = NewBadgerSegment(&opts)
+	if err != nil {
+		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
+	}
 	bds.Open()
 	batchSize := 5
 	numIters := 5
@@ -506,9 +511,9 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	bds.SetMetadata(initialMeta)
 	bds.Open()
 	batchSize := 10
-	numIters := 5000
+	numIters := 500
 	lastRLogIdx := int64(0)
-	token := make([]byte, 10)
+	token := make([]byte, 1024*1024)
 	rand.Read(token)
 	var values [][]byte
 	for ii := 0; ii < batchSize; ii++ {
