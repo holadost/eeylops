@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"eeylops/comm"
-	broker2 "eeylops/server/broker"
+	"eeylops/server/broker"
 	"eeylops/server/mothership"
 	"flag"
 	"fmt"
@@ -22,9 +22,9 @@ type RPCServer struct {
 	host             string
 	port             int
 	grpcServer       *grpc.Server
-	instanceSelector *broker2.BrokerSelector
+	instanceSelector *broker.BrokerSelector
 	motherShip       *mothership.MotherShip
-	broker           *broker2.Broker
+	broker           *broker.Broker
 }
 
 func NewRPCServer(host string, port int) *RPCServer {
@@ -62,12 +62,12 @@ func TestOnlyNewRPCServer(host string, port int, testDir string) *RPCServer {
 	rpcServer.port = port
 	rpcServer.motherShip = mothership.NewMotherShip(testDir)
 	brokerId := "hello_world_broker"
-	opts := broker2.BrokerOpts{
+	opts := broker.BrokerOpts{
 		DataDirectory: testDir,
 		PeerAddresses: nil,
 		BrokerID:      brokerId,
 	}
-	rpcServer.broker = broker2.NewBroker(&opts)
+	rpcServer.broker = broker.NewBroker(&opts)
 	return rpcServer
 }
 
