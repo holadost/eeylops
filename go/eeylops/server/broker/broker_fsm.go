@@ -1,4 +1,4 @@
-package server
+package broker
 
 import (
 	"context"
@@ -27,24 +27,24 @@ func (fsm *BrokerFSM) Apply(log *raft.Log) interface{} {
 	if log.Data == nil || len(log.Data) == 0 {
 		fsm.logger.Fatalf("Failed to apply log message as no data was found")
 	}
-	cmd := Deserialize(log.Data)
+	cmd := base.Deserialize(log.Data)
 	switch cmd.CommandType {
-	case KNoOpCommand:
+	case base.KNoOpCommand:
 		// Do nothing.
-		resp := FSMResponse{
-			CommandType: KNoOpCommand,
+		resp := base.FSMResponse{
+			CommandType: base.KNoOpCommand,
 			Error:       nil,
 		}
 		return &resp
-	case KAppendCommand:
+	case base.KAppendCommand:
 		return fsm.append(cmd, log)
-	case KCommitCommand:
+	case base.KCommitCommand:
 		return fsm.commit(cmd, log)
-	case KRegisterConsumerCommand:
+	case base.KRegisterConsumerCommand:
 		return fsm.registerConsumer(cmd, log)
-	case KAddTopicCommand:
+	case base.KAddTopicCommand:
 		return fsm.addTopic(cmd, log)
-	case KRemoveTopicCommand:
+	case base.KRemoveTopicCommand:
 		return fsm.removeTopic(cmd, log)
 	default:
 		fsm.logger.Fatalf("Invalid command type: %d", cmd.CommandType)
@@ -60,12 +60,12 @@ func (fsm *BrokerFSM) Restore(closer io.ReadCloser) error {
 	return nil
 }
 
-func (fsm *BrokerFSM) append(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) append(cmd *base.Command, log *raft.Log) *base.FSMResponse {
 	if len(cmd.AppendCommand.Data) == 0 {
 		fsm.logger.Fatalf("Received an append command with nothing to append. Log Index: %d, Log Term: %d",
 			log.Index, log.Term)
 	}
-	var resp FSMResponse
+	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 	prt, err := fsm.storageController.GetPartition(cmd.AppendCommand.TopicID, cmd.AppendCommand.PartitionID)
@@ -105,7 +105,7 @@ func (fsm *BrokerFSM) append(cmd *Command, log *raft.Log) *FSMResponse {
 	return &resp
 }
 
-func (fsm *BrokerFSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) registerConsumer(cmd *base.Command, log *raft.Log) *base.FSMResponse {
 	if len(cmd.RegisterConsumerCommand.ConsumerID) == 0 {
 		fsm.logger.Fatalf("Invalid consumer ID, Log Index: %d, Log Term: %d", log.Index, log.Term)
 	}
@@ -115,7 +115,7 @@ func (fsm *BrokerFSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse
 	if cmd.RegisterConsumerCommand.PartitionID <= 0 {
 		fsm.logger.Fatalf("Invalid partition ID. Log Index: %d, Log Term: %d", log.Index, log.Term)
 	}
-	var resp FSMResponse
+	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 
@@ -156,7 +156,7 @@ func (fsm *BrokerFSM) registerConsumer(cmd *Command, log *raft.Log) *FSMResponse
 	return &resp
 }
 
-func (fsm *BrokerFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) commit(cmd *base.Command, log *raft.Log) *base.FSMResponse {
 	if cmd.CommitCommand.TopicID == 0 {
 		fsm.logger.Fatalf("No topic name provided when for commit command")
 	}
@@ -164,7 +164,7 @@ func (fsm *BrokerFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 		fsm.logger.Fatalf("Invalid partition ID provided for commit command. Partition ID: %d",
 			cmd.CommitCommand.PartitionID)
 	}
-	var resp FSMResponse
+	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 	tpc, exists := fsm.doesTopicExist(cmd.CommitCommand.TopicID)
@@ -207,7 +207,7 @@ func (fsm *BrokerFSM) commit(cmd *Command, log *raft.Log) *FSMResponse {
 	return &resp
 }
 
-func (fsm *BrokerFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) addTopic(cmd *base.Command, log *raft.Log) *base.FSMResponse {
 	// Sanity check command.
 	topic := &cmd.AddTopicCommand.TopicConfig
 	if len(topic.Name) == 0 {
@@ -221,7 +221,7 @@ func (fsm *BrokerFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
 	}
 	topic.CreatedAt = log.AppendedAt
 	topic.CreationConfirmed = false
-	var resp FSMResponse
+	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 	// Add topic.
@@ -245,12 +245,12 @@ func (fsm *BrokerFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
 	return &resp
 }
 
-func (fsm *BrokerFSM) removeTopic(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *BrokerFSM) removeTopic(cmd *base.Command, log *raft.Log) *base.FSMResponse {
 	// Sanity checks.
 	if cmd.RemoveTopicCommand.TopicID == 0 {
 		fsm.logger.Fatalf("Invalid topic ID")
 	}
-	var resp FSMResponse
+	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 

@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"eeylops/comm"
+	broker2 "eeylops/server/broker"
+	"eeylops/server/mothership"
 	"flag"
 	"fmt"
 	"github.com/golang/glog"
@@ -20,9 +22,9 @@ type RPCServer struct {
 	host             string
 	port             int
 	grpcServer       *grpc.Server
-	instanceSelector *BrokerSelector
-	motherShip       *MotherShip
-	broker           *Broker
+	instanceSelector *broker2.BrokerSelector
+	motherShip       *mothership.MotherShip
+	broker           *broker2.Broker
 }
 
 func NewRPCServer(host string, port int) *RPCServer {
@@ -58,14 +60,14 @@ func TestOnlyNewRPCServer(host string, port int, testDir string) *RPCServer {
 	}
 	rpcServer.host = host
 	rpcServer.port = port
-	rpcServer.motherShip = NewMotherShip(testDir)
+	rpcServer.motherShip = mothership.NewMotherShip(testDir)
 	brokerId := "hello_world_broker"
-	opts := BrokerOpts{
+	opts := broker2.BrokerOpts{
 		DataDirectory: testDir,
 		PeerAddresses: nil,
 		BrokerID:      brokerId,
 	}
-	rpcServer.broker = NewBroker(&opts)
+	rpcServer.broker = broker2.NewBroker(&opts)
 	return rpcServer
 }
 
@@ -96,7 +98,7 @@ func (srv *RPCServer) CreateTopic(ctx context.Context,
 	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
 		return resp, nil
 	}
-	topic, err := srv.motherShip.topicsConfigStore.GetTopicByName(req.GetTopic().GetTopicName())
+	topic, err := srv.motherShip.GetTopicsConfigStore().GetTopicByName(req.GetTopic().GetTopicName())
 	if err != nil {
 		glog.Fatalf("Just added topic to mothership but unable to get it")
 	}

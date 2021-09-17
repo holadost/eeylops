@@ -1,6 +1,7 @@
-package server
+package mothership
 
 import (
+	"eeylops/server/base"
 	"eeylops/server/storage"
 	"eeylops/util/logging"
 	"github.com/hashicorp/raft"
@@ -24,18 +25,18 @@ func (fsm *MotherShipFSM) Apply(log *raft.Log) interface{} {
 	if log.Data == nil || len(log.Data) == 0 {
 		fsm.logger.Fatalf("Failed to apply log message as no data was found")
 	}
-	cmd := Deserialize(log.Data)
+	cmd := base.Deserialize(log.Data)
 	switch cmd.CommandType {
-	case KNoOpCommand:
+	case base.KNoOpCommand:
 		// Do nothing.
-		resp := FSMResponse{
-			CommandType: KNoOpCommand,
+		resp := base.FSMResponse{
+			CommandType: base.KNoOpCommand,
 			Error:       nil,
 		}
 		return &resp
-	case KAddTopicCommand:
+	case base.KAddTopicCommand:
 		return fsm.addTopic(cmd, log)
-	case KRemoveTopicCommand:
+	case base.KRemoveTopicCommand:
 		return fsm.removeTopic(cmd, log)
 	default:
 		fsm.logger.Fatalf("Invalid command type: %d", cmd.CommandType)
@@ -51,7 +52,7 @@ func (fsm *MotherShipFSM) Restore(closer io.ReadCloser) error {
 	return nil
 }
 
-func (fsm *MotherShipFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *MotherShipFSM) addTopic(cmd *base.Command, log *raft.Log) *base.FSMResponse {
 	// Sanity check command.
 	topic := &cmd.AddTopicCommand.TopicConfig
 	if len(topic.Name) == 0 {
@@ -65,7 +66,7 @@ func (fsm *MotherShipFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
 	}
 	topic.CreatedAt = log.AppendedAt
 	topic.CreationConfirmed = false
-	var resp FSMResponse
+	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 	// Add topic.
@@ -89,12 +90,12 @@ func (fsm *MotherShipFSM) addTopic(cmd *Command, log *raft.Log) *FSMResponse {
 	return &resp
 }
 
-func (fsm *MotherShipFSM) removeTopic(cmd *Command, log *raft.Log) *FSMResponse {
+func (fsm *MotherShipFSM) removeTopic(cmd *base.Command, log *raft.Log) *base.FSMResponse {
 	// Sanity checks.
 	if cmd.RemoveTopicCommand.TopicID == 0 {
 		fsm.logger.Fatalf("Invalid topic ID")
 	}
-	var resp FSMResponse
+	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 

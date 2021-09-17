@@ -1,4 +1,4 @@
-package server
+package mothership
 
 import (
 	"context"
@@ -36,10 +36,14 @@ func NewMotherShip(rootDir string) *MotherShip {
 func (ms *MotherShip) initialize() {
 }
 
+func (ms *MotherShip) GetTopicsConfigStore() *storage.TopicsConfigStore {
+	return ms.topicsConfigStore
+}
+
 func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.CreateTopicResponse {
 		var resp comm.CreateTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
 	// Sanity checks.
@@ -70,12 +74,12 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 	tc.PartitionIDs = prtIds
 	tc.TTLSeconds = int(topic.TtlSeconds)
 	tc.CreatedAt = now
-	addTopicMsg := AddTopicMessage{TopicConfig: tc}
-	cmd := Command{
-		CommandType:     KAddTopicCommand,
+	addTopicMsg := base.AddTopicMessage{TopicConfig: tc}
+	cmd := base.Command{
+		CommandType:     base.KAddTopicCommand,
 		AddTopicCommand: addTopicMsg,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(now.UnixNano()),
 		Term:       0,
@@ -87,7 +91,7 @@ func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 
 	// Apply to MothershipFSM, wait for response and handle errors.
 	tmpResp := ms.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
+	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
 		ms.logger.Fatalf("Invalid response from MothershipFSM. Received: %v", tmpResp)
 	}
@@ -105,7 +109,7 @@ func (ms *MotherShip) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 	// Sanity checks.
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RemoveTopicResponse {
 		var resp comm.RemoveTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
 	topicID := base.TopicIDType(req.GetTopicId())
@@ -115,12 +119,12 @@ func (ms *MotherShip) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 	}
 
 	// TODO: This must go through the replication controller and we must be the leader.
-	rmTopicMsg := RemoveTopicMessage{TopicID: topicID}
-	cmd := Command{
-		CommandType:        KRemoveTopicCommand,
+	rmTopicMsg := base.RemoveTopicMessage{TopicID: topicID}
+	cmd := base.Command{
+		CommandType:        base.KRemoveTopicCommand,
 		RemoveTopicCommand: rmTopicMsg,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(time.Now().UnixNano()),
 		Term:       0,
@@ -132,7 +136,7 @@ func (ms *MotherShip) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 
 	// Apply to MothershipFSM, wait for response and handle errors.
 	tmpResp := ms.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
+	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
 		ms.logger.Fatalf("Unable to cast to MothershipFSM response. Received: %v", tmpResp)
 	}
@@ -151,7 +155,7 @@ func (ms *MotherShip) GetTopic(ctx context.Context, req *comm.GetTopicRequest) *
 	makeResponse := func(tpc *base.TopicConfig, ec comm.Error_ErrorCodes, err error,
 		msg string) *comm.GetTopicResponse {
 		var resp comm.GetTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		if tpc != nil {
 			var topicProto comm.Topic
 			topicProto.TopicId = int32(tpc.ID)
@@ -192,7 +196,7 @@ func (ms *MotherShip) GetAllTopics(ctx context.Context) *comm.GetAllTopicsRespon
 	// TODO: Only if we are the leader.
 	topics := ms.topicsConfigStore.GetAllTopics()
 	var resp comm.GetAllTopicsResponse
-	resp.Error = makeErrorProto(comm.Error_KNoError, nil, "")
+	resp.Error = base.MakeErrorProto(comm.Error_KNoError, nil, "")
 	for _, tpc := range topics {
 		var topicProto comm.Topic
 		topicProto.TopicId = int32(tpc.ID)

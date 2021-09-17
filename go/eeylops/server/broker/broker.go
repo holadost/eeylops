@@ -1,4 +1,4 @@
-package server
+package broker
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"eeylops/server/base"
 	"eeylops/server/replication"
 	"eeylops/server/storage"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
@@ -83,7 +83,7 @@ func (broker *Broker) initialize(opts *BrokerOpts) {
 func (broker *Broker) Produce(ctx context.Context, req *comm.ProduceRequest) *comm.ProduceResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.ProduceResponse {
 		var resp comm.ProduceResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
 
@@ -97,17 +97,17 @@ func (broker *Broker) Produce(ctx context.Context, req *comm.ProduceRequest) *co
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "invalid partition ID")
 	}
 	// TODO: Go through replication controller.
-	appendCmd := AppendMessage{
+	appendCmd := base.AppendMessage{
 		TopicID:     topicID,
 		PartitionID: int(req.GetPartitionId()),
 		Data:        req.GetValues(),
 		Timestamp:   time.Now().UnixNano(),
 	}
-	cmd := Command{
-		CommandType:   KAppendCommand,
+	cmd := base.Command{
+		CommandType:   base.KAppendCommand,
 		AppendCommand: appendCmd,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(time.Now().UnixNano()),
 		Term:       0,
@@ -117,13 +117,13 @@ func (broker *Broker) Produce(ctx context.Context, req *comm.ProduceRequest) *co
 		AppendedAt: time.Time{},
 	}
 	tmpResp := broker.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
+	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
 		broker.logger.Fatalf("Unable to cast produce response to BrokerFSM response. Received: %v", fsmResp)
 	}
-	if fsmResp.CommandType != KAppendCommand {
+	if fsmResp.CommandType != base.KAppendCommand {
 		broker.logger.Fatalf("Got an unexpected command type for produce. Expected: %s(%d), Got: %s(%d)",
-			KAppendCommand.ToString(), KAppendCommand, fsmResp.CommandType.ToString(), fsmResp.CommandType)
+			base.KAppendCommand.ToString(), base.KAppendCommand, fsmResp.CommandType.ToString(), fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrPartitionClosed {
@@ -144,10 +144,10 @@ func (broker *Broker) Produce(ctx context.Context, req *comm.ProduceRequest) *co
 }
 
 func (broker *Broker) Consume(ctx context.Context, req *comm.ConsumeRequest) *comm.ConsumeResponse {
-	makeResponse := func(ret *sbase.ScanEntriesRet, ec comm.Error_ErrorCodes, err error,
+	makeResponse := func(ret *storagebase.ScanEntriesRet, ec comm.Error_ErrorCodes, err error,
 		msg string) *comm.ConsumeResponse {
 		var resp comm.ConsumeResponse
-		ep := makeErrorProto(ec, err, msg)
+		ep := base.MakeErrorProto(ec, err, msg)
 		resp.Error = ep
 		if ret != nil {
 			resp.NextOffset = int64(ret.NextOffset)
@@ -206,7 +206,7 @@ func (broker *Broker) Consume(ctx context.Context, req *comm.ConsumeRequest) *co
 	if req.GetBatchSize() > 0 {
 		batchSize = uint64(req.GetBatchSize())
 	}
-	var scanArg sbase.ScanEntriesArg
+	var scanArg storagebase.ScanEntriesArg
 	scanArg.NumMessages = batchSize
 	if req.GetEndTimestamp() > 0 {
 		scanArg.EndTimestamp = req.GetEndTimestamp()
@@ -254,7 +254,7 @@ func (broker *Broker) Consume(ctx context.Context, req *comm.ConsumeRequest) *co
 		return makeResponse(ret, comm.Error_KNoError, nil, "")
 	}
 	// Autocommit (start_offset-1) as we can now be sure that the prev message was delivered.
-	cm := CommitMessage{
+	cm := base.CommitMessage{
 		TopicID:     base.TopicIDType(req.GetTopicId()),
 		PartitionID: int(req.GetPartitionId()),
 		Offset:      base.Offset(req.GetStartOffset() - 1), // Commit the offset before the requested one.
@@ -274,7 +274,7 @@ func (broker *Broker) Subscribe() {
 
 func (broker *Broker) Commit(ctx context.Context, req *comm.CommitRequest) *comm.CommitResponse {
 	// TODO: This must go through the replication controller and we must be the leader.
-	commitCmd := CommitMessage{
+	commitCmd := base.CommitMessage{
 		TopicID:     base.TopicIDType(req.GetTopicId()),
 		PartitionID: int(req.GetPartitionId()),
 		Offset:      base.Offset(req.GetOffset()),
@@ -283,10 +283,10 @@ func (broker *Broker) Commit(ctx context.Context, req *comm.CommitRequest) *comm
 	return broker.internalCommit(ctx, commitCmd)
 }
 
-func (broker *Broker) internalCommit(ctx context.Context, cm CommitMessage) *comm.CommitResponse {
+func (broker *Broker) internalCommit(ctx context.Context, cm base.CommitMessage) *comm.CommitResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.CommitResponse {
 		var resp comm.CommitResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
 	topicID := cm.TopicID
@@ -299,11 +299,11 @@ func (broker *Broker) internalCommit(ctx context.Context, cm CommitMessage) *com
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "invalid partition ID")
 	}
 	// TODO: This must go through the replication controller and we must be the leader.
-	cmd := Command{
-		CommandType:   KCommitCommand,
+	cmd := base.Command{
+		CommandType:   base.KCommitCommand,
 		CommitCommand: cm,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(time.Now().UnixNano()),
 		Term:       0,
@@ -316,13 +316,13 @@ func (broker *Broker) internalCommit(ctx context.Context, cm CommitMessage) *com
 	if tmpResp == nil {
 		glog.Fatalf("Fatal")
 	}
-	fsmResp, ok := tmpResp.(*FSMResponse)
+	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
 		broker.logger.Fatalf("Unable to cast response from BrokerFSM to FSMResponse. Received: %v", tmpResp)
 	}
-	if fsmResp.CommandType != KCommitCommand {
+	if fsmResp.CommandType != base.KCommitCommand {
 		broker.logger.Fatalf("Got an unexpected command type for commit. Expected: %s(%d), Got: %s(%d)",
-			KCommitCommand.ToString(), KCommitCommand, fsmResp.CommandType.ToString(), fsmResp.CommandType)
+			base.KCommitCommand.ToString(), base.KCommitCommand, fsmResp.CommandType.ToString(), fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrConsumerNotRegistered {
@@ -344,7 +344,7 @@ func (broker *Broker) GetLastCommitted(ctx context.Context, req *comm.LastCommit
 	makeResponse := func(offset base.Offset, ec comm.Error_ErrorCodes, err error,
 		msg string) *comm.LastCommittedResponse {
 		var resp comm.LastCommittedResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		resp.Offset = int64(offset)
 		return &resp
 	}
@@ -413,7 +413,7 @@ func (broker *Broker) GetLastCommitted(ctx context.Context, req *comm.LastCommit
 func (broker *Broker) RegisterConsumer(ctx context.Context, req *comm.RegisterConsumerRequest) *comm.RegisterConsumerResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RegisterConsumerResponse {
 		var resp comm.RegisterConsumerResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
 	// Sanity checks.
@@ -432,16 +432,16 @@ func (broker *Broker) RegisterConsumer(ctx context.Context, req *comm.RegisterCo
 	}
 
 	// Populate command and log.
-	rgMsg := RegisterConsumerMessage{
+	rgMsg := base.RegisterConsumerMessage{
 		ConsumerID:  req.GetConsumerId(),
 		TopicID:     base.TopicIDType(req.GetTopicId()),
 		PartitionID: int(req.GetPartitionId()),
 	}
-	cmd := Command{
-		CommandType:             KRegisterConsumerCommand,
+	cmd := base.Command{
+		CommandType:             base.KRegisterConsumerCommand,
 		RegisterConsumerCommand: rgMsg,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(time.Now().UnixNano()),
 		Term:       0,
@@ -453,13 +453,13 @@ func (broker *Broker) RegisterConsumer(ctx context.Context, req *comm.RegisterCo
 
 	// Apply to BrokerFSM, wait for the response and handle errors.
 	tmpResp := broker.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
+	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
 		broker.logger.Fatalf("Unable to cast response to BrokerFSM response. Received: %v", tmpResp)
 	}
-	if fsmResp.CommandType != KRegisterConsumerCommand {
+	if fsmResp.CommandType != base.KRegisterConsumerCommand {
 		broker.logger.Fatalf("Got an unexpected command type for register consumer. Expected: %s(%d), "+
-			"Got: %s(%d)", KRegisterConsumerCommand.ToString(), KRegisterConsumerCommand,
+			"Got: %s(%d)", base.KRegisterConsumerCommand.ToString(), base.KRegisterConsumerCommand,
 			fsmResp.CommandType.ToString(), fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
@@ -484,7 +484,7 @@ func (broker *Broker) RegisterConsumer(ctx context.Context, req *comm.RegisterCo
 func (broker *Broker) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.CreateTopicResponse {
 		var resp comm.CreateTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
 	// Sanity checks.
@@ -514,12 +514,12 @@ func (broker *Broker) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 	tc.PartitionIDs = prtIds
 	tc.TTLSeconds = int(topic.TtlSeconds)
 	tc.CreatedAt = now
-	addTopicMsg := AddTopicMessage{TopicConfig: tc}
-	cmd := Command{
-		CommandType:     KAddTopicCommand,
+	addTopicMsg := base.AddTopicMessage{TopicConfig: tc}
+	cmd := base.Command{
+		CommandType:     base.KAddTopicCommand,
 		AddTopicCommand: addTopicMsg,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(now.UnixNano()),
 		Term:       0,
@@ -531,13 +531,13 @@ func (broker *Broker) AddTopic(ctx context.Context, req *comm.CreateTopicRequest
 
 	// Apply to BrokerFSM, wait for response and handle errors.
 	tmpResp := broker.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
+	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
 		broker.logger.Fatalf("Invalid response from BrokerFSM. Received: %v", tmpResp)
 	}
-	if fsmResp.CommandType != KAddTopicCommand {
+	if fsmResp.CommandType != base.KAddTopicCommand {
 		broker.logger.Fatalf("Got an unexpected command type for add topic. Expected: %s(%d), "+
-			"Got: %s(%d)", KAddTopicCommand.ToString(), KAddTopicCommand, fsmResp.CommandType.ToString(),
+			"Got: %s(%d)", base.KAddTopicCommand.ToString(), base.KAddTopicCommand, fsmResp.CommandType.ToString(),
 			fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
@@ -555,7 +555,7 @@ func (broker *Broker) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 	// Sanity checks.
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RemoveTopicResponse {
 		var resp comm.RemoveTopicResponse
-		resp.Error = makeErrorProto(ec, err, msg)
+		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
 	topicID := base.TopicIDType(req.GetTopicId())
@@ -565,12 +565,12 @@ func (broker *Broker) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 	}
 
 	// TODO: This must go through the replication controller and we must be the leader.
-	rmTopicMsg := RemoveTopicMessage{TopicID: topicID}
-	cmd := Command{
-		CommandType:        KRemoveTopicCommand,
+	rmTopicMsg := base.RemoveTopicMessage{TopicID: topicID}
+	cmd := base.Command{
+		CommandType:        base.KRemoveTopicCommand,
 		RemoveTopicCommand: rmTopicMsg,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(time.Now().UnixNano()),
 		Term:       0,
@@ -582,13 +582,13 @@ func (broker *Broker) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 
 	// Apply to BrokerFSM, wait for response and handle errors.
 	tmpResp := broker.fsm.Apply(&log)
-	fsmResp, ok := tmpResp.(*FSMResponse)
+	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
 		broker.logger.Fatalf("Unable to cast to BrokerFSM response. Received: %v", tmpResp)
 	}
-	if fsmResp.CommandType != KRemoveTopicCommand {
+	if fsmResp.CommandType != base.KRemoveTopicCommand {
 		broker.logger.Fatalf("Got an unexpected command type for add topic. Expected: %s(%d), "+
-			"Got: %s(%d)", KRemoveTopicCommand.ToString(), KRemoveTopicCommand, fsmResp.CommandType.ToString(),
+			"Got: %s(%d)", base.KRemoveTopicCommand.ToString(), base.KRemoveTopicCommand, fsmResp.CommandType.ToString(),
 			fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
@@ -605,10 +605,10 @@ func (broker *Broker) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 
 func (broker *Broker) doSyncOp() error {
 	// TODO: Do this via the replication controller!
-	cmd := Command{
-		CommandType: KNoOpCommand,
+	cmd := base.Command{
+		CommandType: base.KNoOpCommand,
 	}
-	data := Serialize(&cmd)
+	data := base.Serialize(&cmd)
 	log := raft.Log{
 		Index:      uint64(time.Now().UnixNano()),
 		Term:       0,

@@ -1,10 +1,10 @@
-package server
+package base
 
 import (
 	"eeylops/comm"
 )
 
-func makeErrorProto(code comm.Error_ErrorCodes, err error, msg string) *comm.Error {
+func MakeErrorProto(code comm.Error_ErrorCodes, err error, msg string) *comm.Error {
 	var ep comm.Error
 	ep.ErrorCode = code
 	fullMsg := "[" + code.String() + "]"

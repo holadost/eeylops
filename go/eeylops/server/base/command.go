@@ -1,8 +1,7 @@
-package server
+package base
 
 import (
 	"bytes"
-	"eeylops/server/base"
 	"encoding/gob"
 	"github.com/golang/glog"
 )
@@ -54,31 +53,31 @@ type Command struct {
 }
 
 type AppendMessage struct {
-	TopicID     base.TopicIDType // Topic ID.
-	PartitionID int              // Partition ID where the command is applied
-	Data        [][]byte         // Data to be appended to the partition.
-	Timestamp   int64            // Epoch/timestamp when messages were appended.
+	TopicID     TopicIDType // Topic ID.
+	PartitionID int         // Partition ID where the command is applied
+	Data        [][]byte    // Data to be appended to the partition.
+	Timestamp   int64       // Epoch/timestamp when messages were appended.
 }
 
 type CommitMessage struct {
-	TopicID     base.TopicIDType // Topic ID.
-	PartitionID int              // Partition ID.
-	Offset      base.Offset      // Offset number.
-	ConsumerID  string           // Consumer ID.
+	TopicID     TopicIDType // Topic ID.
+	PartitionID int         // Partition ID.
+	Offset      Offset      // Offset number.
+	ConsumerID  string      // Consumer ID.
 }
 
 type AddTopicMessage struct {
-	TopicConfig base.TopicConfig // Topic
+	TopicConfig TopicConfig // Topic
 }
 
 type RemoveTopicMessage struct {
-	TopicID base.TopicIDType // Topic ID.
+	TopicID TopicIDType // Topic ID.
 }
 
 type RegisterConsumerMessage struct {
-	ConsumerID  string           // Consumer ID.
-	TopicID     base.TopicIDType // Topic ID.
-	PartitionID int              // Partition ID.
+	ConsumerID  string      // Consumer ID.
+	TopicID     TopicIDType // Topic ID.
+	PartitionID int         // Partition ID.
 }
 
 func Serialize(cmd *Command) []byte {

@@ -1,4 +1,4 @@
-package server
+package base
 
 type FSMResponse struct {
 	CommandType CmdType
