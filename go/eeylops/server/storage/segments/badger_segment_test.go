@@ -511,7 +511,7 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	bds.SetMetadata(initialMeta)
 	bds.Open()
 	batchSize := 10
-	numIters := 500
+	numIters := 50
 	lastRLogIdx := int64(0)
 	token := make([]byte, 1024*1024)
 	rand.Read(token)
@@ -554,4 +554,5 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	elapsed = time.Since(start)
 	glog.Infof("Total scan time: %v, Avg scan time: %v, Data size: %d, Batch size: %d",
 		elapsed, elapsed/time.Duration(numIters), 1024*1024, batchSize)
+	glog.Infof("Durations: %v", bds.scanDurations)
 }
