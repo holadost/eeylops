@@ -513,7 +513,7 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	batchSize := 10
 	numIters := 50
 	lastRLogIdx := int64(0)
-	token := make([]byte, 1024*1024)
+	token := make([]byte, 100000)
 	rand.Read(token)
 	var values [][]byte
 	for ii := 0; ii < batchSize; ii++ {
@@ -534,7 +534,7 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 	glog.Infof("Total append time: %v, average time: %v. Data size: %d, Batch size: %d",
-		elapsed, elapsed/time.Duration(numIters), 1024*1024, batchSize)
+		elapsed, elapsed/time.Duration(numIters), len(token), batchSize)
 
 	// Scanning entries.
 	var sarg ScanEntriesArg
@@ -553,5 +553,5 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	}
 	elapsed = time.Since(start)
 	glog.Infof("Total scan time: %v, Avg scan time: %v, Data size: %d, Batch size: %d",
-		elapsed, elapsed/time.Duration(numIters), 1024*1024, batchSize)
+		elapsed, elapsed/time.Duration(numIters), len(token), batchSize)
 }
