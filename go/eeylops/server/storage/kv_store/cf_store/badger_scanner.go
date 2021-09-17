@@ -107,10 +107,6 @@ func (scanner *BadgerScanner) Next() {
 }
 
 func (scanner *BadgerScanner) GetItem() (key []byte, val []byte, err error) {
-	defer func() {
-		scanner.currEntry = nil
-		scanner.currErr = nil
-	}()
 	if scanner.currEntry != nil {
 		return scanner.currEntry.Key, scanner.currEntry.Value, scanner.currErr
 	}
@@ -131,6 +127,8 @@ func (scanner *BadgerScanner) Close() {
 }
 
 func (scanner *BadgerScanner) mayBeFetchNextItem() {
+	scanner.currEntry = nil
+	scanner.currErr = nil
 	item := scanner.iter.Item()
 	key := item.KeyCopy(nil)
 	var cmpKey []byte

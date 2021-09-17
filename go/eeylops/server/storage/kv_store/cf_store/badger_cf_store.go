@@ -11,10 +11,12 @@ import (
 
 const kMaxKeyLength = 60000
 const kInternalMaxKeyLength = kMaxKeyLength + 4000
+const kMaxColumnFamilyLen = 256
 const kDefaultCFName = "default"
 const kAllColumnFamiliesCFName = "cf"
 
 var kSeparatorBytes = []byte("::")
+var kDefaultColumnNamePrefixBytes = append([]byte("0"), kSeparatorBytes...)
 
 type BadgerCFStore struct {
 	internalStore *internalBadgerKVStore

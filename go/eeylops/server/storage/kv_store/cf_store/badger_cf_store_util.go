@@ -10,7 +10,7 @@ func BuildCFKey(cf string, key []byte) []byte {
 	if len(key) == 0 {
 		glog.Fatalf("Unable to build key since key is empty")
 	}
-	return append(BuildCFPrefixBytes(cf), key...)
+	return append(BuildCFPrefixBytes(cf), append(kDefaultColumnNamePrefixBytes, key...)...)
 }
 
 // BuildCFKeyWithCFPrefixBytes is a helper function that creates the key based using the given CF prefix bytes.
@@ -18,7 +18,7 @@ func BuildCFKeyWithCFPrefixBytes(cfPrefix []byte, key []byte) []byte {
 	if len(key) == 0 || len(cfPrefix) == 0 {
 		glog.Fatalf("Unable to build key since key is empty")
 	}
-	return append(cfPrefix, key...)
+	return append(cfPrefix, append(kDefaultColumnNamePrefixBytes, key...)...)
 }
 
 // BuildFirstCFKey is a helper function that creates the first key for a column family.
@@ -50,13 +50,13 @@ func ExtractUserKey(cf string, key []byte) []byte {
 	if len(key) == 0 {
 		glog.Fatalf("Unable to extract user key since the given full key is empty")
 	}
-	cfKey := BuildCFPrefixBytes(cf)
-	return key[len(cfKey):]
+	fullPrefix := append(BuildCFPrefixBytes(cf), kDefaultColumnNamePrefixBytes...)
+	return key[len(fullPrefix):]
 }
 
 // IsColumnFamilyNameValid is a helper function that checks if the column family name is valid.
 func IsColumnFamilyNameValid(name string) bool {
-	if len(name) == 0 {
+	if len(name) == 0 || len(name) > kMaxColumnFamilyLen {
 		return false
 	}
 	for _, cc := range name {
