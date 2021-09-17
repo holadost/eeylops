@@ -26,11 +26,6 @@ var (
 	kNextIndexKeyBytes   = []byte("next_index_key")
 )
 
-type debugScanStruct struct {
-	computeTime time.Duration
-	scanTime    time.Duration
-}
-
 // BadgerSegment implements Segment where the data is backed using badger db.
 type BadgerSegment struct {
 	segLock     sync.RWMutex       // A RW lock for the segment.
@@ -65,7 +60,6 @@ type BadgerSegment struct {
 	timestampIndexChan         chan []TimestampIndexEntry // The channel where the timestamp indexes are forwarded.
 	rebuildIndexOnce           sync.Once                  // Mutex to protect us from building indexes only once.
 	nextTimestampIndexKey      int                        // Next timestamp index key.
-	scanDurations              []debugScanStruct
 }
 
 type BadgerSegmentOpts struct {
@@ -294,18 +288,13 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 	}
 
 	// Compute start and end offsets for the scan.
-	entry := debugScanStruct{}
-	now := time.Now()
 	startOffset, err := seg.computeStartOffsetForScan(arg, &ret)
 	if err != nil {
 		return &ret
 	}
-	entry.computeTime = time.Since(now)
 
 	// Scan the segment for all messages between start and end offset.
 	seg.scanMessages(arg, &ret, startOffset)
-	entry.scanTime = time.Since(now) - entry.computeTime
-	seg.scanDurations = append(seg.scanDurations, entry)
 	return &ret
 }
 

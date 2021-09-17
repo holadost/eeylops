@@ -554,5 +554,4 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 	elapsed = time.Since(start)
 	glog.Infof("Total scan time: %v, Avg scan time: %v, Data size: %d, Batch size: %d",
 		elapsed, elapsed/time.Duration(numIters), 1024*1024, batchSize)
-	glog.Infof("Durations: %v", bds.scanDurations)
 }
