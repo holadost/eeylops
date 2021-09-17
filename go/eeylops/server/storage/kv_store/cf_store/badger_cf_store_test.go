@@ -479,23 +479,27 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 	glog.Infof("Total put time: %v, average put time: %v", elapsed, elapsed/time.Duration(numIters))
 	store.Close()
 	store = NewBadgerCFStore(testDir, opts)
-	scanner, err := store.NewScanner(cfName, nil, false)
-	if err != nil {
-		glog.Fatalf("Unable to create new scanner due to err: %v", err)
-	}
-	scanStart := time.Now()
-	numValues := 0
-	for ; scanner.Valid(); scanner.Next() {
-		_, _, err := scanner.GetItem()
+	var sk []byte
+	startTime := time.Now()
+	for ii := 0; ii < numIters; ii++ {
+		scanner, err := store.NewScanner(cfName, sk, false)
 		if err != nil {
-			glog.Fatalf("Failure while scanning KV store: %v", err)
+			glog.Fatalf("Unable to create new scanner due to err: %v", err)
 		}
-		numValues++
+		numValues := 0
+		for ; scanner.Valid(); scanner.Next() {
+			key, _, err := scanner.GetItem()
+			if err != nil {
+				glog.Fatalf("Failure while scanning KV store: %v", err)
+			}
+			numValues++
+			sk = key
+			if numValues == batchSize {
+				break
+			}
+		}
 	}
-	if numValues != numIters*batchSize {
-		glog.Fatalf("Did not read as many values as we wrote!")
-	}
-	elapsed = time.Since(scanStart)
+	elapsed = time.Since(startTime)
 	glog.Infof("Total scan time: %v, average scan time: %v", elapsed, elapsed/time.Duration(numIters))
 }
 

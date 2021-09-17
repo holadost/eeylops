@@ -312,12 +312,21 @@ func TestBadgerKVStore_BatchPutAndScan(t *testing.T) {
 	elapsed := time.Since(start)
 	glog.Infof("Total put time: %v, average put time: %v", elapsed, elapsed/time.Duration(numIters))
 
-	scanner := store.CreateScanner(nil, nil, false)
 	scanStart := time.Now()
-	for ; scanner.Valid(); scanner.Next() {
-		_, _, err := scanner.GetItem()
-		if err != nil {
-			glog.Fatalf("Failure while scanning KV store: %v", err)
+	var sk []byte
+	for ii := 0; ii < numIters; ii++ {
+		scanner := store.CreateScanner(nil, sk, false)
+		numValues := 0
+		for ; scanner.Valid(); scanner.Next() {
+			key, _, err := scanner.GetItem()
+			if err != nil {
+				glog.Fatalf("Failure while scanning KV store: %v", err)
+			}
+			numValues++
+			sk = key
+			if numValues == batchSize {
+				break
+			}
 		}
 	}
 	elapsed = time.Since(scanStart)
