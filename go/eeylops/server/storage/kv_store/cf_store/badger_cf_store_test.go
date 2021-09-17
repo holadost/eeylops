@@ -6,11 +6,14 @@ import (
 	"eeylops/util/testutil"
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/golang/glog"
 	"github.com/stretchr/testify/require"
+	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestBadgerCFStoreDefault(t *testing.T) {
@@ -423,6 +426,75 @@ func TestBadgerCFStoreTxnConflict(t *testing.T) {
 	require.Error(t, txn2.Commit()) // This should fail.
 }
 
+func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerCFStore_BatchPutAndScan")
+	testDir := testutil.CreateTestDir(t, "TestBadgerCFStore_BatchPutAndScan")
+	opts := badger.DefaultOptions(testDir)
+	opts.SyncWrites = true
+	opts.NumMemtables = 3
+	opts.VerifyValueChecksum = true
+	opts.BlockCacheSize = 0 // Disable block cache.
+	opts.NumCompactors = 2  // Use 2 compactors.
+	opts.IndexCacheSize = 0
+	opts.Compression = options.None
+	opts.TableLoadingMode = options.FileIO
+	opts.ValueLogLoadingMode = options.FileIO
+	opts.CompactL0OnClose = false
+	opts.LoadBloomsOnOpen = true
+	store := NewBadgerCFStore(testDir, opts)
+	cfName := "offset"
+	err := store.AddColumnFamily(cfName)
+	if err != nil {
+		glog.Fatalf("Unable to add column family due to err: %v", err)
+	}
+	batchSize := 10
+	numIters := 1000
+	// Batch write values
+	token := make([]byte, 1024*1024)
+	rand.Read(token)
+	glog.Infof("Testing Batch Put")
+	start := time.Now()
+	var values [][]byte
+	for ii := 0; ii < batchSize; ii++ {
+		values = append(values, token)
+	}
+	for iter := 0; iter < numIters; iter++ {
+		var entries []*CFStoreEntry
+		for ii := 0; ii < batchSize; ii++ {
+			var entry CFStoreEntry
+			key := make([]byte, 16)
+			rand.Read(key)
+			entry.Key = key
+			entry.Value = values[ii]
+			entry.ColumnFamily = cfName
+			entries = append(entries, &entry)
+		}
+		err := store.BatchPut(entries)
+		if err != nil {
+			glog.Fatalf("Unable to batch put values due to err: %s", err.Error())
+			return
+		}
+	}
+	elapsed := time.Since(start)
+	glog.Infof("Total put time: %v, average put time: %v", elapsed, elapsed/time.Duration(numIters))
+	store.Close()
+	store = NewBadgerCFStore(testDir, opts)
+	scanner, err := store.NewScanner(cfName, nil, false)
+	if err != nil {
+		glog.Fatalf("Unable to create new scanner due to err: %v", err)
+	}
+	scanStart := time.Now()
+	for ; scanner.Valid(); scanner.Next() {
+		_, _, err := scanner.GetItem()
+		if err != nil {
+			glog.Fatalf("Failure while scanning KV store: %v", err)
+		}
+	}
+	elapsed = time.Since(scanStart)
+	glog.Infof("Total scan time: %v, average scan time: %v", elapsed, elapsed/time.Duration(numIters))
+}
+
+/*********************************** Helper functions ********************************************/
 func doStoreSingleActorIO(testDir string, cf string) {
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
