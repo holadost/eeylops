@@ -3,6 +3,7 @@ package cf_store
 import (
 	"bytes"
 	"eeylops/server/storage/kv_store"
+	"eeylops/util"
 	"eeylops/util/testutil"
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
@@ -447,23 +448,25 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 	if err != nil {
 		glog.Fatalf("Unable to add column family due to err: %v", err)
 	}
-	batchSize := 10
-	numIters := 1000
+	batchSize := 4
+	numIters := 100
 	// Batch write values
 	token := make([]byte, 1024*1024)
 	rand.Read(token)
-	glog.Infof("Testing Batch Put")
-	start := time.Now()
+	glog.Infof("Benchmarking batch puts")
 	var values [][]byte
 	for ii := 0; ii < batchSize; ii++ {
 		values = append(values, token)
 	}
+	start := time.Now()
+	var allKeys [][]byte
+	// Benchmark batch puts!
 	for iter := 0; iter < numIters; iter++ {
 		var entries []*CFStoreEntry
 		for ii := 0; ii < batchSize; ii++ {
 			var entry CFStoreEntry
-			key := make([]byte, 16)
-			rand.Read(key)
+			key := util.UintToBytes(uint64(iter*batchSize + ii))
+			allKeys = append(allKeys, key)
 			entry.Key = key
 			entry.Value = values[ii]
 			entry.ColumnFamily = cfName
@@ -478,9 +481,35 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 	elapsed := time.Since(start)
 	glog.Infof("Total put time: %v, average put time: %v", elapsed, elapsed/time.Duration(numIters))
 	store.Close()
+
+	// Benchmark batch gets!
+	glog.Infof("Benchmarking batch gets")
 	store = NewBadgerCFStore(testDir, opts)
 	var sk []byte
 	startTime := time.Now()
+	for ii := 0; ii < numIters; ii++ {
+		var keys []*CFStoreKey
+		for jj := 0; jj < batchSize; jj++ {
+			keys = append(keys, &CFStoreKey{
+				Key:          allKeys[ii*batchSize+jj],
+				ColumnFamily: cfName,
+			})
+		}
+		_, errs := store.BatchGet(keys)
+		for jj := 0; jj < len(errs); jj++ {
+			if errs[jj] != nil {
+				glog.Fatalf("Failure while fetching key: %v, %v", keys[jj], err)
+			}
+		}
+	}
+	elapsed = time.Since(startTime)
+	glog.Infof("Total batch get time: %v, average batch get time: %v", elapsed, elapsed/time.Duration(numIters))
+	store.Close()
+
+	// Benchmark scans!
+	glog.Infof("Benchmarking scans")
+	store = NewBadgerCFStore(testDir, opts)
+	startTime = time.Now()
 	for ii := 0; ii < numIters; ii++ {
 		scanner, err := store.NewScanner(cfName, sk, false)
 		if err != nil {
