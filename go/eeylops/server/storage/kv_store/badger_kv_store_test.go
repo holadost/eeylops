@@ -5,6 +5,7 @@ import (
 	"eeylops/util/testutil"
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/golang/glog"
 	"math/rand"
 	"testing"
@@ -268,13 +269,21 @@ func TestBadgerKVStoreTxn(t *testing.T) {
 	txn.Discard()
 }
 
-func TestBadgerKVStore_BatchPut(t *testing.T) {
+func TestBadgerKVStore_BatchPutAndScan(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerKVStore_BatchPut")
 	testDir := testutil.CreateTestDir(t, "TestBadgerKVStore_BatchPut")
 	opts := badger.DefaultOptions(testDir)
-	opts.NumMemtables = 3
 	opts.SyncWrites = true
+	opts.NumMemtables = 3
 	opts.VerifyValueChecksum = true
+	opts.BlockCacheSize = 0 // Disable block cache.
+	opts.NumCompactors = 2  // Use 2 compactors.
+	opts.IndexCacheSize = 0
+	opts.Compression = options.None
+	opts.TableLoadingMode = options.FileIO
+	opts.ValueLogLoadingMode = options.FileIO
+	opts.CompactL0OnClose = false
+	opts.LoadBloomsOnOpen = true
 	store := NewBadgerKVStore(testDir, opts)
 	batchSize := 10
 	numIters := 1000
@@ -301,5 +310,16 @@ func TestBadgerKVStore_BatchPut(t *testing.T) {
 		}
 	}
 	elapsed := time.Since(start)
-	glog.Infof("Total time: %v, average time: %v", elapsed, elapsed/time.Duration(numIters))
+	glog.Infof("Total put time: %v, average put time: %v", elapsed, elapsed/time.Duration(numIters))
+
+	scanner := store.CreateScanner(nil, nil, false)
+	scanStart := time.Now()
+	for ; scanner.Valid(); scanner.Next() {
+		_, _, err := scanner.GetItem()
+		if err != nil {
+			glog.Fatalf("Failure while scanning KV store: %v", err)
+		}
+	}
+	elapsed = time.Since(scanStart)
+	glog.Infof("Total scan time: %v, average scan time: %v", elapsed, elapsed/time.Duration(numIters))
 }
