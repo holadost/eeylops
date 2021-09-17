@@ -440,7 +440,7 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.CompactL0OnClose = false
-	opts.LoadBloomsOnOpen = true
+	opts.LoadBloomsOnOpen = false
 	store := NewBadgerCFStore(testDir, opts)
 	cfName := "offset"
 	err := store.AddColumnFamily(cfName)
@@ -484,11 +484,16 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 		glog.Fatalf("Unable to create new scanner due to err: %v", err)
 	}
 	scanStart := time.Now()
+	numValues := 0
 	for ; scanner.Valid(); scanner.Next() {
 		_, _, err := scanner.GetItem()
 		if err != nil {
 			glog.Fatalf("Failure while scanning KV store: %v", err)
 		}
+		numValues++
+	}
+	if numValues != numIters*batchSize {
+		glog.Fatalf("Did not read as many values as we wrote!")
 	}
 	elapsed = time.Since(scanStart)
 	glog.Infof("Total scan time: %v, average scan time: %v", elapsed, elapsed/time.Duration(numIters))
