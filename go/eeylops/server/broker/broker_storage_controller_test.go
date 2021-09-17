@@ -1,7 +1,8 @@
-package storage
+package broker
 
 import (
 	"eeylops/server/base"
+	"eeylops/server/storage"
 	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
@@ -44,7 +45,7 @@ func TestStorageController(t *testing.T) {
 		glog.Fatalf("Unable to add topic due to err: %s", err.Error())
 	}
 	err := controller.AddTopic(topic, 101)
-	if err == ErrTopicExists {
+	if err == storage.ErrTopicExists {
 		glog.V(1).Infof("Topic was not updated as expected")
 	} else {
 		glog.Fatalf("Added topic: %s even though we should not have. Error: %v", topicName, err)
@@ -57,7 +58,7 @@ func TestStorageController(t *testing.T) {
 	glog.V(1).Infof("Topic: %v", tp)
 
 	_, err = controller.GetTopicByName("topic2")
-	if err != ErrTopicNotFound {
+	if err != storage.ErrTopicNotFound {
 		glog.Fatalf("Fetched a topic that was never created")
 	}
 	tpc, err := controller.GetTopicByID(topic.ID)
@@ -77,7 +78,7 @@ func TestStorageController(t *testing.T) {
 		glog.Fatalf("Failed to mark topic for removal due to err: %s", err.Error())
 	}
 	tp, err = controller.GetTopicByName(topicName)
-	if err == ErrTopicNotFound {
+	if err == storage.ErrTopicNotFound {
 		glog.V(1).Infof("Did not find topic as expected after it was deleted")
 	} else {
 		glog.Fatalf("Got topic even though it was deleted?")

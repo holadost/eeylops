@@ -1,7 +1,8 @@
-package storage
+package broker
 
 import (
 	"eeylops/server/base"
+	"eeylops/server/storage"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
@@ -16,9 +17,9 @@ const kExpiredTopicsDirSuffix = "---expired"
 
 type StorageController struct {
 	// Consumer store.
-	consumerStore *ConsumerStore
+	consumerStore *storage.ConsumerStore
 	// Local topics store.
-	topicsStore *TopicsConfigStore
+	topicsStore *storage.TopicsConfigStore
 	// In memory map that holds the topics and partitions.
 	topicMap map[base.TopicIDType]*topicEntry
 	// Read-write lock to protect access to topicMap.
@@ -30,7 +31,7 @@ type StorageController struct {
 	// Store scan interval in seconds.
 	storeScanIntervalSecs int
 	// Disposer to help remove deleted topics.
-	disposer *StorageDisposer
+	disposer *storage.StorageDisposer
 	// Callback channel after disposer has removed topics.
 	disposedChan chan string
 	// Channel used by janitor and topic removal workflows.
@@ -65,8 +66,8 @@ func NewStorageController(opts StorageControllerOpts) *StorageController {
 }
 
 func (sc *StorageController) initialize() {
-	sc.consumerStore = NewConsumerStore(sc.getControllerRootDirectory())
-	sc.topicsStore = NewTopicsConfigStore(sc.getControllerRootDirectory())
+	sc.consumerStore = storage.NewConsumerStore(sc.getControllerRootDirectory())
+	sc.topicsStore = storage.NewTopicsConfigStore(sc.getControllerRootDirectory())
 	sc.topicMap = make(map[base.TopicIDType]*topicEntry)
 	sc.disposedChan = make(chan string, 128)
 	sc.topicDeletionChan = make(chan *topicEntry, 128)
@@ -90,15 +91,15 @@ func (sc *StorageController) initialize() {
 				topic.Name, err.Error())
 			return
 		}
-		pMap := make(map[int]*Partition)
+		pMap := make(map[int]*storage.Partition)
 		for _, prtId := range topic.PartitionIDs {
-			opts := PartitionOpts{
+			opts := storage.PartitionOpts{
 				TopicName:     sc.generateTopicName(topic.Name, topic.ID),
 				PartitionID:   prtId,
 				RootDirectory: topicDir,
 				TTLSeconds:    topic.TTLSeconds,
 			}
-			pMap[prtId] = NewPartition(opts)
+			pMap[prtId] = storage.NewPartition(opts)
 		}
 		entry := &topicEntry{
 			topic:        &topic,
@@ -116,22 +117,22 @@ func (sc *StorageController) AddTopic(topic base.TopicConfig, rLogIdx int64) err
 	_, exists := sc.topicMap[topic.ID]
 	if exists {
 		sc.logger.Errorf("Topic: %s already exists", topic.Name)
-		return ErrTopicExists
+		return storage.ErrTopicExists
 	}
 	topicDirName := sc.getTopicDirectory(topic.Name, topic.ID)
 	if err := os.MkdirAll(topicDirName, 0774); err != nil {
 		sc.logger.Errorf("Unable to create directory for topic: %s due to err: %s", topic.Name, err.Error())
-		return ErrStorageController
+		return storage.ErrStorageController
 	}
-	partMap := make(map[int]*Partition)
+	partMap := make(map[int]*storage.Partition)
 	for _, elem := range topic.PartitionIDs {
-		opts := PartitionOpts{
+		opts := storage.PartitionOpts{
 			TopicName:     sc.generateTopicName(topic.Name, topic.ID),
 			PartitionID:   elem,
 			RootDirectory: topicDirName,
 			TTLSeconds:    topic.TTLSeconds,
 		}
-		part := NewPartition(opts)
+		part := storage.NewPartition(opts)
 		partMap[elem] = part
 	}
 	entry := &topicEntry{
@@ -151,7 +152,7 @@ func (sc *StorageController) RemoveTopic(topicID base.TopicIDType, rLogIdx int64
 	_, err := sc.GetTopicByID(topicID)
 	if err != nil {
 		sc.logger.Errorf("Unable to remove topic as topic: %d was not found", topicID)
-		return ErrTopicNotFound
+		return storage.ErrTopicNotFound
 	}
 	te := sc.removeTopicFromMap(topicID)
 	if err = sc.topicsStore.RemoveTopic(topicID, rLogIdx); err != nil {
@@ -165,23 +166,23 @@ func (sc *StorageController) GetAllTopics() []base.TopicConfig {
 	return sc.topicsStore.GetAllTopics()
 }
 
-func (sc *StorageController) GetPartition(topicID base.TopicIDType, partitionID int) (*Partition, error) {
+func (sc *StorageController) GetPartition(topicID base.TopicIDType, partitionID int) (*storage.Partition, error) {
 	sc.topicMapLock.RLock()
 	defer sc.topicMapLock.RUnlock()
 	entry, exists := sc.topicMap[topicID]
 	if !exists {
 		sc.logger.Errorf("Unable to find topic: %d", topicID)
-		return nil, ErrTopicNotFound
+		return nil, storage.ErrTopicNotFound
 	}
 	partition, exists := entry.partitionMap[partitionID]
 	if !exists {
 		sc.logger.Errorf("Unable to find partition: %d for topic: %d", partitionID, topicID)
-		return nil, ErrPartitionNotFound
+		return nil, storage.ErrPartitionNotFound
 	}
 	return partition, nil
 }
 
-func (sc *StorageController) GetConsumerStore() *ConsumerStore {
+func (sc *StorageController) GetConsumerStore() *storage.ConsumerStore {
 	return sc.consumerStore
 }
 
@@ -308,7 +309,7 @@ func (sc *StorageController) disposeTopic(te *topicEntry) {
 
 // disposeDirectory is a helper method that asks the default disposer to remove the given directory.
 func (sc *StorageController) disposeDirectory(dirPath string, cb func(error)) {
-	ds := DefaultDisposer()
+	ds := storage.DefaultDisposer()
 	ds.Dispose(dirPath, cb)
 }
 
@@ -319,5 +320,5 @@ func (sc *StorageController) getExpiredDirName(dirName string) string {
 // topicEntry is a wrapper struct to hold the topic config and the partition(s) of this topic.
 type topicEntry struct {
 	topic        *base.TopicConfig
-	partitionMap map[int]*Partition
+	partitionMap map[int]*storage.Partition
 }

@@ -11,11 +11,11 @@ import (
 )
 
 type BrokerFSM struct {
-	storageController *storage.StorageController
+	storageController *StorageController
 	logger            *logging.PrefixLogger
 }
 
-func NewBrokerFSM(controller *storage.StorageController, logger *logging.PrefixLogger) *BrokerFSM {
+func NewBrokerFSM(controller *StorageController, logger *logging.PrefixLogger) *BrokerFSM {
 	fsm := BrokerFSM{
 		storageController: controller,
 		logger:            logger,

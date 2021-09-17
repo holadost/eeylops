@@ -33,7 +33,7 @@ type Broker struct {
 	brokerID              string
 	peerAddresses         []PeerAddress
 	replicationController *replication.RaftController
-	storageController     *storage.StorageController
+	storageController     *StorageController
 	fsm                   *BrokerFSM
 	lastTopicIDAssigned   base.TopicIDType
 	logger                *logging.PrefixLogger
@@ -57,11 +57,11 @@ func (broker *Broker) initialize(opts *BrokerOpts) {
 	util.CreateDir(brokerRootDir)
 
 	// Initialize storage controller.
-	var stopts storage.StorageControllerOpts
+	var stopts StorageControllerOpts
 	stopts.StoreGCScanIntervalSecs = 300
 	stopts.RootDirectory = path.Join(brokerRootDir, "storage")
 	stopts.ControllerID = broker.brokerID
-	broker.storageController = storage.NewStorageController(stopts)
+	broker.storageController = NewStorageController(stopts)
 	allTopics := broker.getAllTopics()
 	max := base.TopicIDType(-1)
 	for _, topic := range allTopics {
