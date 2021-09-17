@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
-	"github.com/golang/glog"
 	"os"
 	"path"
 	"sync"
@@ -528,13 +527,10 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 		}
 	} else {
 		startTs := arg.StartTimestamp
-		glog.Infof("Arg Start Ts: %d, First Unexpired Ts: %d, First msg ts: %d",
-			arg.StartTimestamp, firstUnexpiredMsgTs, firstMsgTs)
 		mayBeStartTs := util.MaxInt(firstUnexpiredMsgTs, firstMsgTs)
 		if mayBeStartTs >= startTs {
 			startTs = mayBeStartTs
 		}
-		glog.Infof("Chosen start ts: %d", startTs)
 		var err error
 		startOffset, err = seg.findFirstOffsetWithTimestampGE(startTs)
 		if err != nil {
