@@ -22,9 +22,9 @@ type metadataModel struct {
 }
 
 func NewSegmentMetadataDB(dbRootPath string) *SegmentMetadataDB {
-	mdirPath := path.Join(dbRootPath, metadataDirName)
-	dbPath := path.Join(mdirPath, metadataDbName)
-	err := os.MkdirAll(mdirPath, 0774)
+	mDirPath := path.Join(dbRootPath, metadataDirName)
+	dbPath := path.Join(mDirPath, metadataDbName)
+	err := os.MkdirAll(mDirPath, 0774)
 	if err != nil {
 		glog.Fatalf("Unable to create directory for segment metadata located at: %s", dbRootPath)
 	}

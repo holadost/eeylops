@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"github.com/golang/glog"
 )
 
@@ -11,7 +11,7 @@ type PartitionScanner struct {
 	p                 *Partition
 	startOffset       base.Offset
 	lastNextOffset    base.Offset
-	lastValuesScanned []*sbase.ScanValue
+	lastValuesScanned []*storagebase.ScanValue
 	lastErrorScanned  error
 }
 
@@ -48,7 +48,7 @@ func (ps *PartitionScanner) Next() {
 	ps.getVal()
 }
 
-func (ps *PartitionScanner) Get() (*sbase.ScanValue, error) {
+func (ps *PartitionScanner) Get() (*storagebase.ScanValue, error) {
 	if ps.lastErrorScanned != nil {
 		return nil, ps.lastErrorScanned
 	}
@@ -77,7 +77,7 @@ func (ps *PartitionScanner) getVal() {
 	if ps.lastNextOffset == -1 {
 		glog.Fatalf("Unexpected lastNextOffset: %d", ps.lastNextOffset)
 	}
-	arg := sbase.ScanEntriesArg{
+	arg := storagebase.ScanEntriesArg{
 		StartOffset:    ps.lastNextOffset,
 		NumMessages:    1,
 		StartTimestamp: -1,

@@ -3,9 +3,9 @@ package storage
 import (
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/segments"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"fmt"
 	"github.com/golang/glog"
 	"math/rand"
@@ -40,7 +40,7 @@ func singleProduce(startIdx int, p *Partition, numValues int) {
 		startIdx += 1
 	}
 	ts := time.Now().UnixNano()
-	parg := sbase.AppendEntriesArg{
+	parg := storagebase.AppendEntriesArg{
 		Entries:   values,
 		Timestamp: ts,
 		RLogIdx:   ts / (1000),
@@ -73,7 +73,7 @@ func loadDataBasicWithNewSegments(p *Partition, numSegments int, numValuesPerSeg
 }
 
 func TestPartitionInitialize(t *testing.T) {
-	util.LogTestMarker("TestPartitionInitialize")
+	testutil.LogTestMarker("TestPartitionInitialize")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -92,7 +92,7 @@ func TestPartitionInitialize(t *testing.T) {
 }
 
 func TestPartitionReInitialize(t *testing.T) {
-	util.LogTestMarker("TestPartitionReInitialize")
+	testutil.LogTestMarker("TestPartitionReInitialize")
 	for ii := 0; ii < 5; ii++ {
 		glog.Infof("\n\n\nIteration: %d", ii)
 		opts := PartitionOpts{
@@ -114,7 +114,7 @@ func TestPartitionReInitialize(t *testing.T) {
 }
 
 func TestPartitionAppend(t *testing.T) {
-	util.LogTestMarker("TestPartitionAppend")
+	testutil.LogTestMarker("TestPartitionAppend")
 	testDir := "/tmp/eeylops/TestPartitionAppend"
 	defer func() { _ = os.RemoveAll(testDir) }()
 	opts := PartitionOpts{
@@ -133,7 +133,7 @@ func TestPartitionAppend(t *testing.T) {
 }
 
 func TestPartitionNewSegmentCreation(t *testing.T) {
-	util.LogTestMarker("TestPartitionNewSegmentCreation")
+	testutil.LogTestMarker("TestPartitionNewSegmentCreation")
 	testDir := "/tmp/eeylops/TestPartitionNewSegmentCreation"
 	_ = os.RemoveAll(testDir)
 	opts := PartitionOpts{
@@ -224,8 +224,8 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 }
 
 func TestPartitionScan(t *testing.T) {
-	util.LogTestMarker("TestPartitionScan")
-	testDir := util.CreateTestDir(t, "TestPartitionScan")
+	testutil.LogTestMarker("TestPartitionScan")
+	testDir := testutil.CreateTestDir(t, "TestPartitionScan")
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -240,7 +240,7 @@ func TestPartitionScan(t *testing.T) {
 	numSegs := 10
 	numValsPerSeg := 100
 	loadDataBasicWithNewSegments(p, numSegs, numValsPerSeg)
-	var sarg sbase.ScanEntriesArg
+	var sarg storagebase.ScanEntriesArg
 	defCtx := context.Background()
 	sarg.StartOffset = 0
 	sarg.NumMessages = 1
@@ -348,8 +348,8 @@ func TestPartitionScan(t *testing.T) {
 }
 
 func TestPartitionManager(t *testing.T) {
-	util.LogTestMarker("TestPartitionManager")
-	testDir := util.CreateTestDir(t, "TestPartitionManager")
+	testutil.LogTestMarker("TestPartitionManager")
+	testDir := testutil.CreateTestDir(t, "TestPartitionManager")
 	totalValues := 500
 	numValuesPerBatch := 50
 	valueSizeBytes := 100
@@ -379,7 +379,7 @@ func TestPartitionManager(t *testing.T) {
 			rand.Read(token)
 			values = append(values, token)
 		}
-		aarg := sbase.AppendEntriesArg{
+		aarg := storagebase.AppendEntriesArg{
 			Entries:   values,
 			Timestamp: time.Now().UnixNano(),
 			RLogIdx:   int64(iter + 1),
@@ -396,7 +396,7 @@ func TestPartitionManager(t *testing.T) {
 	}
 
 	// Test scans with max scan size bytes.
-	var sarg sbase.ScanEntriesArg
+	var sarg storagebase.ScanEntriesArg
 	sarg.StartOffset = 0
 	sarg.NumMessages = 20
 	sarg.StartTimestamp = -1
@@ -434,7 +434,7 @@ func TestPartitionManager(t *testing.T) {
 
 	// Append more values to the partition. The offset should start from totalValues.
 	glog.Infof("Appending messages after all segments have expired!")
-	aarg := sbase.AppendEntriesArg{
+	aarg := storagebase.AppendEntriesArg{
 		Entries:   values,
 		Timestamp: time.Now().UnixNano(),
 		RLogIdx:   int64(101),
@@ -463,29 +463,31 @@ func TestPartitionManager(t *testing.T) {
 	p.Close()
 }
 
-func TestPartitionScan2(t *testing.T) {
-	util.LogTestMarker("TestPartitionScan2")
-	testDir := util.CreateTestDir(t, "TestPartitionScan2")
+func TestPartitionScanTimestamp(t *testing.T) {
+	testutil.LogTestMarker("TestPartitionScanTimestamp")
+	testDir := testutil.CreateTestDir(t, "TestPartitionScanTimestamp")
+	ttlSeconds := 30
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
 		RootDirectory:                  testDir,
-		ExpiredSegmentPollIntervalSecs: 10,
-		LiveSegmentPollIntervalSecs:    2,
+		ExpiredSegmentPollIntervalSecs: 1,
+		LiveSegmentPollIntervalSecs:    1,
 		NumRecordsPerSegmentThreshold:  1000,
 		MaxScanSizeBytes:               15 * 1024 * 1024,
-		TTLSeconds:                     5,
+		TTLSeconds:                     ttlSeconds,
 	}
 	p := NewPartition(opts)
-	numIters := 50
+	numIters := 5000
 	batchSize := 10
 	var timestamps []int64
 	token := make([]byte, 1024)
 	rand.Read(token)
 	producer := func() {
+		timestamps = nil
 		for ii := 0; ii < numIters; ii++ {
 			now := time.Now().UnixNano()
-			var arg sbase.AppendEntriesArg
+			var arg storagebase.AppendEntriesArg
 			for jj := 0; jj < batchSize; jj++ {
 				val := fmt.Sprintf("value-%07d", (ii*batchSize)+jj)
 				arg.Entries = append(arg.Entries, append([]byte(val), token...))
@@ -502,11 +504,12 @@ func TestPartitionScan2(t *testing.T) {
 	start := time.Now()
 	producer()
 	glog.Infof("Producer done. Total time: %v", time.Since(start))
-
-	var sarg sbase.ScanEntriesArg
+	glog.Infof("Starting consumer!")
+	var sarg storagebase.ScanEntriesArg
 	sarg.NumMessages = uint64(batchSize)
 	sarg.StartOffset = -1
 	defCtx := context.Background()
+	now := time.Now()
 	for ii := 1; ii < len(timestamps); ii++ {
 		sarg.StartTimestamp = timestamps[ii-1]
 		sarg.EndTimestamp = timestamps[ii]
@@ -515,7 +518,7 @@ func TestPartitionScan2(t *testing.T) {
 			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
 		}
 		if len(sret.Values) != batchSize {
-			glog.Fatalf("Mismatch. Expected %d values, got: %d", batchSize, len(sret.Values))
+			glog.Fatalf("Mismatch. Expected %d values, got: %d. Iteration: %d", batchSize, len(sret.Values), ii)
 		}
 		for jj := 0; jj < batchSize; jj++ {
 			expected := base.Offset(((ii - 1) * batchSize) + jj)
@@ -524,4 +527,80 @@ func TestPartitionScan2(t *testing.T) {
 			}
 		}
 	}
+	glog.Infof("Consumer done. Total time: %v", time.Since(now))
+	oldTimestamps := append([]int64{}, timestamps...)
+	glog.Infof("Waiting for some segments to expire but not all")
+	time.Sleep(time.Duration(ttlSeconds-8) * time.Second)
+
+	glog.Infof("Some or all segments must have expired by now. Starting producer again")
+	producer()
+	glog.Infof("Producer has finished")
+
+	glog.Infof("Starting consumer but checking with old timestamps!")
+	now = time.Now()
+	sarg.NumMessages = uint64(batchSize)
+	sarg.StartOffset = -1
+	for ii := 1; ii < len(oldTimestamps); ii++ {
+		sarg.StartTimestamp = oldTimestamps[ii-1]
+		sarg.EndTimestamp = oldTimestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != 0 {
+			glog.Fatalf("Mismatch. Expected 0 values, got: %d. Iteration: %d", len(sret.Values), ii)
+		}
+		if sret.NextOffset != -1 {
+			glog.Fatalf("Next offset mismatch. Expected: %d, got: %d, iteration: %d",
+				-1, sret.NextOffset, ii)
+		}
+	}
+	glog.Infof("Consumer with old timestamps finished. Total Time: %v", time.Since(now))
+
+	glog.Infof("Starting consumer but checking with old start timestamps but new end timestamp")
+	now = time.Now()
+	sarg.NumMessages = uint64(batchSize)
+	sarg.StartOffset = -1
+	for ii := 1; ii < len(oldTimestamps); ii++ {
+		sarg.StartTimestamp = oldTimestamps[ii-1]
+		sarg.EndTimestamp = timestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != batchSize {
+			glog.Fatalf("Mismatch. Expected %d values, got: %d. Iteration: %d", batchSize, len(sret.Values), ii)
+		}
+		for jj := 0; jj < batchSize; jj++ {
+			expected := base.Offset(numIters*batchSize + jj)
+			got := sret.Values[jj].Offset
+			if got != expected {
+				glog.Fatalf("Offset mismatch. Expected: %d, got: %d, iteration: %d, Sarg: %v",
+					expected, got, ii, sarg)
+			}
+		}
+	}
+	glog.Infof("Consumer with old and new timestamps done. Total Time: %v", time.Since(now))
+
+	glog.Infof("Starting consumer but checking with new start and end timestamps")
+	now = time.Now()
+	for ii := 1; ii < len(timestamps); ii++ {
+		sarg.StartTimestamp = timestamps[ii-1]
+		sarg.EndTimestamp = timestamps[ii]
+		sret := p.Scan(defCtx, &sarg)
+		if sret.Error != nil {
+			glog.Fatalf("Unable to scan first offset due to err: %s", sret.Error.Error())
+		}
+		if len(sret.Values) != batchSize {
+			glog.Fatalf("Mismatch. Expected %d values, got: %d. Iteration: %d", batchSize, len(sret.Values), ii)
+		}
+		for jj := 0; jj < batchSize; jj++ {
+			expected := base.Offset(numIters*batchSize) + base.Offset(((ii-1)*batchSize)+jj)
+			if sret.Values[jj].Offset != expected {
+				glog.Fatalf("Offset mismatch. Expected: %d, got: %d", expected, sret.Values[jj].Offset)
+			}
+		}
+	}
+	glog.Infof("Consumer has finished with new timestamps. Total Time: %v", time.Since(now))
+	glog.Infof("Partition timestamp test finished successfully!")
 }

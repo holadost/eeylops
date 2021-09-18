@@ -6,8 +6,8 @@ import (
 
 func TestPrefixLogger(t *testing.T) {
 	// The output should be seen on the screen.
-	logger := NewPrefixLogger("prefix-1")
-	logger2 := NewPrefixLoggerWithParent("prefix-2", logger)
+	logger := NewPrefixLogger("logPrefixStr-1")
+	logger2 := NewPrefixLoggerWithParent("logPrefixStr-2", logger)
 	logger.Infof("Hello World!")
 	logger.Infof("Hello World: %d", 2)
 	logger.Infof("Hello World: %s", "jkaghkjahdkjhadkjha")

@@ -2,7 +2,7 @@ package main
 
 import (
 	"eeylops/server/storage"
-	"eeylops/util"
+	"eeylops/util/testutil"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -12,7 +12,7 @@ import (
 
 func main() {
 	runtime.GOMAXPROCS(4)
-	testDir := util.CreateDir("TestPartitionStress")
+	testDir := testutil.CreateFreshTestDir("TestPartitionStress")
 	go func() {
 		log.Println(http.ListenAndServe("localhost:8080", nil))
 	}()

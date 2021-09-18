@@ -19,6 +19,9 @@ var (
 	// ErrConsumerStore is returned when we have unexpected consumer store error.
 	// ErrConsumerStore = errors.New("ErrConsumerStore: consumer store error")
 
+	// ErrConsumerNotRegistered is returned when a consumer is not registered.
+	ErrConsumerNotRegistered = errors.New("ErrConsumerNotRegistered: consumer not registered")
+
 	// ErrConsumerStoreCommit is returned when we have an error while committing an offset for a consumer.
 	ErrConsumerStoreCommit = errors.New("ErrConsumerStoreCommit: consumer store commit error")
 
@@ -31,6 +34,15 @@ var (
 	// ErrTopicNotFound is returned when the given topic is not found.
 	ErrTopicNotFound = errors.New("ErrTopicNotFound: topic not found")
 
-	// errPartitionOffsetTsNotFound is returned when an offset or timestamp was not found
-	errPartitionOffsetTsNotFound = errors.New("errPartitionOffsetTsNotFound: offset/timestamp not found")
+	// ErrTopicExists is returned when a topic with the given name already exists.
+	ErrTopicExists = errors.New("ErrTopicExists: topic already exists")
+
+	// ErrStorageController is a generic error that is returned for any unhandled errors.
+	ErrStorageController = errors.New("ErrStorageController: storage controller error")
+
+	// ErrPartitionNotFound is a returned when the given partition is not found by the instance topic manager.
+	ErrPartitionNotFound = errors.New("ErrPartitionNotFound: partition not found")
+
+	// ErrInvalidRLogIdx is a returned when the replicated log index applied was invalid.
+	ErrInvalidRLogIdx = errors.New("ErrInvalidRLogIdx: invalid replicated log index")
 )

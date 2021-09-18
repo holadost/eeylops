@@ -1,0 +1,317 @@
+syntax = "proto3";
+
+package comm;
+
+// Base error returned with every RPC response.
+message Error {
+  enum ErrorCodes {
+    KNoError = 0;
+    KErrInvalidArg = 1;
+    KErrNotLeader = 2;
+    KErrBackend = 3;
+    KErrReplication = 4;
+    KErrTopicNotFound = 5;
+    KErrTopicExists = 6;
+    KErrPartitionNotFound = 7;
+    KErrConsumerNotRegistered = 8;
+    KErrInvalidClusterId = 9;
+    KErrTransport = 10;
+    KErrTimeout = 11;
+  }
+  ErrorCodes error_code = 1;
+  string error_msg = 2;
+  int32 leader_id = 3;
+}
+
+message ClusterConfig {
+  repeated NodeConfig node_config_list = 1;
+  int32 leader_id = 2;
+}
+
+message NodeConfig {
+  int32 id = 1;
+  string host = 2;
+  int32 port = 3;
+}
+
+// Value.
+message Value {
+  // This holds the offset of the message in the partition.
+  int64 offset = 1;
+  // This holds the timestamp when the message was written to the partition.
+  int64 timestamp = 2;
+  // Value.
+  bytes value = 3;
+}
+
+message Topic {
+  // Topic ID.
+  int32 topic_id = 1;
+  // Name of the topic.
+  string topic_name = 2;
+  // List of partition IDs associated with this topic.
+  repeated int32 partition_ids = 3;
+  // Time to live(in seconds) or retention policy for messages
+  // in this topic.
+  int32 ttl_seconds = 4;
+}
+
+// This topic config is used for internal communications between the mothership and the various brokers.
+message BrokerTopicConfig {
+  // Topic ID.
+  int32 topic_id = 1;
+  // Name of the topic.
+  string topic_name = 2;
+  // List of partition IDs associated with this topic.
+  repeated int32 partition_ids = 3;
+  // Time to live(in seconds) or retention policy for messages
+  // in this topic.
+  int32 ttl_seconds = 4;
+  // Created epoch time(in nanoseconds).
+  int64 created_at = 5;
+}
+
+message CreateTopicRequest {
+  // Topic to be created.
+  Topic topic = 1;
+}
+
+message CreateTopicResponse {
+  // Error.
+  Error error = 1;
+}
+
+message CreateBrokerTopicRequest {
+  // Topic to be created.
+  BrokerTopicConfig topic = 1;
+}
+
+message CreateBrokerTopicResponse {
+  // Error.
+  Error error = 1;
+}
+
+message RemoveTopicRequest {
+  // Topic ID.
+  int32 topic_id = 1;
+}
+
+message RemoveTopicResponse {
+  // Error.
+  Error error = 1;
+}
+
+message GetTopicRequest {
+  // Topic name.
+  string topic_name = 1;
+  // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
+  bool sync = 2;
+}
+
+message GetTopicResponse {
+  // Error.
+  Error error = 1;
+  // Topic.
+  Topic topic = 2;
+}
+
+message GetAllTopicsRequest {
+  // If true, a sync read is performed i.e. the latest value(s) are fetched. Defaults to false.
+  bool sync = 1;
+}
+
+message GetAllTopicsResponse {
+  // Error.
+  Error error = 1;
+  // All topics.
+  repeated Topic topics = 2;
+}
+
+message ProduceRequest {
+  // Topic ID.
+  int32 topic_id = 1;
+  // Partition where the given values must be appended.
+  int32 partition_id = 2;
+  // List of values to append to the partition.
+  repeated bytes values = 3;
+}
+
+message ProduceResponse {
+  // Error.
+  Error error = 1;
+}
+
+message RegisterConsumerRequest {
+  // Consumer ID. Must be <= 256 characters.
+  string consumer_id = 1;
+  // Topic ID.
+  int32 topic_id = 2;
+  // Partition Id.
+  int32 partition_id = 3;
+}
+
+message RegisterConsumerResponse {
+  // Error.
+  Error error = 1;
+}
+
+message ConsumeRequest {
+  // Consumer ID.
+  string consumer_id = 1;
+  // Topic ID.
+  int32 topic_id = 2;
+  // Partition ID.
+  int32 partition_id = 3;
+  // Batch size(number of messages) to fetch per scan RPC. Defaults to 1.
+  int32 batch_size = 4;
+  // Specifies the start offset from where the scan starts.
+  // Defaults to -1.
+  int64 start_offset = 5;
+  // Filters messages such that only messages >= start_timestamp
+  // are fetched.
+  int64 start_timestamp = 6;
+  // Filters messages such that only messages < end_timestamp are
+  // fetched.
+  int64 end_timestamp = 7;
+  // If True, start_offset - 1 is committed before sending out the response. Defaults to false.
+  bool auto_commit = 8;
+  // If true, consume resumes from the last committed offset. Defaults to false. If true, start_offset must not be
+  // specified.
+  bool resume_from_last_committed_offset = 9;
+}
+
+message ConsumeResponse {
+  // Error.
+  Error error = 1;
+  // List of values.
+  repeated Value values = 2;
+  // The next offset to start scan from. If -1, it means that
+  // the scan is complete.
+  int64 next_offset = 3;
+}
+
+message CommitRequest {
+  // Topic ID
+  int32 topic_id = 1;
+  // Partition ID.
+  int32 partition_id = 2;
+  // Consumer ID.
+  string consumer_id = 3;
+  // Offset number.
+  int64 offset = 4;
+}
+
+message CommitResponse {
+  // Error.
+  Error error = 1;
+}
+
+message LastCommittedRequest {
+  // Topic ID.
+  int32 topic_id = 1;
+  // Partition ID.
+  int32 partition_id = 2;
+  // Consumer ID.
+  string consumer_id = 3;
+  // If true, a sync read is performed i.e. the latest value is fetched. Defaults to false.
+  bool sync = 4;
+}
+
+message LastCommittedResponse {
+  // Error.
+  Error error = 1;
+  // Last committed offset.
+  int64 offset = 2;
+}
+
+message GetBrokerRequest {
+  // Topic ID.
+  int32 topic_id = 1;
+  // Partition ID.
+  int32 partition_id = 2;
+}
+
+message GetBrokerResponse {
+  // Error.
+  Error error = 1;
+  // Leader configuration.
+  NodeConfig leader_config = 2;
+}
+
+message GetLeaderRequest {
+}
+
+message GetLeaderResponse {
+  // Error.
+  Error error = 1;
+  // Leader configuration.
+  NodeConfig leader_config = 2;
+}
+
+message GetClusterConfigRequest {
+}
+
+message GetClusterConfigResponse {
+  // Error.
+  Error error = 1;
+  // Cluster configuration.
+  ClusterConfig config = 2;
+}
+
+
+service EeylopsService{
+  // Creates a new topic with eeylops. If the topic already exists,
+  // returns KTopicAlreadyExists.
+  //
+  // If ttl_seconds is not provided, it defaults to 7 days.
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
+  // Removes a topic with eeylops. If the topic does not exist, KTopicNotFound
+  // error code is returned.
+  rpc RemoveTopic(RemoveTopicRequest) returns (RemoveTopicResponse);
+
+  // Creates a new topic with an eeylops broker. This is used for internal communications alone.
+  rpc CreateTopicOnBroker(CreateBrokerTopicRequest) returns (CreateBrokerTopicResponse);
+  // Removes a topic with an eeylops broker. This is used for internal communications alone.
+  rpc RemoveTopicFromBroker(RemoveTopicRequest) returns (RemoveTopicResponse);
+
+  // Get a the requested topic. If the topic does not exist, KTopicNotFound
+  // error code is returned.
+  rpc GetTopic(GetTopicRequest) returns (GetTopicResponse);
+
+  // Get a the requested topic. If the topic does not exist, KTopicNotFound
+  // error code is returned.
+  rpc GetAllTopics(GetAllTopicsRequest) returns (GetAllTopicsResponse);
+
+  // Produce one or more messages to the given topic and partition.
+  // Returns KTopicNotFound if the topic or partition was not found.
+  rpc Produce(ProduceRequest) returns (ProduceResponse);
+
+  // Publish produces one or more messages periodically using client side streaming.
+  rpc Publish(stream ProduceRequest) returns (ProduceResponse);
+
+  // Registers a consumer.
+  rpc RegisterConsumer(RegisterConsumerRequest) returns (RegisterConsumerResponse);
+
+  // Consume one or more messages from the given topic and partition.
+  // Returns KTopicNotFound if the topic or partition was not found.
+  rpc Consume(ConsumeRequest) returns (ConsumeResponse);
+
+  // Subscribes to a topic and partition and consumes messages using server side streaming.
+  rpc Subscribe(ConsumeRequest) returns (stream ConsumeResponse);
+
+  // Commits the offset provided by the client. Future Subscribers can
+  // directly start from the last committed offset of that Subscriber.
+  rpc Commit(CommitRequest) returns (CommitResponse);
+
+  // Fetches the last committed offset by the client.
+  rpc GetLastCommitted(LastCommittedRequest) returns (LastCommittedResponse);
+
+  // Fetches the broker for the given topic and partition.
+  rpc GetBroker(GetBrokerRequest) returns (GetBrokerResponse);
+
+  // Fetches the broker for the given topic and partition.
+  rpc GetLeader(GetLeaderRequest) returns (GetLeaderResponse);
+
+  // Fetches the cluster configuration.
+  rpc GetClusterConfig(GetClusterConfigRequest) returns (GetClusterConfigResponse);
+}

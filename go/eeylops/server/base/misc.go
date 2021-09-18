@@ -18,3 +18,5 @@ func GetDataDirectory() string {
 }
 
 type Offset int64
+type TopicIDType int
+type PartitionIDType int

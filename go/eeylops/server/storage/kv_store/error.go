@@ -14,4 +14,25 @@ var (
 
 	// ErrKVStoreGeneric is returned when there is some generic kv store error.
 	ErrKVStoreGeneric = errors.New("ErrKVStoreGeneric: kv store generic error")
+
+	// ErrKVStoreConflict is returned when there is a conflict error. This can happen when there are simultaneous
+	// transactions.
+	ErrKVStoreConflict = errors.New("ErrKVStoreConflict: kv store conflict error")
+
+	// ErrKVStoreReservedColumnFamilyNames is returned when the CF name provided is reserved.
+	ErrKVStoreReservedColumnFamilyNames = errors.New("ErrKVStoreReservedColumnFamilyNames: cannot use " +
+		"reserved column family names")
+
+	// ErrKVStoreInvalidColumnFamilyName is returned when the CF name provided is invalid.
+	ErrKVStoreInvalidColumnFamilyName = errors.New("ErrKVStoreInvalidColumnFamilyName: invalid CF name")
+
+	// ErrKVStoreColumnFamilyExists is returned when the CF already exists.
+	ErrKVStoreColumnFamilyExists = errors.New("ErrKVStoreColumnFamilyExists: column family already exists")
+
+	// ErrKVStoreColumnFamilyNotFound is returned when the CF already exists.
+	ErrKVStoreColumnFamilyNotFound = errors.New("ErrKVStoreColumnFamilyNotFound: column family not found")
+
+	// ErrKVStoreInvalidKey is returned when the key is invalid.
+	ErrKVStoreInvalidKey = errors.New("ErrKVStoreInvalidKey: invalid key. key must be > 0 bytes and " +
+		"<= 60000 bytes")
 )
