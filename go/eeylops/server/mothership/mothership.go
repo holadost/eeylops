@@ -17,10 +17,10 @@ import (
 const kMotherShipDirName = "mothership"
 
 type MotherShip struct {
-	logger            *logging.PrefixLogger
-	fsm               *MotherShipFSM
-	topicsConfigStore *storage.TopicsConfigStore
-	rootDir           string
+	logger  *logging.PrefixLogger
+	fsm     *MotherShipFSM
+	store   *MothershipStore
+	rootDir string
 }
 
 func NewMotherShip(rootDir string) *MotherShip {
@@ -28,16 +28,16 @@ func NewMotherShip(rootDir string) *MotherShip {
 	msRootPath := path.Join(rootDir, kMotherShipDirName)
 	util.CreateDir(msRootPath)
 	ms.rootDir = msRootPath
-	ms.topicsConfigStore = storage.NewTopicsConfigStoreWithTopicIDGenerationEnabled(msRootPath)
-	ms.fsm = NewMotherShipFSM(ms.topicsConfigStore, ms.logger)
+	ms.store = NewMothershipStore(msRootPath)
+	ms.fsm = NewMotherShipFSM(ms.store, ms.logger)
 	return &ms
 }
 
 func (ms *MotherShip) initialize() {
 }
 
-func (ms *MotherShip) GetTopicsConfigStore() *storage.TopicsConfigStore {
-	return ms.topicsConfigStore
+func (ms *MotherShip) GetMothershipStore() *MothershipStore {
+	return ms.store
 }
 
 func (ms *MotherShip) AddTopic(ctx context.Context, req *comm.CreateTopicRequest) *comm.CreateTopicResponse {
@@ -180,7 +180,7 @@ func (ms *MotherShip) GetTopic(ctx context.Context, req *comm.GetTopicRequest) *
 	}
 
 	// Fetch topic.
-	topic, err := ms.topicsConfigStore.GetTopicByName(req.GetTopicName())
+	topic, err := ms.store.GetTopicByName(req.GetTopicName())
 	if err != nil {
 		if err == storage.ErrTopicNotFound {
 			return makeResponse(nil, comm.Error_KErrTopicNotFound, err,
@@ -194,7 +194,7 @@ func (ms *MotherShip) GetTopic(ctx context.Context, req *comm.GetTopicRequest) *
 
 func (ms *MotherShip) GetAllTopics(ctx context.Context) *comm.GetAllTopicsResponse {
 	// TODO: Only if we are the leader.
-	topics := ms.topicsConfigStore.GetAllTopics()
+	topics := ms.store.GetAllTopics()
 	var resp comm.GetAllTopicsResponse
 	resp.Error = base.MakeErrorProto(comm.Error_KNoError, nil, "")
 	for _, tpc := range topics {

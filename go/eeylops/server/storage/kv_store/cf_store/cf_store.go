@@ -26,10 +26,6 @@ type CFStore interface {
 	Put(entry *CFStoreEntry) error
 	// Delete deletes the given key from the backing store.
 	Delete(key *CFStoreKey) error
-	// Scan iterates over a column family from the given startKey and fetches the required number of
-	// values. Scans can be in the forward or reverse directions.
-	Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
-		entries []*CFStoreEntry, nextKey []byte, retErr error)
 	// BatchGet multiple keys from the backing store.
 	BatchGet(keys []*CFStoreKey) (values []*CFStoreEntry, errs []error)
 	// BatchPut multiple entries in the backing store.
@@ -69,10 +65,8 @@ type Transaction interface {
 	BatchPut(entries []*CFStoreEntry) error
 	// BatchDelete and does Deletes.
 	BatchDelete(keys []*CFStoreKey) error
-	// Scan and scans values from the store starting from the given start key and num keys. Every scan call
-	// returns a slice of keys, values, the next key and scan error(if any).
-	Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
-		entries []*CFStoreEntry, nextKey []byte, retErr error)
+	// NewScanner returns a new scanner than can be used to iterate over a column family in the backing store.
+	NewScanner(cf string, startKey []byte, reverse bool) (Scanner, error)
 	// Commit the transaction.
 	Commit() error
 	// Discard the transaction.

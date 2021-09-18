@@ -39,7 +39,7 @@ func newBadgerScanner(store *internalBadgerKVStore, cf string, startKey []byte, 
 }
 
 func newBadgerScannerWithTxn(store *internalBadgerKVStore, txn *badger.Txn, cf string, startKey []byte,
-	reverse bool) *BadgerScanner {
+	reverse bool) (*BadgerScanner, error) {
 	scanner := new(BadgerScanner)
 	scanner.store = store
 	scanner.txn = txn
@@ -53,7 +53,7 @@ func newBadgerScannerWithTxn(store *internalBadgerKVStore, txn *badger.Txn, cf s
 		scanner.startKey = BuildCFKey(scanner.cf, startKey)
 	}
 	scanner.initialize()
-	return scanner
+	return scanner, nil
 }
 
 func (scanner *BadgerScanner) initialize() {

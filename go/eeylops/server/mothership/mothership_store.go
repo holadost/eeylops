@@ -71,9 +71,11 @@ func (mss *MothershipStore) initialize() {
 	mss.addCfsIfNotExists()
 
 	// Initialize replicated log index, next topic ID and last logical timestamp.
-	mss.initializeLastRLogIdxFromStore()
-	mss.initializeNextTopicIDFromKVStore()
-	mss.initializeLastLogicalTs()
+	txn := mss.kvStore.NewTransaction()
+	mss.initializeLastRLogIdxFromStore(txn)
+	mss.initializeNextTopicIDFromKVStore(txn)
+	mss.initializeLastLogicalTs(txn)
+	txn.Discard()
 
 	// Initialize internal topic maps.
 	mss.topicNameMap = make(map[string]*base.TopicConfig)
@@ -348,12 +350,12 @@ func (mss *MothershipStore) removeTopicFromMaps(topic *base.TopicConfig) {
 }
 
 // initializeNextTopicIDFromKVStore fetches the next topic ID from the underlying KV store that will be used for new topics.
-func (mss *MothershipStore) initializeNextTopicIDFromKVStore() {
+func (mss *MothershipStore) initializeNextTopicIDFromKVStore(txn cf_store.Transaction) {
 	key := cf_store.CFStoreKey{
 		Key:          kLastTopicIDBytes,
 		ColumnFamily: kMothershipKVStoreMiscColumnFamily,
 	}
-	val, err := mss.kvStore.Get(&key)
+	val, err := txn.Get(&key)
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			// No topics have been created yet.
@@ -368,12 +370,12 @@ func (mss *MothershipStore) initializeNextTopicIDFromKVStore() {
 }
 
 // initializeNextTopicIDFromKVStore fetches the next topic ID from the underlying KV store that will be used for new topics.
-func (mss *MothershipStore) initializeLastLogicalTs() {
+func (mss *MothershipStore) initializeLastLogicalTs(txn cf_store.Transaction) {
 	key := cf_store.CFStoreKey{
 		Key:          kLastLogicalTimestampBytes,
 		ColumnFamily: kMothershipKVStoreMiscColumnFamily,
 	}
-	val, err := mss.kvStore.Get(&key)
+	val, err := txn.Get(&key)
 	if err != nil {
 		if err == kv_store.ErrKVStoreKeyNotFound {
 			mss.topicsConfigLogicalTimestamp = 0
@@ -386,12 +388,12 @@ func (mss *MothershipStore) initializeLastLogicalTs() {
 }
 
 // initializeNextTopicIDFromKVStore fetches the next topic ID from the underlying KV store that will be used for new topics.
-func (mss *MothershipStore) initializeLastRLogIdxFromStore() {
+func (mss *MothershipStore) initializeLastRLogIdxFromStore(txn cf_store.Transaction) {
 	rLogKey, _ := storagebase.PrepareRLogIDXKeyVal(0)
 	var key cf_store.CFStoreKey
 	key.Key = rLogKey
 	key.ColumnFamily = kMothershipKVStoreMiscColumnFamily
-	lastVal, err := mss.kvStore.Get(&key)
+	lastVal, err := txn.Get(&key)
 	if err != nil {
 		if err != kv_store.ErrKVStoreKeyNotFound {
 			mss.logger.Fatalf("Unable to initialize topics config store due to err: %s", err.Error())

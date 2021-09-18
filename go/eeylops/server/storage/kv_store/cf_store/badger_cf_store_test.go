@@ -442,7 +442,8 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.CompactL0OnClose = false
 	opts.LoadBloomsOnOpen = false
-	store := NewBadgerCFStore(testDir, opts)
+	var store CFStore
+	store = NewBadgerCFStore(testDir, opts)
 	cfName := "offset"
 	err := store.AddColumnFamily(cfName)
 	if err != nil {
@@ -621,42 +622,6 @@ func doStoreIO(store CFStore, cf string) {
 			}
 			if entries[ii].ColumnFamily != cf {
 				glog.Fatalf("CF mismatch. Expected: %s, Got: %s", cf, entries[ii].ColumnFamily)
-			}
-		}
-	}
-
-	// Scan and verify values
-	glog.Infof("Testing Scan")
-	for iter := 0; iter < numIters; iter++ {
-		meraVal := iter * batchSize
-		expectedNextKey := []byte(fmt.Sprintf("key-%03d", (iter+1)*batchSize))
-		sk := []byte(fmt.Sprintf("key-%03d", meraVal))
-		entries, nk, err := store.Scan(cf, sk, batchSize, 1024*1024, false)
-		if err != nil {
-			glog.Fatalf("Unexpected error while scanning: %v", err)
-		}
-		for ii := 0; ii < len(entries); ii++ {
-			meraSingleVal := meraVal + ii
-			expectedKey := []byte(fmt.Sprintf("key-%03d", meraSingleVal))
-			expectedVal := []byte(fmt.Sprintf("value-%03d", meraSingleVal))
-			if bytes.Compare(expectedKey, entries[ii].Key) != 0 {
-				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedKey),
-					string(entries[ii].Key))
-				return
-			}
-			if bytes.Compare(expectedVal, entries[ii].Value) != 0 {
-				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedVal),
-					string(entries[ii].Value))
-				return
-			}
-		}
-		if iter == numIters-1 {
-			if nk != nil {
-				glog.Fatalf("Next key is not nil!")
-			}
-		} else {
-			if bytes.Compare(nk, expectedNextKey) != 0 {
-				glog.Fatalf("Unexpected next key: %s", string(nk))
 			}
 		}
 	}
@@ -869,42 +834,6 @@ func doTransactionIO(store CFStore, cf string) {
 			}
 			if entries[ii].ColumnFamily != cf {
 				glog.Fatalf("CF mismatch. Expected: %s, Got: %s", cf, entries[ii].ColumnFamily)
-			}
-		}
-		txn.Discard()
-	}
-
-	// Scan and verify values
-	glog.Infof("Testing Scan")
-	for iter := 0; iter < numIters; iter++ {
-		meraVal := iter * batchSize
-		expectedNextKey := []byte(fmt.Sprintf("key-%03d", (iter+1)*batchSize))
-		sk := []byte(fmt.Sprintf("key-%03d", meraVal))
-		txn := store.NewTransaction()
-		entries, nk, err := txn.Scan(cf, sk, batchSize, 1024*1024, false)
-		if err != nil {
-			glog.Fatalf("Unexpected error while scanning: %v", err)
-		}
-		for ii := 0; ii < len(entries); ii++ {
-			meraSingleVal := meraVal + ii
-			expectedKey := []byte(fmt.Sprintf("key-%03d", meraSingleVal))
-			expectedVal := []byte(fmt.Sprintf("value-%03d", meraSingleVal))
-			if bytes.Compare(expectedKey, entries[ii].Key) != 0 {
-				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedKey),
-					string(entries[ii].Key))
-			}
-			if bytes.Compare(expectedVal, entries[ii].Value) != 0 {
-				glog.Fatalf("Value mismatch. Expected: %s, Got: %s", string(expectedVal),
-					string(entries[ii].Value))
-			}
-		}
-		if iter == numIters-1 {
-			if nk != nil {
-				glog.Fatalf("Next key is not nil!")
-			}
-		} else {
-			if bytes.Compare(nk, expectedNextKey) != 0 {
-				glog.Fatalf("Unexpected next key: %s", string(nk))
 			}
 		}
 		txn.Discard()

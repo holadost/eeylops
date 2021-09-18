@@ -98,7 +98,7 @@ func (srv *RPCServer) CreateTopic(ctx context.Context,
 	if resp.GetError().GetErrorCode() != comm.Error_KNoError {
 		return resp, nil
 	}
-	topic, err := srv.motherShip.GetTopicsConfigStore().GetTopicByName(req.GetTopic().GetTopicName())
+	topic, err := srv.motherShip.GetMothershipStore().GetTopicByName(req.GetTopic().GetTopicName())
 	if err != nil {
 		glog.Fatalf("Just added topic to mothership but unable to get it")
 	}

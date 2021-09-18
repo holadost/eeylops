@@ -46,7 +46,7 @@ func (txn *BadgerCFStoreTransaction) BatchDelete(keys []*CFStoreKey) error {
 	return txn.store.BatchDeleteWithTxn(txn.badgerTxn, keys)
 }
 
-func (txn *BadgerCFStoreTransaction) NewScanner(cf string, startKey []byte, reverse bool) Scanner {
+func (txn *BadgerCFStoreTransaction) NewScanner(cf string, startKey []byte, reverse bool) (Scanner, error) {
 	return newBadgerScannerWithTxn(txn.store, txn.badgerTxn, cf, startKey, reverse)
 }
 
