@@ -207,6 +207,7 @@ func (cs *ConsumerStore) RemoveNonExistentTopicConsumers(existentTopicIds []base
 		cs.logger.Fatalf("Unable to initialize scanner due to err: %v", err)
 	}
 	var keysToRemove []*kv_store.KVStoreKey
+	totalKeysRemoved := 0
 	for ; scanner.Valid(); scanner.Next() {
 		key, _, err := scanner.GetItem()
 		if err != nil {
@@ -218,6 +219,7 @@ func (cs *ConsumerStore) RemoveNonExistentTopicConsumers(existentTopicIds []base
 					Key:          key,
 					ColumnFamily: kConsumerStoreMainColumnFamily,
 				})
+				totalKeysRemoved++
 				if len(keysToRemove) == 64 {
 					deleteKeys(keysToRemove)
 					keysToRemove = nil
@@ -227,6 +229,9 @@ func (cs *ConsumerStore) RemoveNonExistentTopicConsumers(existentTopicIds []base
 	}
 	if len(keysToRemove) > 0 {
 		deleteKeys(keysToRemove)
+	}
+	if totalKeysRemoved > 0 {
+		cs.logger.Infof("Removed %d keys from the consumer store", totalKeysRemoved)
 	}
 }
 

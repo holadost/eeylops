@@ -9,11 +9,17 @@ import (
 	storagebase "eeylops/server/storage/base"
 	"eeylops/util"
 	"eeylops/util/logging"
+	"flag"
 	"fmt"
 	"github.com/golang/glog"
 	"github.com/hashicorp/raft"
 	"path"
 	"time"
+)
+
+var (
+	FlagBrokerStoreGCIntervalSecs = flag.Int("broker_store_gc_interval_secs", 3600,
+		"The interval at which the broker store is scanned to reclaim garbage")
 )
 
 type PeerAddress struct {
@@ -58,7 +64,7 @@ func (broker *Broker) initialize(opts *BrokerOpts) {
 
 	// Initialize broker store.
 	var stopts BrokerStoreOpts
-	stopts.StoreGCScanIntervalSecs = 300
+	stopts.StoreGCScanIntervalSecs = *FlagBrokerStoreGCIntervalSecs
 	stopts.RootDirectory = path.Join(brokerRootDir, "storage")
 	stopts.BrokerID = broker.brokerID
 	broker.brokerStore = NewBrokerStore(stopts)

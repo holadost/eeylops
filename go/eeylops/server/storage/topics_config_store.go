@@ -229,7 +229,6 @@ func (tcs *TopicsConfigStore) GetAllTopics() []base.TopicConfig {
 	tcs.topicMapLock.RLock()
 	defer tcs.topicMapLock.RUnlock()
 	var topics []base.TopicConfig
-	tcs.logger.Infof("Total number of topics in maps: %d", len(tcs.topicIDMap))
 	for _, topic := range tcs.topicIDMap {
 		topics = append(topics, *topic)
 	}
