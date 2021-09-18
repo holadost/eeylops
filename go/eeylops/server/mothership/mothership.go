@@ -24,7 +24,7 @@ type MotherShip struct {
 }
 
 func NewMotherShip(rootDir string) *MotherShip {
-	ms := MotherShip{logger: logging.NewPrefixLogger("mothership")}
+	ms := MotherShip{logger: logging.NewPrefixLogger("Mothership")}
 	msRootPath := path.Join(rootDir, kMotherShipDirName)
 	util.CreateDir(msRootPath)
 	ms.rootDir = msRootPath

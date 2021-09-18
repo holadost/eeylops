@@ -44,7 +44,7 @@ func NewMothershipStore(rootDir string) *MothershipStore {
 	msc := new(MothershipStore)
 	msc.rootDir = rootDir
 	msc.tsDir = path.Join(rootDir, kMothershipTopicsConfigStoreDirectory)
-	msc.logger = logging.NewPrefixLogger("mothership_store")
+	msc.logger = logging.NewPrefixLogger("Mothership")
 	if err := os.MkdirAll(msc.tsDir, 0774); err != nil {
 		msc.logger.Fatalf("Unable to create directory for topic store due to err: %v", err)
 		return nil
