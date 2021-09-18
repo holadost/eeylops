@@ -3,29 +3,14 @@ package storage
 import (
 	"eeylops/server/base"
 	"eeylops/util/testutil"
-	"fmt"
 	"github.com/golang/glog"
-	"os"
 	"testing"
 )
 
-func createConsumerStoreTestDir(t *testing.T, testName string) string {
-	dataDir := fmt.Sprintf("/tmp/consumer_store_test/%s", testName)
-	err := os.RemoveAll(dataDir)
-	if err != nil {
-		t.Fatalf("Unable to delete test directory: %s", dataDir)
-	}
-	err = os.MkdirAll(dataDir, 0774)
-	if err != nil {
-		glog.Fatalf("Unable to create test dir: %s", dataDir)
-	}
-	return dataDir
-}
-
-func c(t *testing.T) {
+func TestConsumerStore(t *testing.T) {
 	testutil.LogTestMarker("TestConsumerStore")
-	testDir := createConsumerStoreTestDir(t, "TestConsumerStore")
-	cs := NewConsumerStore(testDir)
+	testDir := testutil.CreateFreshTestDir("TestConsumerStore")
+	cs := NewConsumerStore(testDir, "1")
 	consumerID := "consumer1"
 	topidName := base.TopicIDType(1)
 	partitionID := uint(1)
