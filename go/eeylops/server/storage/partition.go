@@ -120,8 +120,8 @@ func NewPartition(opts PartitionOpts) *Partition {
 	if p.partitionID <= 0 {
 		glog.Fatalf("Partition ID must be defined. Partition ID must be > 0")
 	}
-	p.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("partition-%d", p.partitionID),
-		logging.NewPrefixLogger(p.topicName))
+	p.logger = logging.NewPrefixLoggerWithParent(fmt.Sprintf("Partition: %d", p.partitionID),
+		logging.NewPrefixLogger(fmt.Sprintf("Topic: %s", p.topicName)))
 	p.rootDir = opts.RootDirectory
 	if p.rootDir == "" {
 		p.logger.Fatalf("A data directory must be specified for topic: %s, partition: %d",
