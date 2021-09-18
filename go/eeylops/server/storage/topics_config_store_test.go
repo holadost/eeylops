@@ -29,7 +29,7 @@ func TestTopicConfigStore(t *testing.T) {
 	numTopics := 100
 	closeReopenIterNum := 5
 	readVerifyIterNum := 5
-	ts := NewTopicsConfigStoreWithTopicIDGenerationEnabled(testDir)
+	ts := NewTopicsConfigStore(testDir, "1")
 	topicNameGen := func(val int) string {
 		return fmt.Sprintf("topic-%d", val)
 	}
@@ -42,6 +42,7 @@ func TestTopicConfigStore(t *testing.T) {
 		topic.PartitionIDs = []int{0, 1, 2, 3}
 		topic.TTLSeconds = 86400
 		topic.CreatedAt = time.Now()
+		topic.ID = base.TopicIDType(ii)
 		if err := ts.AddTopic(topic, int64(100+ii)); err != nil {
 			glog.Fatalf("Unable to add topic due to err: %s", err.Error())
 			return
@@ -53,7 +54,7 @@ func TestTopicConfigStore(t *testing.T) {
 				glog.Fatalf("Unable to close topic store due to err: %s", err.Error())
 				return
 			}
-			ts = NewTopicsConfigStoreWithTopicIDGenerationEnabled(testDir)
+			ts = NewTopicsConfigStore(testDir, "1")
 		}
 		// Read and verify all the topics every readVerifyIterNum iterations.
 		if ii%readVerifyIterNum == 0 {
@@ -89,7 +90,7 @@ func TestTopicConfigStore(t *testing.T) {
 				glog.Fatalf("Unable to close topic store due to err: %s", err.Error())
 				return
 			}
-			ts = NewTopicsConfigStoreWithTopicIDGenerationEnabled(testDir)
+			ts = NewTopicsConfigStore(testDir, "1")
 		}
 		if ii%readVerifyIterNum == 0 {
 			for jj := 1; jj <= numTopics; jj++ {

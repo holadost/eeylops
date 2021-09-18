@@ -66,7 +66,7 @@ func NewBrokerStore(opts BrokerStoreOpts) *BrokerStore {
 
 func (bs *BrokerStore) initialize() {
 	bs.consumerStore = storage.NewConsumerStore(bs.getBrokerRootDirectory(), bs.brokerID)
-	bs.topicsStore = storage.NewTopicsConfigStore(bs.getBrokerRootDirectory())
+	bs.topicsStore = storage.NewTopicsConfigStore(bs.getBrokerRootDirectory(), bs.brokerID)
 	bs.topicMap = make(map[base.TopicIDType]*topicEntry)
 	bs.disposedChan = make(chan string, 128)
 	bs.topicDeletionChan = make(chan *topicEntry, 128)
