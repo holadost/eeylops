@@ -4,7 +4,7 @@ import (
 	"eeylops/server/base"
 	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/badger_kv_store"
+	bkv "eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util/logging"
 	"encoding/json"
 	"fmt"
@@ -62,7 +62,7 @@ func (tcs *TopicsConfigStore) initialize() {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.LoadBloomsOnOpen = false
-	tcs.kvStore = badger_kv_store.NewBadgerKVStore(tcs.tsDir, opts)
+	tcs.kvStore = bkv.NewBadgerKVStore(tcs.tsDir, opts)
 	tcs.addCfsIfNotExists()
 
 	// Initialize internal maps.

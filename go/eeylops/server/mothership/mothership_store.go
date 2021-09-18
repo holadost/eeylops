@@ -5,7 +5,7 @@ import (
 	"eeylops/server/storage"
 	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/badger_kv_store"
+	bkv "eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"encoding/json"
@@ -67,7 +67,7 @@ func (mss *MothershipStore) initialize() {
 	opts.Compression = 0
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
-	mss.kvStore = badger_kv_store.NewBadgerKVStore(mss.tsDir, opts)
+	mss.kvStore = bkv.NewBadgerKVStore(mss.tsDir, opts)
 	mss.addCfsIfNotExists()
 
 	// Initialize replicated log index, next topic ID and last logical timestamp.

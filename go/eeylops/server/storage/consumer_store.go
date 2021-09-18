@@ -5,7 +5,7 @@ import (
 	"eeylops/server/base"
 	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/badger_kv_store"
+	bkv "eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
@@ -63,7 +63,7 @@ func (cs *ConsumerStore) initialize() {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.LoadBloomsOnOpen = false
-	cs.kvStore = badger_kv_store.NewBadgerKVStore(cs.csDir, opts)
+	cs.kvStore = bkv.NewBadgerKVStore(cs.csDir, opts)
 	cs.addCfsIfNotExists()
 
 	// Find the last replicated log index.

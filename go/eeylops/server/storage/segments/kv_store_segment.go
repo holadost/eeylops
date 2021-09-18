@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/badger_kv_store"
+	bkv "eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"errors"
@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	kLastRLogIdxKeyBytes = sbase.KLastRLogIdxKeyBytes
+	kLastRLogIdxKeyBytes = storagebase.KLastRLogIdxKeyBytes
 	kNextIndexKeyBytes   = []byte("next_index_key")
 )
 
@@ -514,7 +514,7 @@ func (seg *KVStoreSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *S
 				// The value hasn't expired. Check if only one value was requested and if so, we can return early here
 				// since we already have the message with us.
 				if arg.NumMessages == 1 {
-					ret.Values = append(ret.Values, &sbase.ScanValue{
+					ret.Values = append(ret.Values, &storagebase.ScanValue{
 						Offset:    arg.StartOffset,
 						Value:     msg.GetBody(),
 						Timestamp: msg.GetTimestamp(),
@@ -600,7 +600,7 @@ func (seg *KVStoreSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet
 				break
 			}
 		}
-		ret.Values = append(ret.Values, &sbase.ScanValue{
+		ret.Values = append(ret.Values, &storagebase.ScanValue{
 			Offset:    offset,
 			Value:     msg.GetBody(),
 			Timestamp: msg.GetTimestamp(),
@@ -854,7 +854,7 @@ func (seg *KVStoreSegment) open() {
 		opts.NumMemtables = 0
 	}
 	opts.Logger = seg.logger
-	seg.dataDB = badger_kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
+	seg.dataDB = bkv.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
 
 	// Create column families.
 	cfs := []string{kOffsetColumnFamily, kTimestampIndexColumnFamily, kMiscColumnFamily}
