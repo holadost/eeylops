@@ -27,13 +27,13 @@ type BrokerOpts struct {
 	BrokerID      string        // Broker ID.
 }
 
-// Broker manages the replication and storage controller for the node.
+// Broker handles the storage and replication for one or more partitions.
 type Broker struct {
 	instanceDir           string
 	brokerID              string
 	peerAddresses         []PeerAddress
 	replicationController *replication.RaftController
-	storageController     *StorageController
+	brokerStore           *BrokerStore
 	fsm                   *BrokerFSM
 	lastTopicIDAssigned   base.TopicIDType
 	logger                *logging.PrefixLogger
@@ -56,12 +56,12 @@ func (broker *Broker) initialize(opts *BrokerOpts) {
 	brokerRootDir := path.Join(opts.DataDirectory, broker.brokerID)
 	util.CreateDir(brokerRootDir)
 
-	// Initialize storage controller.
-	var stopts StorageControllerOpts
+	// Initialize broker store.
+	var stopts BrokerStoreOpts
 	stopts.StoreGCScanIntervalSecs = 300
 	stopts.RootDirectory = path.Join(brokerRootDir, "storage")
-	stopts.ControllerID = broker.brokerID
-	broker.storageController = NewStorageController(stopts)
+	stopts.BrokerID = broker.brokerID
+	broker.brokerStore = NewBrokerStore(stopts)
 	allTopics := broker.getAllTopics()
 	max := base.TopicIDType(-1)
 	for _, topic := range allTopics {
@@ -75,7 +75,7 @@ func (broker *Broker) initialize(opts *BrokerOpts) {
 	}
 
 	// Initialize BrokerFSM.
-	fsm := NewBrokerFSM(broker.storageController, logging.NewPrefixLogger(broker.brokerID))
+	fsm := NewBrokerFSM(broker.brokerStore, logging.NewPrefixLogger(broker.brokerID))
 	broker.fsm = fsm
 	// TODO: Initialize replication controller.
 }
@@ -185,7 +185,7 @@ func (broker *Broker) Consume(ctx context.Context, req *comm.ConsumeRequest) *co
 	}
 
 	// Fetch partition.
-	prt, err := broker.storageController.GetPartition(topicID, int(req.GetPartitionId()))
+	prt, err := broker.brokerStore.GetPartition(topicID, int(req.GetPartitionId()))
 	if err != nil {
 		if err == storage.ErrTopicNotFound {
 			broker.logger.VInfof(1, "Received request for topic: %d, partition: %d which does not exist",
@@ -220,7 +220,7 @@ func (broker *Broker) Consume(ctx context.Context, req *comm.ConsumeRequest) *co
 	} else if req.GetResumeFromLastCommittedOffset() {
 		// Resume from last committed offset.
 		// TODO: Ensure that we are leader before we do this or it could lead to inconsistencies.
-		off, err := broker.storageController.GetConsumerStore().GetLastCommitted(
+		off, err := broker.brokerStore.GetConsumerStore().GetLastCommitted(
 			req.GetConsumerId(), topicID, uint(req.GetPartitionId()))
 		if err != nil {
 			if err == storage.ErrConsumerNotRegistered {
@@ -376,7 +376,7 @@ func (broker *Broker) GetLastCommitted(ctx context.Context, req *comm.LastCommit
 	}
 
 	// TODO: Check if topic and partition exist.
-	topic, err := broker.storageController.GetTopicByID(topicID)
+	topic, err := broker.brokerStore.GetTopicByID(topicID)
 	if err != nil {
 		broker.logger.Errorf("Unable to get topic: %d due to err: %s", topicID, err.Error())
 		if err == storage.ErrTopicNotFound {
@@ -392,7 +392,7 @@ func (broker *Broker) GetLastCommitted(ctx context.Context, req *comm.LastCommit
 	}
 
 	// Fetch the last committed offset.
-	cs := broker.storageController.GetConsumerStore()
+	cs := broker.brokerStore.GetConsumerStore()
 	offset, err := cs.GetLastCommitted(req.GetConsumerId(), topicID, uint(req.GetPartitionId()))
 	if err != nil {
 		if err == storage.ErrConsumerNotRegistered {
@@ -627,5 +627,5 @@ func (broker *Broker) doSyncOp() error {
 }
 
 func (broker *Broker) getAllTopics() []base.TopicConfig {
-	return broker.storageController.GetAllTopics()
+	return broker.brokerStore.GetAllTopics()
 }

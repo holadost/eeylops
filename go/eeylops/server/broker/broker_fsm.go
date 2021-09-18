@@ -11,14 +11,14 @@ import (
 )
 
 type BrokerFSM struct {
-	storageController *StorageController
-	logger            *logging.PrefixLogger
+	store  *BrokerStore
+	logger *logging.PrefixLogger
 }
 
-func NewBrokerFSM(controller *StorageController, logger *logging.PrefixLogger) *BrokerFSM {
+func NewBrokerFSM(store *BrokerStore, logger *logging.PrefixLogger) *BrokerFSM {
 	fsm := BrokerFSM{
-		storageController: controller,
-		logger:            logger,
+		store:  store,
+		logger: logger,
 	}
 	return &fsm
 }
@@ -68,7 +68,7 @@ func (fsm *BrokerFSM) append(cmd *base.Command, log *raft.Log) *base.FSMResponse
 	var resp base.FSMResponse
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
-	prt, err := fsm.storageController.GetPartition(cmd.AppendCommand.TopicID, cmd.AppendCommand.PartitionID)
+	prt, err := fsm.store.GetPartition(cmd.AppendCommand.TopicID, cmd.AppendCommand.PartitionID)
 	if err != nil {
 		resp.Error = err
 		if err == storage.ErrPartitionNotFound || err == storage.ErrTopicNotFound {
@@ -138,7 +138,7 @@ func (fsm *BrokerFSM) registerConsumer(cmd *base.Command, log *raft.Log) *base.F
 		return &resp
 	}
 
-	cs := fsm.storageController.GetConsumerStore()
+	cs := fsm.store.GetConsumerStore()
 	err := cs.RegisterConsumer(cmd.RegisterConsumerCommand.ConsumerID, cmd.RegisterConsumerCommand.TopicID,
 		uint(cmd.RegisterConsumerCommand.PartitionID), int64(log.Index))
 	if err != nil {
@@ -181,7 +181,7 @@ func (fsm *BrokerFSM) commit(cmd *base.Command, log *raft.Log) *base.FSMResponse
 		resp.Error = storage.ErrPartitionNotFound
 		return &resp
 	}
-	cs := fsm.storageController.GetConsumerStore()
+	cs := fsm.store.GetConsumerStore()
 	if err := cs.Commit(cmd.CommitCommand.ConsumerID, cmd.CommitCommand.TopicID,
 		uint(cmd.CommitCommand.PartitionID), cmd.CommitCommand.Offset, int64(log.Index)); err != nil {
 		if err == storage.ErrConsumerNotRegistered {
@@ -225,7 +225,7 @@ func (fsm *BrokerFSM) addTopic(cmd *base.Command, log *raft.Log) *base.FSMRespon
 	resp.CommandType = cmd.CommandType
 	resp.Error = nil
 	// Add topic.
-	if err := fsm.storageController.AddTopic(cmd.AddTopicCommand.TopicConfig, int64(log.Index)); err != nil {
+	if err := fsm.store.AddTopic(cmd.AddTopicCommand.TopicConfig, int64(log.Index)); err != nil {
 		if err == storage.ErrTopicExists {
 			fsm.logger.Warningf("Unable to add topic as it already exists. Topic Details: %s, "+
 				"Log Index: %d, Log Term: %d", cmd.AddTopicCommand.TopicConfig.ToString(), log.Index,
@@ -255,7 +255,7 @@ func (fsm *BrokerFSM) removeTopic(cmd *base.Command, log *raft.Log) *base.FSMRes
 	resp.Error = nil
 
 	// Remove topic.
-	if err := fsm.storageController.RemoveTopic(cmd.RemoveTopicCommand.TopicID, int64(log.Index)); err != nil {
+	if err := fsm.store.RemoveTopic(cmd.RemoveTopicCommand.TopicID, int64(log.Index)); err != nil {
 		if err == storage.ErrTopicNotFound {
 			fsm.logger.Warningf("Unable to remove topic: %d as topic does not exist. Log Index: %d, "+
 				"Log Term: %d", cmd.RemoveTopicCommand.TopicID, log.Index, log.Term)
@@ -275,7 +275,7 @@ func (fsm *BrokerFSM) removeTopic(cmd *base.Command, log *raft.Log) *base.FSMRes
 }
 
 func (fsm *BrokerFSM) doesTopicExist(topicID base.TopicIDType) (base.TopicConfig, bool) {
-	tpc, err := fsm.storageController.GetTopicByID(topicID)
+	tpc, err := fsm.store.GetTopicByID(topicID)
 	if err != nil {
 		if err == storage.ErrTopicNotFound {
 			return base.TopicConfig{}, false
