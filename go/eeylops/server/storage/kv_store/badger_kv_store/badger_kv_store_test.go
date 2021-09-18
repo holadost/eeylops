@@ -17,16 +17,16 @@ import (
 	"time"
 )
 
-func TestBadgerCFStoreDefault(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStore")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStore")
+func TestBadgerKVStoreDefault(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreDefault")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreDefault")
 	doStoreSingleActorIO(testDir, "")
 	glog.Infof("Badger KV store test finished successfully")
 }
 
-func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreAddColumnFamily")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreAddColumnFamily")
+func TestBadgerKVStoreAddColumnFamily(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreAddColumnFamily")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreAddColumnFamily")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -77,25 +77,25 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 	}
 }
 
-func TestBadgerCFStoreNewCF(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreNewCF")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreNewCF")
+func TestBadgerKVStoreNewCF(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreNewCF")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreNewCF")
 	cfName := "cf_2"
 	createColumnFamily(testDir, cfName)
 	doStoreSingleActorIO(testDir, cfName)
 	glog.Infof("Badger KV store test finished successfully")
 }
 
-func TestBadgerCFStoreMultiCF(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreMultiCF")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreMultiCF")
+func TestBadgerKVStoreMultiCF(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreMultiCF")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreMultiCF")
 	doStoreMultiConcurrentActorIO(testDir, 8)
 	glog.Infof("Badger KV store test finished successfully")
 }
 
-func TestBadgerCFStoreTxn(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreTxn")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxn")
+func TestBadgerKVStoreTxn(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreTxn")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreTxn")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -297,9 +297,9 @@ func TestBadgerCFStoreTxn(t *testing.T) {
 	txn.Discard()
 }
 
-func TestBadgerCFStoreTxnIO(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreTxnIO")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxnIO")
+func TestBadgerKVStoreTxnIO(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreTxnIO")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreTxnIO")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -313,9 +313,9 @@ func TestBadgerCFStoreTxnIO(t *testing.T) {
 	doTransactionIO(store, cfName)
 }
 
-func TestBadgerCFStoreConcurrentTxnIO(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreConcurrentTxnIO")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreConcurrentTxnIO")
+func TestBadgerKVStoreConcurrentTxnIO(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreConcurrentTxnIO")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreConcurrentTxnIO")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -344,9 +344,9 @@ func TestBadgerCFStoreConcurrentTxnIO(t *testing.T) {
 	wg.Wait()
 }
 
-func TestBadgerCFStoreTxnConflict(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStoreTxnConflict")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStoreTxnConflict")
+func TestBadgerKVStoreTxnConflict(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStoreTxnConflict")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStoreTxnConflict")
 	opts := badger.DefaultOptions(testDir)
 	opts.MaxLevels = 7
 	opts.NumMemtables = 2
@@ -427,9 +427,9 @@ func TestBadgerCFStoreTxnConflict(t *testing.T) {
 	require.Error(t, txn2.Commit()) // This should fail.
 }
 
-func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
-	testutil.LogTestMarker("TestBadgerCFStore_BatchPutAndScan")
-	testDir := testutil.CreateTestDir(t, "TestBadgerCFStore_BatchPutAndScan")
+func TestBadgerKVStore_BatchPutAndScan(t *testing.T) {
+	testutil.LogTestMarker("TestBadgerKVStore_BatchPutAndScan")
+	testDir := testutil.CreateFreshTestDir("TestBadgerKVStore_BatchPutAndScan")
 	opts := badger.DefaultOptions(testDir)
 	opts.SyncWrites = true
 	opts.NumMemtables = 3

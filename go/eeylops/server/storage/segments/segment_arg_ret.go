@@ -1,20 +1,20 @@
 package segments
 
-import sbase "eeylops/server/storage/base"
+import storagebase "eeylops/server/storage/base"
 
 type AppendEntriesArg struct {
-	sbase.AppendEntriesArg
+	storagebase.AppendEntriesArg
 }
 
 type AppendEntriesRet struct {
-	sbase.AppendEntriesRet
+	storagebase.AppendEntriesRet
 }
 
 type ScanEntriesArg struct {
-	sbase.ScanEntriesArg
+	storagebase.ScanEntriesArg
 	ScanSizeBytes int64
 }
 
 type ScanEntriesRet struct {
-	sbase.ScanEntriesRet
+	storagebase.ScanEntriesRet
 }

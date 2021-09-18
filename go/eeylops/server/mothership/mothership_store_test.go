@@ -12,7 +12,7 @@ import (
 
 func TestMothershipStore(t *testing.T) {
 	testutil.LogTestMarker("TestMothershipStore")
-	testDir := testutil.CreateTestDir(t, "TestMothershipStore")
+	testDir := testutil.CreateFreshTestDir("TestMothershipStore")
 	numTopics := 100
 	closeReopenIterNum := 5
 	readVerifyIterNum := 5

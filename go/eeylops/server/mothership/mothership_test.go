@@ -12,7 +12,7 @@ import (
 
 func TestMotherShip_AddRemoveGetTopic(t *testing.T) {
 	testutil.LogTestMarker("TestMotherShip_AddRemoveGetTopic")
-	testDir := testutil.CreateTestDir(t, "TestMotherShip_AddRemoveGetTopic")
+	testDir := testutil.CreateFreshTestDir("TestMotherShip_AddRemoveGetTopic")
 	generateTopicName := func(id int) string {
 		return fmt.Sprintf("hello_topic_%d", id)
 	}

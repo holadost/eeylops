@@ -14,7 +14,7 @@ import (
 
 func TestBroker_ConsumerCommit(t *testing.T) {
 	testutil.LogTestMarker("TestBroker_ConsumerCommit")
-	testDirName := testutil.CreateTestDir(t, "TestBroker_ConsumerCommit")
+	testDirName := testutil.CreateFreshTestDir("TestBroker_ConsumerCommit")
 	opts := BrokerOpts{
 		DataDirectory: testDirName,
 		PeerAddresses: nil,
