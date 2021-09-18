@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 )
 
 const kConsumerStoreDirectory = "consumer_store"
@@ -96,6 +97,9 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicI
 		cs.logger.Warningf("Invalid replication log index: %d. Expected > %d", rLogIdx, cs.lastRLogIdx)
 		return ErrInvalidRLogIdx
 	}
+	if strings.Contains(consumerID, kConsumerKeyDelimiter) {
+		cs.logger.Fatalf("Consumer ID cannot contain %s. Consumer ID: %s", kConsumerKeyDelimiter, consumerID)
+	}
 	key := cs.generateConsumerKey(consumerID, topicID, partitionID)
 	_, err := cs.kvStore.Get(&kv_store.KVStoreKey{
 		Key:          key,
@@ -137,6 +141,9 @@ func (cs *ConsumerStore) Commit(consumerID string, topicID base.TopicIDType, par
 	if rLogIdx < cs.lastRLogIdx {
 		cs.logger.Warningf("Invalid replication log index: %d. Expected > %d", rLogIdx, cs.lastRLogIdx)
 		return ErrInvalidRLogIdx
+	}
+	if strings.Contains(consumerID, kConsumerKeyDelimiter) {
+		cs.logger.Fatalf("Consumer ID cannot contain %s. Consumer ID: %s", kConsumerKeyDelimiter, consumerID)
 	}
 	key := cs.generateConsumerKey(consumerID, topicID, partitionID)
 	_, err := cs.kvStore.Get(&kv_store.KVStoreKey{
@@ -188,6 +195,41 @@ func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicID base.TopicI
 	return lastCommitted, nil
 }
 
+func (cs *ConsumerStore) RemoveNonExistentTopicConsumers(existentTopicIds []base.TopicIDType) {
+	cs.logger.Infof("Removing all non existent topic consumers from store")
+	deleteKeys := func(keys []*kv_store.KVStoreKey) {
+		if err := cs.kvStore.BatchDelete(keys); err != nil {
+			cs.logger.Fatalf("Unable to delete keys due to err: %v", err)
+		}
+	}
+	scanner, err := cs.kvStore.NewScanner(kConsumerStoreMainColumnFamily, nil, false)
+	if err != nil {
+		cs.logger.Fatalf("Unable to initialize scanner due to err: %v", err)
+	}
+	var keysToRemove []*kv_store.KVStoreKey
+	for ; scanner.Valid(); scanner.Next() {
+		key, _, err := scanner.GetItem()
+		if err != nil {
+			cs.logger.Fatalf("Unable to scan from consumer store due to err: %v", err)
+		}
+		for _, tid := range existentTopicIds {
+			if cs.doesKeyContainTopicID(key, tid) {
+				keysToRemove = append(keysToRemove, &kv_store.KVStoreKey{
+					Key:          key,
+					ColumnFamily: kConsumerStoreMainColumnFamily,
+				})
+				if len(keysToRemove) == 64 {
+					deleteKeys(keysToRemove)
+					keysToRemove = nil
+				}
+			}
+		}
+	}
+	if len(keysToRemove) > 0 {
+		deleteKeys(keysToRemove)
+	}
+}
+
 // Snapshot the consumer store.
 func (cs *ConsumerStore) Snapshot() error {
 	return nil
@@ -213,6 +255,14 @@ func (cs *ConsumerStore) bytesToOffset(data []byte) base.Offset {
 func (cs *ConsumerStore) generateConsumerKey(consumerID string, topicID base.TopicIDType, partitionID uint) []byte {
 	return []byte(consumerID + kConsumerKeyDelimiter + fmt.Sprintf("%d", topicID) + kConsumerKeyDelimiter +
 		strconv.Itoa(int(partitionID)))
+}
+
+func (cs *ConsumerStore) doesKeyContainTopicID(key []byte, topicID base.TopicIDType) bool {
+	fields := strings.Split(string(key), kConsumerKeyDelimiter)
+	if fields[1] == fmt.Sprintf("%d", topicID) {
+		return true
+	}
+	return false
 }
 
 // addCfsIfNotExists adds the consumer store column families to the KV store.

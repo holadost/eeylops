@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"time"
 )
 
 const kTopicsDirName = "topics"
@@ -209,7 +210,7 @@ func (bs *BrokerStore) getTopicsRootDirectory() string {
 
 // getTopicDirectory returns the directory for the given topic.
 func (bs *BrokerStore) getTopicDirectory(topicName string, topicID base.TopicIDType) string {
-	dirName := topicName + fmt.Sprintf("-%d", topicID)
+	dirName := fmt.Sprintf("%s-%d", topicName, topicID)
 	return path.Join(bs.getTopicsRootDirectory(), dirName)
 }
 
@@ -252,6 +253,11 @@ func (bs *BrokerStore) removeTopicFromMap(topicID base.TopicIDType) *topicEntry 
 // removes those topics and its associated partitions from the underlying storage.
 func (bs *BrokerStore) manager() {
 	bs.logger.Infof("Starting broker store manager")
+	scanInterval := time.Duration(time.Second * 3600)
+	if bs.storeScanIntervalSecs > 0 {
+		scanInterval = time.Second * time.Duration(bs.storeScanIntervalSecs)
+	}
+	ticker := time.NewTicker(scanInterval)
 	for {
 		select {
 		case topicInfo := <-bs.disposedChan:
@@ -260,6 +266,8 @@ func (bs *BrokerStore) manager() {
 		case te := <-bs.topicDeletionChan:
 			bs.closeTopic(te)
 			bs.disposeTopic(te)
+		case <-ticker.C:
+			bs.gcConsumerStore()
 		}
 	}
 }
@@ -314,6 +322,16 @@ func (bs *BrokerStore) disposeDirectory(dirPath string, cb func(error)) {
 
 func (bs *BrokerStore) getExpiredDirName(dirName string) string {
 	return fmt.Sprintf("%s%s", dirName, kExpiredTopicsDirSuffix)
+}
+
+/************************************** CONSUMER STORE GC *****************************************************/
+func (bs *BrokerStore) gcConsumerStore() {
+	allTopics := bs.GetAllTopics()
+	var allTopicIds []base.TopicIDType
+	for _, topic := range allTopics {
+		allTopicIds = append(allTopicIds, topic.ID)
+	}
+	bs.consumerStore.RemoveNonExistentTopicConsumers(allTopicIds)
 }
 
 // topicEntry is a wrapper struct to hold the topic config and the partition(s) of this topic.
