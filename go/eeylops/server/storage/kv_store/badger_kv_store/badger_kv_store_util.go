@@ -1,4 +1,4 @@
-package cf_store
+package badger_kv_store
 
 import (
 	"github.com/golang/glog"

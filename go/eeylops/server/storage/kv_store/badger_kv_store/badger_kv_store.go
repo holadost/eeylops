@@ -1,4 +1,4 @@
-package cf_store
+package badger_kv_store
 
 import (
 	"bytes"
@@ -18,21 +18,16 @@ const kAllColumnFamiliesCFName = "cf"
 var kSeparatorBytes = []byte("::")
 var kDefaultColumnNamePrefixBytes = append([]byte("0"), kSeparatorBytes...)
 
-type BadgerCFStore struct {
+type BadgerKVStore struct {
 	internalStore *internalBadgerKVStore
 }
 
-func NewBadgerCFStore(rootDir string, opts badger.Options) *BadgerCFStore {
+func NewBadgerKVStore(rootDir string, opts badger.Options) *BadgerKVStore {
 	logger := logging.NewPrefixLogger("badger_cf_store")
-	return newBadgerCFStore(rootDir, logger, opts)
+	return newBadgerKVStore(rootDir, logger, opts)
 }
 
-func NewBadgerCFStoreWithLogger(rootDir string, logger *logging.PrefixLogger,
-	opts badger.Options) *BadgerCFStore {
-	return newBadgerCFStore(rootDir, logger, opts)
-}
-
-func newBadgerCFStore(rootDir string, logger *logging.PrefixLogger, opts badger.Options) *BadgerCFStore {
+func newBadgerKVStore(rootDir string, logger *logging.PrefixLogger, opts badger.Options) *BadgerKVStore {
 	kvStore := new(internalBadgerKVStore)
 	kvStore.rootDir = rootDir
 	kvStore.logger = logger
@@ -42,69 +37,69 @@ func newBadgerCFStore(rootDir string, logger *logging.PrefixLogger, opts badger.
 	}
 	opts.Logger = logging.NewPrefixLoggerWithParentAndDepth("", logger, 1)
 	kvStore.initialize(opts)
-	return &BadgerCFStore{internalStore: kvStore}
+	return &BadgerKVStore{internalStore: kvStore}
 }
 
-func (cfStore *BadgerCFStore) GetDataDir() string {
-	return cfStore.internalStore.GetDataDir()
+func (kvStore *BadgerKVStore) GetDataDir() string {
+	return kvStore.internalStore.GetDataDir()
 }
 
 // Size returns the size of the KV store in bytes.
-func (cfStore *BadgerCFStore) Size() int64 {
-	return cfStore.internalStore.Size()
+func (kvStore *BadgerKVStore) Size() int64 {
+	return kvStore.internalStore.Size()
 }
 
 // Close the KV store.
-func (cfStore *BadgerCFStore) Close() error {
-	return cfStore.internalStore.Close()
+func (kvStore *BadgerKVStore) Close() error {
+	return kvStore.internalStore.Close()
 }
 
 // AddColumnFamily adds the column family(if it does not exist) to the KV store.
-func (cfStore *BadgerCFStore) AddColumnFamily(cf string) error {
-	return cfStore.internalStore.AddColumnFamily(cf)
+func (kvStore *BadgerKVStore) AddColumnFamily(cf string) error {
+	return kvStore.internalStore.AddColumnFamily(cf)
 }
 
-func (cfStore *BadgerCFStore) Get(key *CFStoreKey) (*CFStoreEntry, error) {
-	return cfStore.internalStore.Get(key)
+func (kvStore *BadgerKVStore) Get(key *kv_store.KVStoreKey) (*kv_store.KVStoreEntry, error) {
+	return kvStore.internalStore.Get(key)
 }
 
-func (cfStore *BadgerCFStore) Put(entry *CFStoreEntry) error {
-	return cfStore.internalStore.Put(entry)
+func (kvStore *BadgerKVStore) Put(entry *kv_store.KVStoreEntry) error {
+	return kvStore.internalStore.Put(entry)
 }
 
-func (cfStore *BadgerCFStore) Delete(key *CFStoreKey) error {
-	return cfStore.internalStore.Delete(key)
+func (kvStore *BadgerKVStore) Delete(key *kv_store.KVStoreKey) error {
+	return kvStore.internalStore.Delete(key)
 }
 
-func (cfStore *BadgerCFStore) Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
-	entries []*CFStoreEntry, nextKey []byte, retErr error) {
-	return cfStore.internalStore.Scan(cf, startKey, numValues, scanSizeBytes, reverse)
+func (kvStore *BadgerKVStore) Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
+	entries []*kv_store.KVStoreEntry, nextKey []byte, retErr error) {
+	return kvStore.internalStore.Scan(cf, startKey, numValues, scanSizeBytes, reverse)
 }
 
-func (cfStore *BadgerCFStore) BatchGet(keys []*CFStoreKey) (values []*CFStoreEntry, errs []error) {
-	return cfStore.internalStore.BatchGet(keys)
+func (kvStore *BadgerKVStore) BatchGet(keys []*kv_store.KVStoreKey) (values []*kv_store.KVStoreEntry, errs []error) {
+	return kvStore.internalStore.BatchGet(keys)
 }
 
-func (cfStore *BadgerCFStore) BatchPut(entries []*CFStoreEntry) error {
-	return cfStore.internalStore.BatchPut(entries)
+func (kvStore *BadgerKVStore) BatchPut(entries []*kv_store.KVStoreEntry) error {
+	return kvStore.internalStore.BatchPut(entries)
 }
 
-func (cfStore *BadgerCFStore) BatchDelete(keys []*CFStoreKey) error {
-	return cfStore.internalStore.BatchDelete(keys)
+func (kvStore *BadgerKVStore) BatchDelete(keys []*kv_store.KVStoreKey) error {
+	return kvStore.internalStore.BatchDelete(keys)
 }
 
-func (cfStore *BadgerCFStore) NewScanner(cf string, startKey []byte, reverse bool) (Scanner, error) {
+func (kvStore *BadgerKVStore) NewScanner(cf string, startKey []byte, reverse bool) (kv_store.Scanner, error) {
 	if len(cf) == 0 {
 		cf = kDefaultCFName
 	}
 	if !IsColumnFamilyNameValid(cf) {
 		return nil, kv_store.ErrKVStoreInvalidColumnFamilyName
 	}
-	return newBadgerScanner(cfStore.internalStore, cf, startKey, reverse), nil
+	return newBadgerScanner(kvStore.internalStore, cf, startKey, reverse), nil
 }
 
-func (cfStore *BadgerCFStore) NewTransaction() Transaction {
-	return newBadgerCFStoreTransaction(cfStore.internalStore)
+func (kvStore *BadgerKVStore) NewTransaction() kv_store.Transaction {
+	return newBadgerKVStoreTransaction(kvStore.internalStore)
 }
 
 /*************************************************** INTERNAL CF STORE ************************************************/
@@ -209,7 +204,7 @@ func (ikvStore *internalBadgerKVStore) AddColumnFamily(cf string) error {
 }
 
 // Get gets the value associated with the key.
-func (ikvStore *internalBadgerKVStore) Get(key *CFStoreKey) (*CFStoreEntry, error) {
+func (ikvStore *internalBadgerKVStore) Get(key *kv_store.KVStoreKey) (*kv_store.KVStoreEntry, error) {
 	if ikvStore.closed {
 		return nil, kv_store.ErrKVStoreClosed
 	}
@@ -220,7 +215,7 @@ func (ikvStore *internalBadgerKVStore) Get(key *CFStoreKey) (*CFStoreEntry, erro
 
 // GetWithTxn gets the value associated with the key. This method requires a transaction to be passed. Transaction
 // commits and rollbacks must be handled by the caller.
-func (ikvStore *internalBadgerKVStore) GetWithTxn(txn *badger.Txn, key *CFStoreKey) (*CFStoreEntry, error) {
+func (ikvStore *internalBadgerKVStore) GetWithTxn(txn *badger.Txn, key *kv_store.KVStoreKey) (*kv_store.KVStoreEntry, error) {
 	if ikvStore.closed {
 		return nil, kv_store.ErrKVStoreClosed
 	}
@@ -233,7 +228,7 @@ func (ikvStore *internalBadgerKVStore) GetWithTxn(txn *badger.Txn, key *CFStoreK
 		return nil, err
 	}
 	item, err := txn.Get(BuildCFKey(cf, key.Key))
-	var entry CFStoreEntry
+	var entry kv_store.KVStoreEntry
 	entry.Key = key.Key
 	entry.ColumnFamily = key.ColumnFamily
 	if err != nil {
@@ -252,7 +247,7 @@ func (ikvStore *internalBadgerKVStore) GetWithTxn(txn *badger.Txn, key *CFStoreK
 }
 
 // Put gets the value associated with the key.
-func (ikvStore *internalBadgerKVStore) Put(entry *CFStoreEntry) error {
+func (ikvStore *internalBadgerKVStore) Put(entry *kv_store.KVStoreEntry) error {
 	if ikvStore.closed {
 		return kv_store.ErrKVStoreClosed
 	}
@@ -274,7 +269,7 @@ func (ikvStore *internalBadgerKVStore) Put(entry *CFStoreEntry) error {
 
 // PutWithTxn puts a key value pair in the DB. If the key already exists, it would be updated. This method
 // requires a transaction to be passed. Transaction commits and rollbacks must be handled by the caller.
-func (ikvStore *internalBadgerKVStore) PutWithTxn(txn *badger.Txn, entry *CFStoreEntry) error {
+func (ikvStore *internalBadgerKVStore) PutWithTxn(txn *badger.Txn, entry *kv_store.KVStoreEntry) error {
 	if ikvStore.closed {
 		ikvStore.logger.Errorf("KV store is closed")
 		return kv_store.ErrKVStoreClosed
@@ -295,7 +290,7 @@ func (ikvStore *internalBadgerKVStore) PutWithTxn(txn *badger.Txn, entry *CFStor
 }
 
 // Delete deletes a key value pair from the DB.
-func (ikvStore *internalBadgerKVStore) Delete(key *CFStoreKey) error {
+func (ikvStore *internalBadgerKVStore) Delete(key *kv_store.KVStoreKey) error {
 	if ikvStore.closed {
 		return kv_store.ErrKVStoreClosed
 	}
@@ -318,7 +313,7 @@ func (ikvStore *internalBadgerKVStore) Delete(key *CFStoreKey) error {
 
 // DeleteWithTxn removes the given key value pair from the DB. This method requires a transaction to be passed.
 // Transaction commits and rollbacks must be handled by the caller.
-func (ikvStore *internalBadgerKVStore) DeleteWithTxn(txn *badger.Txn, key *CFStoreKey) error {
+func (ikvStore *internalBadgerKVStore) DeleteWithTxn(txn *badger.Txn, key *kv_store.KVStoreKey) error {
 	if ikvStore.closed {
 		return kv_store.ErrKVStoreClosed
 	}
@@ -339,7 +334,7 @@ func (ikvStore *internalBadgerKVStore) DeleteWithTxn(txn *badger.Txn, key *CFSto
 
 // Scan scans the DB in ascending order from the given start key. if numValues is < 0, the entire DB is scanned.
 func (ikvStore *internalBadgerKVStore) Scan(cf string, startKey []byte, numValues int, scanSizeBytes int, reverse bool) (
-	entries []*CFStoreEntry, nextKey []byte, retErr error) {
+	entries []*kv_store.KVStoreEntry, nextKey []byte, retErr error) {
 	if ikvStore.closed {
 		return nil, nil, kv_store.ErrKVStoreClosed
 	}
@@ -351,7 +346,7 @@ func (ikvStore *internalBadgerKVStore) Scan(cf string, startKey []byte, numValue
 // ScanWithTxn scans the DB in ascending order from the given start key. if numValues is < 0, the entire DB is scanned.
 // Transaction commits and rollbacks must be handled by the caller.
 func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, startKey []byte, numValues int,
-	scanSizeBytes int, reverse bool) (entries []*CFStoreEntry, nextKey []byte, retErr error) {
+	scanSizeBytes int, reverse bool) (entries []*kv_store.KVStoreEntry, nextKey []byte, retErr error) {
 	if ikvStore.closed {
 		return nil, nil, kv_store.ErrKVStoreClosed
 	}
@@ -408,7 +403,7 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 		if numValues >= 0 && len(entries) == numValues {
 			return entries, key, nil
 		}
-		entries = append(entries, &CFStoreEntry{
+		entries = append(entries, &kv_store.KVStoreEntry{
 			Key:          key,
 			Value:        val,
 			ColumnFamily: actualCf,
@@ -419,10 +414,10 @@ func (ikvStore *internalBadgerKVStore) ScanWithTxn(txn *badger.Txn, cf string, s
 }
 
 // BatchGet fetches multiple keys from the DB.
-func (ikvStore *internalBadgerKVStore) BatchGet(keys []*CFStoreKey) (values []*CFStoreEntry, errs []error) {
+func (ikvStore *internalBadgerKVStore) BatchGet(keys []*kv_store.KVStoreKey) (values []*kv_store.KVStoreEntry, errs []error) {
 	if ikvStore.closed {
 		for ii := 0; ii < len(keys); ii++ {
-			values = append(values, &CFStoreEntry{})
+			values = append(values, &kv_store.KVStoreEntry{})
 			errs = append(errs, kv_store.ErrKVStoreClosed)
 		}
 		return
@@ -434,11 +429,11 @@ func (ikvStore *internalBadgerKVStore) BatchGet(keys []*CFStoreKey) (values []*C
 
 // BatchGetWithTxn fetches multiple keys from the DB. This method requires a transaction to be passed.
 // Transaction commits and rollbacks must be handled by the caller.
-func (ikvStore *internalBadgerKVStore) BatchGetWithTxn(txn *badger.Txn, keys []*CFStoreKey) (values []*CFStoreEntry,
+func (ikvStore *internalBadgerKVStore) BatchGetWithTxn(txn *badger.Txn, keys []*kv_store.KVStoreKey) (values []*kv_store.KVStoreEntry,
 	errs []error) {
 	if ikvStore.closed {
 		for ii := 0; ii < len(keys); ii++ {
-			values = append(values, &CFStoreEntry{})
+			values = append(values, &kv_store.KVStoreEntry{})
 			errs = append(errs, kv_store.ErrKVStoreClosed)
 		}
 		return
@@ -474,7 +469,7 @@ func (ikvStore *internalBadgerKVStore) BatchGetWithTxn(txn *badger.Txn, keys []*
 			values = append(values, nil)
 			continue
 		}
-		values = append(values, &CFStoreEntry{
+		values = append(values, &kv_store.KVStoreEntry{
 			Key:          key.Key,
 			Value:        tmpValue,
 			ColumnFamily: key.ColumnFamily,
@@ -485,7 +480,7 @@ func (ikvStore *internalBadgerKVStore) BatchGetWithTxn(txn *badger.Txn, keys []*
 }
 
 // BatchPut sets/updates multiple key value pairs in the DB.
-func (ikvStore *internalBadgerKVStore) BatchPut(entries []*CFStoreEntry) error {
+func (ikvStore *internalBadgerKVStore) BatchPut(entries []*kv_store.KVStoreEntry) error {
 	if ikvStore.closed {
 		return kv_store.ErrKVStoreBackend
 	}
@@ -510,7 +505,7 @@ func (ikvStore *internalBadgerKVStore) BatchPut(entries []*CFStoreEntry) error {
 
 // BatchPutWithTxn sets multiple key value pairs in the DB. This method needs a transaction to be passed. Transaction
 // commits and rollbacks must be handled by the caller.
-func (ikvStore *internalBadgerKVStore) BatchPutWithTxn(txn *badger.Txn, entries []*CFStoreEntry) error {
+func (ikvStore *internalBadgerKVStore) BatchPutWithTxn(txn *badger.Txn, entries []*kv_store.KVStoreEntry) error {
 	for _, entry := range entries {
 		if !IsKeyValid(entry.Key, false) {
 			return kv_store.ErrKVStoreInvalidKey
@@ -528,7 +523,7 @@ func (ikvStore *internalBadgerKVStore) BatchPutWithTxn(txn *badger.Txn, entries 
 }
 
 // BatchDelete deletes multiple key value pairs from the DB.
-func (ikvStore *internalBadgerKVStore) BatchDelete(keys []*CFStoreKey) error {
+func (ikvStore *internalBadgerKVStore) BatchDelete(keys []*kv_store.KVStoreKey) error {
 	if ikvStore.closed {
 		ikvStore.logger.Errorf("KV store is closed")
 		return kv_store.ErrKVStoreClosed
@@ -552,7 +547,7 @@ func (ikvStore *internalBadgerKVStore) BatchDelete(keys []*CFStoreKey) error {
 
 // BatchDeleteWithTxn deletes multiple key value pairs from the DB. This method requires a transaction to be passed.
 // Transaction commits and rollbacks must be handled by the caller.
-func (ikvStore *internalBadgerKVStore) BatchDeleteWithTxn(txn *badger.Txn, keys []*CFStoreKey) error {
+func (ikvStore *internalBadgerKVStore) BatchDeleteWithTxn(txn *badger.Txn, keys []*kv_store.KVStoreKey) error {
 	var err error
 	for _, key := range keys {
 		if !IsKeyValid(key.Key, false) {

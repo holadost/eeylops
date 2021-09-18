@@ -1,4 +1,4 @@
-package cf_store
+package badger_kv_store
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ type BadgerScanner struct {
 	fkBytes       []byte                 // First CF marker key.
 	lkBytes       []byte                 // Last CF marker key.
 	cfPrefixBytes []byte                 // CF prefix bytes.
-	currEntry     *CFStoreEntry          // Current entry.
+	currEntry     *kv_store.KVStoreEntry // Current entry.
 	currErr       error                  // Current error.
 }
 
@@ -141,7 +141,7 @@ func (scanner *BadgerScanner) mayBeFetchNextItem() {
 		// We have reached the last key. Nothing more to fetch.
 		return
 	}
-	var entry CFStoreEntry
+	var entry kv_store.KVStoreEntry
 	scanner.currEntry = &entry
 	scanner.currErr = nil
 	entry.Key = ExtractUserKey(scanner.cf, key)

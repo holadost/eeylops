@@ -1,4 +1,4 @@
-package cf_store
+package badger_kv_store
 
 import (
 	"bytes"
@@ -33,7 +33,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 	if err := store.AddColumnFamily("cf1"); err != nil {
 		glog.Fatalf("Unable to add column family due to err: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 		glog.Fatalf("Unable to close the store due to err: %v", err)
 	}
 
-	store = NewBadgerCFStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts)
 	err = store.AddColumnFamily(kDefaultCFName)
 	if err != kv_store.ErrKVStoreReservedColumnFamilyNames {
 		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
@@ -56,7 +56,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 		glog.Fatalf("Unable to close the store due to err: %v", err)
 	}
 
-	store = NewBadgerCFStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts)
 	err = store.AddColumnFamily(kAllColumnFamiliesCFName)
 	if err != kv_store.ErrKVStoreReservedColumnFamilyNames {
 		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
@@ -66,7 +66,7 @@ func TestBadgerCFStoreAddColumnFamily(t *testing.T) {
 		glog.Fatalf("Unable to close the store due to err: %v", err)
 	}
 
-	store = NewBadgerCFStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts)
 	err = store.AddColumnFamily("default-1") // - not allowed in CF names. Only letters, digits and underscores.
 	if err != kv_store.ErrKVStoreInvalidColumnFamilyName {
 		glog.Fatalf("Tried to create invalid column family. Got err: %v", err)
@@ -103,24 +103,24 @@ func TestBadgerCFStoreTxn(t *testing.T) {
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
 	opts.SyncWrites = true
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 
 	// Testing discard transaction.
 	glog.Infof("Testing batch put failures")
 	txn := store.NewTransaction()
 	failureKey := "failureKey"
 	failureValue := "failureValue"
-	entry := CFStoreEntry{
+	entry := kv_store.KVStoreEntry{
 		Key:          []byte(failureKey),
 		Value:        []byte(failureValue),
 		ColumnFamily: "",
 	}
-	failureKVStoreKey := CFStoreKey{
+	failureKVStoreKey := kv_store.KVStoreKey{
 		Key:          []byte(failureKey),
 		ColumnFamily: "",
 	}
-	var entries []*CFStoreEntry
-	var keys []*CFStoreKey
+	var entries []*kv_store.KVStoreEntry
+	var keys []*kv_store.KVStoreKey
 	entries = append(entries, &entry)
 	keys = append(keys, &failureKVStoreKey)
 	err := txn.BatchPut(entries)
@@ -140,11 +140,11 @@ func TestBadgerCFStoreTxn(t *testing.T) {
 	entries = nil
 	toBeDeletedKey := "to_be_deleted_key"
 	toBeDeletedValue := "to_be_deleted_value"
-	keys = append(keys, &CFStoreKey{
+	keys = append(keys, &kv_store.KVStoreKey{
 		Key:          []byte(toBeDeletedKey),
 		ColumnFamily: "",
 	})
-	entries = append(entries, &CFStoreEntry{
+	entries = append(entries, &kv_store.KVStoreEntry{
 		Key:          []byte(toBeDeletedKey),
 		Value:        []byte(toBeDeletedValue),
 		ColumnFamily: "",
@@ -172,18 +172,18 @@ func TestBadgerCFStoreTxn(t *testing.T) {
 	glog.Infof("Testing batch put and delete in transaction failure")
 	successKey := "successKey"
 	successValue := "successValue"
-	var skeys []*CFStoreKey
-	var sentries []*CFStoreEntry
-	skeys = append(skeys, &CFStoreKey{
+	var skeys []*kv_store.KVStoreKey
+	var sentries []*kv_store.KVStoreEntry
+	skeys = append(skeys, &kv_store.KVStoreKey{
 		Key:          []byte(successKey),
 		ColumnFamily: "",
 	})
-	sentries = append(sentries, &CFStoreEntry{
+	sentries = append(sentries, &kv_store.KVStoreEntry{
 		Key:          []byte(successKey),
 		Value:        []byte(successValue),
 		ColumnFamily: "",
 	})
-	testBatchPutAndDelete := func(txn Transaction) {
+	testBatchPutAndDelete := func(txn kv_store.Transaction) {
 		glog.Infof("Testing Batch Put and batch delete")
 		err = txn.BatchPut(sentries)
 		if err != nil {
@@ -235,11 +235,11 @@ func TestBadgerCFStoreTxn(t *testing.T) {
 	successValue2 := "successValue2"
 	keys = nil
 	entries = nil
-	keys = append(keys, &CFStoreKey{
+	keys = append(keys, &kv_store.KVStoreKey{
 		Key:          []byte(successKey2),
 		ColumnFamily: "",
 	})
-	entries = append(entries, &CFStoreEntry{
+	entries = append(entries, &kv_store.KVStoreEntry{
 		Key:          []byte(successKey2),
 		Value:        []byte(successValue2),
 		ColumnFamily: "",
@@ -309,7 +309,7 @@ func TestBadgerCFStoreTxnIO(t *testing.T) {
 	opts.SyncWrites = true
 	cfName := "cf1"
 	createColumnFamily(testDir, cfName)
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 	doTransactionIO(store, cfName)
 }
 
@@ -324,7 +324,7 @@ func TestBadgerCFStoreConcurrentTxnIO(t *testing.T) {
 	opts.NumCompactors = 2
 	opts.SyncWrites = true
 	var cfNames []string
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 	numWorkers := 8
 	for ii := 0; ii < numWorkers; ii++ {
 		cfName := fmt.Sprintf("cf_%d", ii)
@@ -354,7 +354,7 @@ func TestBadgerCFStoreTxnConflict(t *testing.T) {
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
 	opts.SyncWrites = true
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 	ax := []byte("x")
 	ay := []byte("y")
 
@@ -362,20 +362,20 @@ func TestBadgerCFStoreTxnConflict(t *testing.T) {
 	txn := store.NewTransaction()
 	defer txn.Discard()
 	val := []byte(strconv.Itoa(100))
-	require.NoError(t, txn.Put(&CFStoreEntry{
+	require.NoError(t, txn.Put(&kv_store.KVStoreEntry{
 		Key:          ax,
 		Value:        val,
 		ColumnFamily: "",
 	}))
-	require.NoError(t, txn.Put(&CFStoreEntry{
+	require.NoError(t, txn.Put(&kv_store.KVStoreEntry{
 		Key:          ay,
 		Value:        val,
 		ColumnFamily: "",
 	}))
 	require.NoError(t, txn.Commit())
 
-	getBal := func(txn Transaction, key []byte) (bal int) {
-		storeKey := &CFStoreKey{
+	getBal := func(txn kv_store.Transaction, key []byte) (bal int) {
+		storeKey := &kv_store.KVStoreKey{
 			Key:          key,
 			ColumnFamily: "",
 		}
@@ -392,7 +392,7 @@ func TestBadgerCFStoreTxnConflict(t *testing.T) {
 	sum := getBal(txn1, ax)
 	sum += getBal(txn1, ay)
 	require.Equal(t, 200, sum)
-	require.NoError(t, txn1.Put(&CFStoreEntry{
+	require.NoError(t, txn1.Put(&kv_store.KVStoreEntry{
 		Key:          ax,
 		Value:        []byte("0"),
 		ColumnFamily: "",
@@ -410,7 +410,7 @@ func TestBadgerCFStoreTxnConflict(t *testing.T) {
 	sum = getBal(txn2, ax)
 	sum += getBal(txn2, ay)
 	require.Equal(t, 200, sum)
-	require.NoError(t, txn2.Put(&CFStoreEntry{
+	require.NoError(t, txn2.Put(&kv_store.KVStoreEntry{
 		Key:          ay,
 		Value:        []byte("0"),
 		ColumnFamily: "",
@@ -442,8 +442,8 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.CompactL0OnClose = false
 	opts.LoadBloomsOnOpen = false
-	var store CFStore
-	store = NewBadgerCFStore(testDir, opts)
+	var store kv_store.KVStore
+	store = NewBadgerKVStore(testDir, opts)
 	cfName := "offset"
 	err := store.AddColumnFamily(cfName)
 	if err != nil {
@@ -463,9 +463,9 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 	var allKeys [][]byte
 	// Benchmark batch puts!
 	for iter := 0; iter < numIters; iter++ {
-		var entries []*CFStoreEntry
+		var entries []*kv_store.KVStoreEntry
 		for ii := 0; ii < batchSize; ii++ {
-			var entry CFStoreEntry
+			var entry kv_store.KVStoreEntry
 			key := util.UintToBytes(uint64(iter*batchSize + ii))
 			allKeys = append(allKeys, key)
 			entry.Key = key
@@ -485,13 +485,13 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 
 	// Benchmark batch gets!
 	glog.Infof("Benchmarking batch gets")
-	store = NewBadgerCFStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts)
 	var sk []byte
 	startTime := time.Now()
 	for ii := 0; ii < numIters; ii++ {
-		var keys []*CFStoreKey
+		var keys []*kv_store.KVStoreKey
 		for jj := 0; jj < batchSize; jj++ {
-			keys = append(keys, &CFStoreKey{
+			keys = append(keys, &kv_store.KVStoreKey{
 				Key:          allKeys[ii*batchSize+jj],
 				ColumnFamily: cfName,
 			})
@@ -509,7 +509,7 @@ func TestBadgerCFStore_BatchPutAndScan(t *testing.T) {
 
 	// Benchmark scans!
 	glog.Infof("Benchmarking scans")
-	store = NewBadgerCFStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts)
 	startTime = time.Now()
 	for ii := 0; ii < numIters; ii++ {
 		scanner, err := store.NewScanner(cfName, sk, false)
@@ -541,7 +541,7 @@ func doStoreSingleActorIO(testDir string, cf string) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 	defer store.Close()
 	doStoreIO(store, cf)
 }
@@ -553,7 +553,7 @@ func doStoreMultiConcurrentActorIO(testDir string, numWorkers int) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 	defer store.Close()
 	wg := sync.WaitGroup{}
 	workload := func(idx int) {
@@ -575,16 +575,16 @@ func doStoreMultiConcurrentActorIO(testDir string, numWorkers int) {
 	wg.Wait()
 }
 
-func doStoreIO(store CFStore, cf string) {
+func doStoreIO(store kv_store.KVStore, cf string) {
 	batchSize := 10
 	numIters := 20
 	// Batch write values
 	glog.Infof("Testing Batch Put")
 	for iter := 0; iter < numIters; iter++ {
-		var entries []*CFStoreEntry
+		var entries []*kv_store.KVStoreEntry
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var entry CFStoreEntry
+			var entry kv_store.KVStoreEntry
 			entry.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			entry.Value = []byte(fmt.Sprintf("value-%03d", meraVal))
 			entry.ColumnFamily = cf
@@ -600,10 +600,10 @@ func doStoreIO(store CFStore, cf string) {
 	// Batch read and verify values
 	glog.Infof("Testing BatchGet")
 	for iter := 0; iter < numIters; iter++ {
-		var keys []*CFStoreKey
+		var keys []*kv_store.KVStoreKey
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var key CFStoreKey
+			var key kv_store.KVStoreKey
 			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			key.ColumnFamily = cf
 			keys = append(keys, &key)
@@ -709,10 +709,10 @@ func doStoreIO(store CFStore, cf string) {
 	// Batch delete keys.
 	glog.Infof("Testing BatchDelete")
 	for iter := 0; iter < numIters; iter++ {
-		var keys []*CFStoreKey
+		var keys []*kv_store.KVStoreKey
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var key CFStoreKey
+			var key kv_store.KVStoreKey
 			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			key.ColumnFamily = cf
 			keys = append(keys, &key)
@@ -726,10 +726,10 @@ func doStoreIO(store CFStore, cf string) {
 	// Batch read and verify values
 	glog.Infof("Testing BatchGet")
 	for iter := 0; iter < numIters; iter++ {
-		var keys []*CFStoreKey
+		var keys []*kv_store.KVStoreKey
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var key CFStoreKey
+			var key kv_store.KVStoreKey
 			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			key.ColumnFamily = cf
 			keys = append(keys, &key)
@@ -747,11 +747,11 @@ func doStoreIO(store CFStore, cf string) {
 	glog.Infof("Testing single put, get and delete")
 	singleKey := []byte("singleKey")
 	singleVal := []byte("singleVal")
-	var entry CFStoreEntry
+	var entry kv_store.KVStoreEntry
 	entry.Key = singleKey
 	entry.Value = singleVal
 	entry.ColumnFamily = cf
-	var key CFStoreKey
+	var key kv_store.KVStoreKey
 	key.Key = singleKey
 	key.ColumnFamily = cf
 	err = store.Put(&entry)
@@ -780,16 +780,16 @@ func doStoreIO(store CFStore, cf string) {
 	}
 }
 
-func doTransactionIO(store CFStore, cf string) {
+func doTransactionIO(store kv_store.KVStore, cf string) {
 	batchSize := 10
 	numIters := 20
 	// Batch write values
 	glog.Infof("Testing Batch Put")
 	for iter := 0; iter < numIters; iter++ {
-		var entries []*CFStoreEntry
+		var entries []*kv_store.KVStoreEntry
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var entry CFStoreEntry
+			var entry kv_store.KVStoreEntry
 			entry.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			entry.Value = []byte(fmt.Sprintf("value-%03d", meraVal))
 			entry.ColumnFamily = cf
@@ -811,10 +811,10 @@ func doTransactionIO(store CFStore, cf string) {
 	// Batch read and verify values
 	glog.Infof("Testing BatchGet")
 	for iter := 0; iter < numIters; iter++ {
-		var keys []*CFStoreKey
+		var keys []*kv_store.KVStoreKey
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var key CFStoreKey
+			var key kv_store.KVStoreKey
 			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			key.ColumnFamily = cf
 			keys = append(keys, &key)
@@ -842,10 +842,10 @@ func doTransactionIO(store CFStore, cf string) {
 	// Batch delete keys.
 	glog.Infof("Testing BatchDelete")
 	for iter := 0; iter < numIters; iter++ {
-		var keys []*CFStoreKey
+		var keys []*kv_store.KVStoreKey
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var key CFStoreKey
+			var key kv_store.KVStoreKey
 			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			key.ColumnFamily = cf
 			keys = append(keys, &key)
@@ -865,10 +865,10 @@ func doTransactionIO(store CFStore, cf string) {
 	// Batch read and verify values
 	glog.Infof("Testing BatchGet")
 	for iter := 0; iter < numIters; iter++ {
-		var keys []*CFStoreKey
+		var keys []*kv_store.KVStoreKey
 		for ii := 0; ii < batchSize; ii++ {
 			meraVal := iter*batchSize + ii
-			var key CFStoreKey
+			var key kv_store.KVStoreKey
 			key.Key = []byte(fmt.Sprintf("key-%03d", meraVal))
 			key.ColumnFamily = cf
 			keys = append(keys, &key)
@@ -891,14 +891,14 @@ func createColumnFamily(testDir string, cfname string) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerCFStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts)
 	defer store.Close()
 	if err := store.AddColumnFamily(cfname); err != nil {
 		glog.Fatalf("Unable to add column family due to err: %v", err)
 	}
 }
 
-func createColumnFamilyWithStore(store CFStore, cfname string) {
+func createColumnFamilyWithStore(store kv_store.KVStore, cfname string) {
 	if err := store.AddColumnFamily(cfname); err != nil {
 		glog.Fatalf("Unable to add column family due to err: %v", err)
 	}

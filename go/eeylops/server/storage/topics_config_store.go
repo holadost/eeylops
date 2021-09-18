@@ -4,7 +4,7 @@ import (
 	"eeylops/server/base"
 	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/cf_store"
+	"eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util/logging"
 	"encoding/json"
 	"fmt"
@@ -21,7 +21,7 @@ const kTopicsConfigStoreMiscColumnFamily = "misc_cf"
 
 // TopicsConfigStore holds all the topics for eeylops.
 type TopicsConfigStore struct {
-	kvStore      cf_store.CFStore
+	kvStore      kv_store.KVStore
 	logger       *logging.PrefixLogger
 	storeID      string
 	rootDir      string
@@ -62,7 +62,7 @@ func (tcs *TopicsConfigStore) initialize() {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.LoadBloomsOnOpen = false
-	tcs.kvStore = cf_store.NewBadgerCFStore(tcs.tsDir, opts)
+	tcs.kvStore = badger_kv_store.NewBadgerKVStore(tcs.tsDir, opts)
 	tcs.addCfsIfNotExists()
 
 	// Initialize internal maps.
@@ -74,7 +74,7 @@ func (tcs *TopicsConfigStore) initialize() {
 	}
 
 	// Initialize last replicated log index key.
-	lastVal, err := tcs.kvStore.Get(&cf_store.CFStoreKey{
+	lastVal, err := tcs.kvStore.Get(&kv_store.KVStoreKey{
 		Key:          storagebase.GetLastRLogKeyBytes(),
 		ColumnFamily: kConsumerStoreMiscColumnFamily,
 	})
@@ -119,13 +119,13 @@ func (tcs *TopicsConfigStore) AddTopic(topic base.TopicConfig, rLogIdx int64) er
 	if err := sanitize(); err != nil {
 		return err
 	}
-	var entries []*cf_store.CFStoreEntry
+	var entries []*kv_store.KVStoreEntry
 	rLogKey, rLogVal := storagebase.PrepareRLogIDXKeyVal(rLogIdx)
-	entries = append(entries, &cf_store.CFStoreEntry{
+	entries = append(entries, &kv_store.KVStoreEntry{
 		Key:          rLogKey,
 		Value:        rLogVal,
 		ColumnFamily: kTopicsConfigStoreMiscColumnFamily,
-	}, &cf_store.CFStoreEntry{
+	}, &kv_store.KVStoreEntry{
 		Key:          []byte(topic.Name),
 		Value:        tcs.marshalTopic(&topic),
 		ColumnFamily: kTopicsConfigStoreMainColumnFamily,
@@ -171,9 +171,9 @@ func (tcs *TopicsConfigStore) RemoveTopic(topicId base.TopicIDType, rLogIdx int6
 		return err
 	}
 	key := tcs.topicNameToKeyBytes(tpc.Name)
-	var entries []*cf_store.CFStoreEntry
+	var entries []*kv_store.KVStoreEntry
 	rKey, rVal := storagebase.PrepareRLogIDXKeyVal(rLogIdx)
-	entries = append(entries, &cf_store.CFStoreEntry{
+	entries = append(entries, &kv_store.KVStoreEntry{
 		Key:          rKey,
 		Value:        rVal,
 		ColumnFamily: kTopicsConfigStoreMiscColumnFamily,
@@ -184,7 +184,7 @@ func (tcs *TopicsConfigStore) RemoveTopic(topicId base.TopicIDType, rLogIdx int6
 	defer tcs.topicMapLock.Unlock()
 	txn := tcs.kvStore.NewTransaction()
 	defer txn.Discard()
-	if err := txn.Delete(&cf_store.CFStoreKey{Key: key, ColumnFamily: kTopicsConfigStoreMainColumnFamily}); err != nil {
+	if err := txn.Delete(&kv_store.KVStoreKey{Key: key, ColumnFamily: kTopicsConfigStoreMainColumnFamily}); err != nil {
 		tcs.logger.Errorf("Unable to delete topic: %s due to err: %s", tpc.Name, err.Error())
 		return ErrTopicStore
 	}

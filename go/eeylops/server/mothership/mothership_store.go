@@ -5,7 +5,7 @@ import (
 	"eeylops/server/storage"
 	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/cf_store"
+	"eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"encoding/json"
@@ -27,7 +27,7 @@ var kLastLogicalTimestampBytes = []byte(kMothershipKVStoreLogicalTimestampKey)
 
 // MothershipStore holds all the topics for eeylops.
 type MothershipStore struct {
-	kvStore                      cf_store.CFStore
+	kvStore                      kv_store.KVStore
 	logger                       *logging.PrefixLogger
 	rootDir                      string
 	tsDir                        string
@@ -67,7 +67,7 @@ func (mss *MothershipStore) initialize() {
 	opts.Compression = 0
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
-	mss.kvStore = cf_store.NewBadgerCFStore(mss.tsDir, opts)
+	mss.kvStore = badger_kv_store.NewBadgerKVStore(mss.tsDir, opts)
 	mss.addCfsIfNotExists()
 
 	// Initialize replicated log index, next topic ID and last logical timestamp.
@@ -119,28 +119,28 @@ func (mss *MothershipStore) AddTopic(topic base.TopicConfig, rLogIdx int64) erro
 	}
 
 	mss.logger.Infof("Adding new topic: \n---------------%s\n---------------", topic.ToString())
-	var entries []*cf_store.CFStoreEntry
+	var entries []*kv_store.KVStoreEntry
 	// Add replicated log index.
 	rLogKey, rLogVal := storagebase.PrepareRLogIDXKeyVal(rLogIdx)
-	var rlogEntry cf_store.CFStoreEntry
+	var rlogEntry kv_store.KVStoreEntry
 	rlogEntry.ColumnFamily = kMothershipKVStoreMiscColumnFamily
 	rlogEntry.Key = rLogKey
 	rlogEntry.Value = rLogVal
 
 	// Add next topic id entry.
-	var ntEntry cf_store.CFStoreEntry
+	var ntEntry kv_store.KVStoreEntry
 	ntEntry.ColumnFamily = kMothershipKVStoreMiscColumnFamily
 	ntEntry.Key = kLastTopicIDBytes
 	ntEntry.Value = mss.topicIdToBytes(topic.ID)
 
 	// Add topic entry.
-	var topicEntry cf_store.CFStoreEntry
+	var topicEntry kv_store.KVStoreEntry
 	topicEntry.ColumnFamily = kMothershipKVStoreTopicsColumnFamily
 	topicEntry.Key = mss.topicNameToKeyBytes(topic.Name)
 	topicEntry.Value = mss.marshalTopic(&topic)
 
 	// Update logical timestamp as well.
-	var ltsEntry cf_store.CFStoreEntry
+	var ltsEntry kv_store.KVStoreEntry
 	ltsEntry.ColumnFamily = kMothershipKVStoreMiscColumnFamily
 	ltsEntry.Key = kLastLogicalTimestampBytes
 	ltsEntry.Value = mss.logicalTimestampToBytes(mss.topicsConfigLogicalTimestamp + 1)
@@ -192,13 +192,13 @@ func (mss *MothershipStore) RemoveTopic(topicId base.TopicIDType, rLogIdx int64)
 	}
 
 	mss.logger.Infof("Removing topic: %d from topic store", topicId)
-	key := cf_store.CFStoreKey{
+	key := kv_store.KVStoreKey{
 		ColumnFamily: kMothershipKVStoreTopicsColumnFamily,
 		Key:          mss.topicNameToKeyBytes(tpc.Name),
 	}
-	var entries []*cf_store.CFStoreEntry
-	var rlogEntry cf_store.CFStoreEntry
-	var ltsEntry cf_store.CFStoreEntry
+	var entries []*kv_store.KVStoreEntry
+	var rlogEntry kv_store.KVStoreEntry
+	var ltsEntry kv_store.KVStoreEntry
 	rLogKey, rLogVal := storagebase.PrepareRLogIDXKeyVal(rLogIdx)
 	rlogEntry.ColumnFamily = kMothershipKVStoreMiscColumnFamily
 	rlogEntry.Key = rLogKey
@@ -350,8 +350,8 @@ func (mss *MothershipStore) removeTopicFromMaps(topic *base.TopicConfig) {
 }
 
 // initializeNextTopicIDFromKVStore fetches the next topic ID from the underlying KV store that will be used for new topics.
-func (mss *MothershipStore) initializeNextTopicIDFromKVStore(txn cf_store.Transaction) {
-	key := cf_store.CFStoreKey{
+func (mss *MothershipStore) initializeNextTopicIDFromKVStore(txn kv_store.Transaction) {
+	key := kv_store.KVStoreKey{
 		Key:          kLastTopicIDBytes,
 		ColumnFamily: kMothershipKVStoreMiscColumnFamily,
 	}
@@ -370,8 +370,8 @@ func (mss *MothershipStore) initializeNextTopicIDFromKVStore(txn cf_store.Transa
 }
 
 // initializeNextTopicIDFromKVStore fetches the next topic ID from the underlying KV store that will be used for new topics.
-func (mss *MothershipStore) initializeLastLogicalTs(txn cf_store.Transaction) {
-	key := cf_store.CFStoreKey{
+func (mss *MothershipStore) initializeLastLogicalTs(txn kv_store.Transaction) {
+	key := kv_store.KVStoreKey{
 		Key:          kLastLogicalTimestampBytes,
 		ColumnFamily: kMothershipKVStoreMiscColumnFamily,
 	}
@@ -388,9 +388,9 @@ func (mss *MothershipStore) initializeLastLogicalTs(txn cf_store.Transaction) {
 }
 
 // initializeNextTopicIDFromKVStore fetches the next topic ID from the underlying KV store that will be used for new topics.
-func (mss *MothershipStore) initializeLastRLogIdxFromStore(txn cf_store.Transaction) {
+func (mss *MothershipStore) initializeLastRLogIdxFromStore(txn kv_store.Transaction) {
 	rLogKey, _ := storagebase.PrepareRLogIDXKeyVal(0)
-	var key cf_store.CFStoreKey
+	var key kv_store.KVStoreKey
 	key.Key = rLogKey
 	key.ColumnFamily = kMothershipKVStoreMiscColumnFamily
 	lastVal, err := txn.Get(&key)

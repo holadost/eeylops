@@ -6,7 +6,7 @@ import (
 	"eeylops/server/base"
 	sbase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/cf_store"
+	"eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"errors"
@@ -32,7 +32,7 @@ type BadgerSegment struct {
 	topicName   string             // Topic name.
 	partitionID uint               // Partition ID.
 	ttlSeconds  int                // TTL seconds for a message.
-	dataDB      cf_store.CFStore   // Backing KV store to hold the data.
+	dataDB      kv_store.KVStore   // Backing KV store to hold the data.
 	metadataDB  *SegmentMetadataDB // Segment metadata DB.
 	startOffset int64              // Segment start offset
 
@@ -211,9 +211,9 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	keys := seg.generateKeys(nextOff, base.Offset(len(arg.Entries)))
 	values, tsEntries, nextIndexBatchSizeBytes := prepareMessageValues(arg.Entries, arg.Timestamp,
 		seg.currentIndexBatchSizeBytes, nextOff)
-	var entries []*cf_store.CFStoreEntry
+	var entries []*kv_store.KVStoreEntry
 	for ii, key := range keys {
-		entry := &cf_store.CFStoreEntry{
+		entry := &kv_store.KVStoreEntry{
 			Key:          key,
 			Value:        values[ii],
 			ColumnFamily: kOffsetColumnFamily,
@@ -224,7 +224,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 	// Add index entries if required.
 	nextIndexKey := seg.getNextIndexKey()
 	for _, tse := range tsEntries {
-		entries = append(entries, &cf_store.CFStoreEntry{
+		entries = append(entries, &kv_store.KVStoreEntry{
 			Key:          util.UintToBytes(uint64(nextIndexKey)),
 			Value:        tse.Serialize(),
 			ColumnFamily: kTimestampIndexColumnFamily,
@@ -234,11 +234,11 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 
 	// Update replicated log index and next index key as well.
 	entries = append(entries,
-		&cf_store.CFStoreEntry{
+		&kv_store.KVStoreEntry{
 			Key:          kLastRLogIdxKeyBytes,
 			Value:        util.UintToBytes(uint64(arg.RLogIdx)),
 			ColumnFamily: kMiscColumnFamily},
-		&cf_store.CFStoreEntry{
+		&kv_store.KVStoreEntry{
 			Key:          kNextIndexKeyBytes,
 			Value:        util.UintToBytes(uint64(nextIndexKey)),
 			ColumnFamily: kMiscColumnFamily,
@@ -614,7 +614,7 @@ func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet,
 
 // getMsgAtOffset fetches a single offset from the backend.
 func (seg *BadgerSegment) getMsgAtOffset(offset base.Offset) (*Message, error) {
-	entry, err := seg.dataDB.Get(&cf_store.CFStoreKey{
+	entry, err := seg.dataDB.Get(&kv_store.KVStoreKey{
 		Key:          seg.offsetToKey(offset),
 		ColumnFamily: kOffsetColumnFamily,
 	})
@@ -789,7 +789,7 @@ func (seg *BadgerSegment) rebuildIndexes() {
 	seg.rebuildIndexOnce.Do(func() {
 		seg.logger.VInfof(1, "Rebuilding segment indexes")
 		startIdxKey := seg.numToIndexKey(0)
-		_, err := seg.dataDB.Get(&cf_store.CFStoreKey{
+		_, err := seg.dataDB.Get(&kv_store.KVStoreKey{
 			Key:          startIdxKey,
 			ColumnFamily: kTimestampIndexColumnFamily,
 		})
@@ -854,7 +854,7 @@ func (seg *BadgerSegment) open() {
 		opts.NumMemtables = 0
 	}
 	opts.Logger = seg.logger
-	seg.dataDB = cf_store.NewBadgerCFStore(path.Join(seg.rootDir, dataDirName), opts)
+	seg.dataDB = badger_kv_store.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
 
 	// Create column families.
 	cfs := []string{kOffsetColumnFamily, kTimestampIndexColumnFamily, kMiscColumnFamily}
@@ -870,7 +870,7 @@ func (seg *BadgerSegment) open() {
 	}
 
 	// Gather the last replicated log index in the segment.
-	entry, err := seg.dataDB.Get(&cf_store.CFStoreKey{
+	entry, err := seg.dataDB.Get(&kv_store.KVStoreKey{
 		Key:          kLastRLogIdxKeyBytes,
 		ColumnFamily: kMiscColumnFamily,
 	})
@@ -892,7 +892,7 @@ func (seg *BadgerSegment) open() {
 	}
 
 	// Gather the next index key.
-	entry, err = seg.dataDB.Get(&cf_store.CFStoreKey{
+	entry, err = seg.dataDB.Get(&kv_store.KVStoreKey{
 		Key:          kNextIndexKeyBytes,
 		ColumnFamily: kMiscColumnFamily,
 	})

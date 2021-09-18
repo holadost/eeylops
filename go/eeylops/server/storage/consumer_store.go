@@ -5,7 +5,7 @@ import (
 	"eeylops/server/base"
 	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/kv_store"
-	"eeylops/server/storage/kv_store/cf_store"
+	"eeylops/server/storage/kv_store/badger_kv_store"
 	"eeylops/util"
 	"eeylops/util/logging"
 	"fmt"
@@ -25,7 +25,7 @@ var kNilOffsetBytes = []byte("nil")
 
 // ConsumerStore is used by the broker to manage the last committed offsets by every registered consumer.
 type ConsumerStore struct {
-	kvStore     cf_store.CFStore
+	kvStore     kv_store.KVStore
 	storeID     string
 	rootDir     string
 	csDir       string
@@ -63,11 +63,11 @@ func (cs *ConsumerStore) initialize() {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.LoadBloomsOnOpen = false
-	cs.kvStore = cf_store.NewBadgerCFStore(cs.csDir, opts)
+	cs.kvStore = badger_kv_store.NewBadgerKVStore(cs.csDir, opts)
 	cs.addCfsIfNotExists()
 
 	// Find the last replicated log index.
-	val, err := cs.kvStore.Get(&cf_store.CFStoreKey{
+	val, err := cs.kvStore.Get(&kv_store.KVStoreKey{
 		Key:          storagebase.GetLastRLogKeyBytes(),
 		ColumnFamily: kConsumerStoreMiscColumnFamily,
 	})
@@ -97,7 +97,7 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicI
 		return ErrInvalidRLogIdx
 	}
 	key := cs.generateConsumerKey(consumerID, topicID, partitionID)
-	_, err := cs.kvStore.Get(&cf_store.CFStoreKey{
+	_, err := cs.kvStore.Get(&kv_store.KVStoreKey{
 		Key:          key,
 		ColumnFamily: kConsumerStoreMainColumnFamily,
 	})
@@ -107,12 +107,12 @@ func (cs *ConsumerStore) RegisterConsumer(consumerID string, topicID base.TopicI
 			return ErrConsumerStoreFetch
 		}
 		rKey, rVal := storagebase.PrepareRLogIDXKeyVal(rLogIdx)
-		var entries []*cf_store.CFStoreEntry
-		entries = append(entries, &cf_store.CFStoreEntry{
+		var entries []*kv_store.KVStoreEntry
+		entries = append(entries, &kv_store.KVStoreEntry{
 			Key:          key,
 			Value:        kNilOffsetBytes,
 			ColumnFamily: kConsumerStoreMainColumnFamily,
-		}, &cf_store.CFStoreEntry{
+		}, &kv_store.KVStoreEntry{
 			Key:          rKey,
 			Value:        rVal,
 			ColumnFamily: kConsumerStoreMiscColumnFamily,
@@ -139,7 +139,7 @@ func (cs *ConsumerStore) Commit(consumerID string, topicID base.TopicIDType, par
 		return ErrInvalidRLogIdx
 	}
 	key := cs.generateConsumerKey(consumerID, topicID, partitionID)
-	_, err := cs.kvStore.Get(&cf_store.CFStoreKey{
+	_, err := cs.kvStore.Get(&kv_store.KVStoreKey{
 		Key:          key,
 		ColumnFamily: kConsumerStoreMainColumnFamily,
 	})
@@ -149,12 +149,12 @@ func (cs *ConsumerStore) Commit(consumerID string, topicID base.TopicIDType, par
 		return ErrConsumerNotRegistered
 	}
 	rKey, rVal := storagebase.PrepareRLogIDXKeyVal(rLogIdx)
-	var entries []*cf_store.CFStoreEntry
-	entries = append(entries, &cf_store.CFStoreEntry{
+	var entries []*kv_store.KVStoreEntry
+	entries = append(entries, &kv_store.KVStoreEntry{
 		Key:          key,
 		Value:        cs.offsetToBytes(offsetNum),
 		ColumnFamily: kConsumerStoreMainColumnFamily,
-	}, &cf_store.CFStoreEntry{
+	}, &kv_store.KVStoreEntry{
 		Key:          rKey,
 		Value:        rVal,
 		ColumnFamily: kConsumerStoreMiscColumnFamily,
@@ -172,7 +172,7 @@ func (cs *ConsumerStore) Commit(consumerID string, topicID base.TopicIDType, par
 func (cs *ConsumerStore) GetLastCommitted(consumerID string, topicID base.TopicIDType,
 	partitionID uint) (base.Offset, error) {
 	key := cs.generateConsumerKey(consumerID, topicID, partitionID)
-	val, err := cs.kvStore.Get(&cf_store.CFStoreKey{
+	val, err := cs.kvStore.Get(&kv_store.KVStoreKey{
 		Key:          key,
 		ColumnFamily: kConsumerStoreMainColumnFamily,
 	})
