@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/segments"
 	"eeylops/util"
 	"eeylops/util/logging"
@@ -206,14 +206,14 @@ func (p *Partition) initialize() {
 	// Initialize segments.
 	segmentIds := p.getFileSystemSegments()
 	for ii, segmentID := range segmentIds {
-		opts := segments.BadgerSegmentOpts{
+		opts := segments.KVStoreSegmentOpts{
 			RootDir:     p.getSegmentDirectory(segmentID),
 			Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segmentID), p.logger),
 			Topic:       p.topicName,
 			PartitionID: uint(p.partitionID),
 			TTLSeconds:  p.ttlSeconds,
 		}
-		segment, err := segments.NewBadgerSegment(&opts)
+		segment, err := segments.NewKVStoreSegment(&opts)
 		if err != nil {
 			p.logger.Fatalf("Unable to initialize segment due to err: %s", err.Error())
 			return
@@ -287,10 +287,10 @@ func (p *Partition) initialize() {
 }
 
 // Append records to the partition.
-func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sbase.AppendEntriesRet {
+func (p *Partition) Append(ctx context.Context, arg *storagebase.AppendEntriesArg) *storagebase.AppendEntriesRet {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
-	var ret sbase.AppendEntriesRet
+	var ret storagebase.AppendEntriesRet
 	if p.closed {
 		ret.Error = ErrPartitionClosed
 		return &ret
@@ -314,10 +314,10 @@ func (p *Partition) Append(ctx context.Context, arg *sbase.AppendEntriesArg) *sb
 }
 
 // Scan numMessages records from the partition from the given startOffset.
-func (p *Partition) Scan(ctx context.Context, arg *sbase.ScanEntriesArg) *sbase.ScanEntriesRet {
+func (p *Partition) Scan(ctx context.Context, arg *storagebase.ScanEntriesArg) *storagebase.ScanEntriesRet {
 	p.partitionCfgLock.RLock()
 	defer p.partitionCfgLock.RUnlock()
-	var ret sbase.ScanEntriesRet
+	var ret storagebase.ScanEntriesRet
 	if p.closed {
 		ret.Error = ErrPartitionClosed
 		return &ret
@@ -362,7 +362,7 @@ func (p *Partition) Close() {
 }
 
 // offsetScan is a helper method of scan that does offset based scans.
-func (p *Partition) offsetScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
+func (p *Partition) offsetScan(ctx context.Context, arg *storagebase.ScanEntriesArg, ret *storagebase.ScanEntriesRet) {
 	var startOffset base.Offset
 	var endOffset base.Offset
 	numMsgsOffset := base.Offset(arg.NumMessages)
@@ -386,7 +386,7 @@ func (p *Partition) offsetScan(ctx context.Context, arg *sbase.ScanEntriesArg, r
 }
 
 // timestampScan is a helper method of scan that does timestamp based scans.
-func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet) {
+func (p *Partition) timestampScan(ctx context.Context, arg *storagebase.ScanEntriesArg, ret *storagebase.ScanEntriesRet) {
 	if arg.StartTimestamp <= 0 {
 		p.logger.Errorf("Invalid inputs. Either timestamp/offset must be provided")
 		ret.Error = ErrPartitionScan
@@ -431,7 +431,7 @@ func (p *Partition) timestampScan(ctx context.Context, arg *sbase.ScanEntriesArg
 }
 
 // scanMessages scans messages based on the given arg and populates the results in the given ret.
-func (p *Partition) scanMessages(ctx context.Context, arg *sbase.ScanEntriesArg, ret *sbase.ScanEntriesRet,
+func (p *Partition) scanMessages(ctx context.Context, arg *storagebase.ScanEntriesArg, ret *storagebase.ScanEntriesRet,
 	offsetType bool, endTs int64, startIdx, endIdx int) {
 	var scanSizeBytes int
 	scanSizeBytes = 0
@@ -733,14 +733,14 @@ func (p *Partition) createNewSegmentUnsafe() {
 				segmentID, p.partitionID, err.Error())
 			return
 		}
-		opts := segments.BadgerSegmentOpts{
+		opts := segments.KVStoreSegmentOpts{
 			RootDir:     p.getSegmentDirectory(segmentID),
 			Logger:      p.logger,
 			Topic:       p.topicName,
 			PartitionID: uint(p.partitionID),
 			TTLSeconds:  p.ttlSeconds,
 		}
-		seg, err = segments.NewBadgerSegment(&opts)
+		seg, err = segments.NewKVStoreSegment(&opts)
 		if err != nil {
 			p.logger.Fatalf("Failure while closing and reopening last segment due to err: %s",
 				err.Error())
@@ -764,7 +764,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 		startOffset = prevMetadata.EndOffset + 1
 	}
 
-	opts := segments.BadgerSegmentOpts{
+	opts := segments.KVStoreSegmentOpts{
 		RootDir:     p.getSegmentDirectory(int(segID)),
 		Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segID), p.logger),
 		Topic:       p.topicName,
@@ -778,7 +778,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 		CreatedTimestamp: time.Now(),
 		StartOffset:      startOffset,
 	}
-	newSeg, err := segments.NewBadgerSegmentWithMetadata(&opts, metadata)
+	newSeg, err := segments.NewKVStoreSegmentWithMetadata(&opts, metadata)
 	if err != nil {
 		p.logger.Fatalf("Unable to create new segment due to err: %s", err.Error())
 		return

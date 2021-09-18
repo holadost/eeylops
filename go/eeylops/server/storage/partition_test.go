@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/segments"
 	"eeylops/util/testutil"
 	"fmt"
@@ -40,7 +40,7 @@ func singleProduce(startIdx int, p *Partition, numValues int) {
 		startIdx += 1
 	}
 	ts := time.Now().UnixNano()
-	parg := sbase.AppendEntriesArg{
+	parg := storagebase.AppendEntriesArg{
 		Entries:   values,
 		Timestamp: ts,
 		RLogIdx:   ts / (1000),
@@ -240,7 +240,7 @@ func TestPartitionScan(t *testing.T) {
 	numSegs := 10
 	numValsPerSeg := 100
 	loadDataBasicWithNewSegments(p, numSegs, numValsPerSeg)
-	var sarg sbase.ScanEntriesArg
+	var sarg storagebase.ScanEntriesArg
 	defCtx := context.Background()
 	sarg.StartOffset = 0
 	sarg.NumMessages = 1
@@ -379,7 +379,7 @@ func TestPartitionManager(t *testing.T) {
 			rand.Read(token)
 			values = append(values, token)
 		}
-		aarg := sbase.AppendEntriesArg{
+		aarg := storagebase.AppendEntriesArg{
 			Entries:   values,
 			Timestamp: time.Now().UnixNano(),
 			RLogIdx:   int64(iter + 1),
@@ -396,7 +396,7 @@ func TestPartitionManager(t *testing.T) {
 	}
 
 	// Test scans with max scan size bytes.
-	var sarg sbase.ScanEntriesArg
+	var sarg storagebase.ScanEntriesArg
 	sarg.StartOffset = 0
 	sarg.NumMessages = 20
 	sarg.StartTimestamp = -1
@@ -434,7 +434,7 @@ func TestPartitionManager(t *testing.T) {
 
 	// Append more values to the partition. The offset should start from totalValues.
 	glog.Infof("Appending messages after all segments have expired!")
-	aarg := sbase.AppendEntriesArg{
+	aarg := storagebase.AppendEntriesArg{
 		Entries:   values,
 		Timestamp: time.Now().UnixNano(),
 		RLogIdx:   int64(101),
@@ -487,7 +487,7 @@ func TestPartitionScanTimestamp(t *testing.T) {
 		timestamps = nil
 		for ii := 0; ii < numIters; ii++ {
 			now := time.Now().UnixNano()
-			var arg sbase.AppendEntriesArg
+			var arg storagebase.AppendEntriesArg
 			for jj := 0; jj < batchSize; jj++ {
 				val := fmt.Sprintf("value-%07d", (ii*batchSize)+jj)
 				arg.Entries = append(arg.Entries, append([]byte(val), token...))
@@ -505,7 +505,7 @@ func TestPartitionScanTimestamp(t *testing.T) {
 	producer()
 	glog.Infof("Producer done. Total time: %v", time.Since(start))
 	glog.Infof("Starting consumer!")
-	var sarg sbase.ScanEntriesArg
+	var sarg storagebase.ScanEntriesArg
 	sarg.NumMessages = uint64(batchSize)
 	sarg.StartOffset = -1
 	defCtx := context.Background()

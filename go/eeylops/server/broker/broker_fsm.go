@@ -4,7 +4,7 @@ import (
 	"context"
 	"eeylops/server/base"
 	"eeylops/server/storage"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"eeylops/util/logging"
 	"github.com/hashicorp/raft"
 	"io"
@@ -78,7 +78,7 @@ func (fsm *BrokerFSM) append(cmd *base.Command, log *raft.Log) *base.FSMResponse
 				cmd.AppendCommand.PartitionID, cmd.AppendCommand.TopicID, err.Error())
 		}
 	}
-	arg := sbase.AppendEntriesArg{
+	arg := storagebase.AppendEntriesArg{
 		Entries:   cmd.AppendCommand.Data,
 		Timestamp: cmd.AppendCommand.Timestamp,
 		RLogIdx:   int64(log.Index),

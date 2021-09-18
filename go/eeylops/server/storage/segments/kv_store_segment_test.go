@@ -49,7 +49,7 @@ func newTestWorkload() *testWorkload {
 	return &tw
 }
 
-func (tw *testWorkload) appendMessages(startOffset base.Offset, seg *BadgerSegment, numMessages int, payloadSize int,
+func (tw *testWorkload) appendMessages(startOffset base.Offset, seg *KVStoreSegment, numMessages int, payloadSize int,
 	timestamp int64, rlogIdx int64) {
 	if startOffset <= tw.lastOffsetAppended {
 		glog.Fatalf("Incorrect start offset provided. Last offset appended to segment: %d, provided: %d",
@@ -73,7 +73,7 @@ func (tw *testWorkload) appendMessages(startOffset base.Offset, seg *BadgerSegme
 	tw.lastOffsetAppended = startOffset + base.Offset(len(values)) - 1
 }
 
-func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages int, startTs int64, endTs int64, expectedStartOffset base.Offset, expectedNumMessages int) {
+func (tw *testWorkload) scanMessagesByTimestamp(seg *KVStoreSegment, numMessages int, startTs int64, endTs int64, expectedStartOffset base.Offset, expectedNumMessages int) {
 	var arg ScanEntriesArg
 	arg.StartTimestamp = startTs
 	arg.StartOffset = -1
@@ -109,7 +109,7 @@ func (tw *testWorkload) scanMessagesByTimestamp(seg *BadgerSegment, numMessages 
 	}
 }
 
-func (tw *testWorkload) scanExpiredMessagesByTimestamp(seg *BadgerSegment, numMessages int, startTs int64, endTs int64) {
+func (tw *testWorkload) scanExpiredMessagesByTimestamp(seg *KVStoreSegment, numMessages int, startTs int64, endTs int64) {
 	var arg ScanEntriesArg
 	arg.StartTimestamp = startTs
 	arg.StartOffset = -1
@@ -124,7 +124,7 @@ func (tw *testWorkload) scanExpiredMessagesByTimestamp(seg *BadgerSegment, numMe
 	}
 }
 
-func (tw *testWorkload) scanMessagesByOffset(seg *BadgerSegment, numMessages int, startOffset base.Offset, endTs int64, expectedStartOffset base.Offset, expectedNumMessages int) {
+func (tw *testWorkload) scanMessagesByOffset(seg *KVStoreSegment, numMessages int, startOffset base.Offset, endTs int64, expectedStartOffset base.Offset, expectedNumMessages int) {
 	var arg ScanEntriesArg
 	arg.StartOffset = startOffset
 	arg.StartTimestamp = -1
@@ -159,7 +159,7 @@ func (tw *testWorkload) scanMessagesByOffset(seg *BadgerSegment, numMessages int
 	}
 }
 
-func TestBadgerSegment(t *testing.T) {
+func TestKVStoreSegment(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerSegment")
 	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment")
 	initialMeta := SegmentMetadata{
@@ -170,14 +170,14 @@ func TestBadgerSegment(t *testing.T) {
 		CreatedTimestamp: time.Now(),
 		ImmutableReason:  0,
 	}
-	opts := BadgerSegmentOpts{
+	opts := KVStoreSegmentOpts{
 		RootDir:     dataDir,
 		Logger:      nil,
 		Topic:       "topic1",
 		PartitionID: 1,
 		TTLSeconds:  86400,
 	}
-	bds, err := NewBadgerSegment(&opts)
+	bds, err := NewKVStoreSegment(&opts)
 	if err != nil {
 		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
@@ -194,7 +194,7 @@ func TestBadgerSegment(t *testing.T) {
 			if err != nil {
 				logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 			}
-			bds, err = NewBadgerSegment(&opts)
+			bds, err = NewKVStoreSegment(&opts)
 			if err != nil {
 				logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 			}
@@ -295,7 +295,7 @@ func TestBadgerSegment(t *testing.T) {
 	if err != nil {
 		logger.Fatalf("Failed to close segment due to err: %s", err.Error())
 	}
-	bds, err = NewBadgerSegment(&opts)
+	bds, err = NewKVStoreSegment(&opts)
 	if err != nil {
 		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
@@ -335,7 +335,7 @@ func TestBadgerSegment(t *testing.T) {
 	}
 }
 
-func TestBadgerSegment_Scan(t *testing.T) {
+func TestKVStoreSegment_Scan(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerSegment_Scan")
 	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment_Scan")
 	initialMeta := SegmentMetadata{
@@ -346,20 +346,20 @@ func TestBadgerSegment_Scan(t *testing.T) {
 		CreatedTimestamp: time.Now(),
 		ImmutableReason:  0,
 	}
-	opts := BadgerSegmentOpts{
+	opts := KVStoreSegmentOpts{
 		RootDir:     dataDir,
 		Logger:      nil,
 		Topic:       "topic1",
 		PartitionID: 1,
 		TTLSeconds:  86400,
 	}
-	bds, err := NewBadgerSegment(&opts)
+	bds, err := NewKVStoreSegment(&opts)
 	if err != nil {
 		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
 	bds.SetMetadata(initialMeta)
 	bds.Close()
-	bds, err = NewBadgerSegment(&opts)
+	bds, err = NewKVStoreSegment(&opts)
 	if err != nil {
 		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
@@ -393,7 +393,7 @@ func TestBadgerSegment_Scan(t *testing.T) {
 		glog.Fatalf("Error while closing segment: %s", err.Error())
 	}
 	opts.TTLSeconds = 2
-	bds, err = NewBadgerSegment(&opts)
+	bds, err = NewKVStoreSegment(&opts)
 	if err != nil {
 		glog.Fatalf("Error while initializing segment: %s", err.Error())
 	}
@@ -436,7 +436,7 @@ func TestBadgerSegment_Scan(t *testing.T) {
 	}
 }
 
-func TestBadgerSegment_Append(t *testing.T) {
+func TestKVStoreSegment_Append(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerSegment_Append")
 	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment_Append")
 	initialMeta := SegmentMetadata{
@@ -447,14 +447,14 @@ func TestBadgerSegment_Append(t *testing.T) {
 		CreatedTimestamp: time.Now(),
 		ImmutableReason:  0,
 	}
-	opts := BadgerSegmentOpts{
+	opts := KVStoreSegmentOpts{
 		RootDir:     dataDir,
 		Logger:      nil,
 		Topic:       "topic1",
 		PartitionID: 1,
 		TTLSeconds:  86400,
 	}
-	bds, err := NewBadgerSegment(&opts)
+	bds, err := NewKVStoreSegment(&opts)
 	if err != nil {
 		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}
@@ -486,7 +486,7 @@ func TestBadgerSegment_Append(t *testing.T) {
 	glog.Infof("Total time: %v, average time: %v", elapsed, elapsed/time.Duration(numIters))
 }
 
-func TestBadgerSegment_AppendScanBM(t *testing.T) {
+func TestKVStoreSegment_AppendScanBM(t *testing.T) {
 	testutil.LogTestMarker("TestBadgerSegment_AppendScanBM")
 	dataDir := testutil.CreateTestDir(t, "TestBadgerSegment_AppendScanBM")
 	initialMeta := SegmentMetadata{
@@ -497,14 +497,14 @@ func TestBadgerSegment_AppendScanBM(t *testing.T) {
 		CreatedTimestamp: time.Now(),
 		ImmutableReason:  0,
 	}
-	opts := BadgerSegmentOpts{
+	opts := KVStoreSegmentOpts{
 		RootDir:     dataDir,
 		Logger:      nil,
 		Topic:       "topic1",
 		PartitionID: 1,
 		TTLSeconds:  86400,
 	}
-	bds, err := NewBadgerSegment(&opts)
+	bds, err := NewKVStoreSegment(&opts)
 	if err != nil {
 		logger.Fatalf("Unable to create badger segment due to err: %s", err.Error())
 	}

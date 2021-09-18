@@ -25,8 +25,8 @@ var (
 	kNextIndexKeyBytes   = []byte("next_index_key")
 )
 
-// BadgerSegment implements Segment where the data is backed using badger db.
-type BadgerSegment struct {
+// KVStoreSegment implements Segment where the data is backed using a KV store. Currently, KV store uses badger.
+type KVStoreSegment struct {
 	segLock     sync.RWMutex       // A RW lock for the segment.
 	rootDir     string             // Root directory of this segment.
 	topicName   string             // Topic name.
@@ -61,7 +61,7 @@ type BadgerSegment struct {
 	nextTimestampIndexKey      int                        // Next timestamp index key.
 }
 
-type BadgerSegmentOpts struct {
+type KVStoreSegmentOpts struct {
 	RootDir     string                // Root directory for the segment. This is a compulsory parameter.
 	Logger      *logging.PrefixLogger // Parent logger if any. Optional parameter.
 	Topic       string                // Topic name. Optional parameter.
@@ -69,12 +69,12 @@ type BadgerSegmentOpts struct {
 	TTLSeconds  int                   // TTL seconds for messages.
 }
 
-// NewBadgerSegment initializes a new instance of badger segment.
-func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
+// NewKVStoreSegment initializes a new instance of KV store based segment.
+func NewKVStoreSegment(opts *KVStoreSegmentOpts) (*KVStoreSegment, error) {
 	if err := os.MkdirAll(path.Join(opts.RootDir, dataDirName), 0774); err != nil {
 		return nil, err
 	}
-	seg := new(BadgerSegment)
+	seg := new(KVStoreSegment)
 	seg.rootDir = opts.RootDir
 	// Set segment ID as root directory for now since we still haven't initialized the segment metadata.
 	if opts.Logger == nil {
@@ -93,11 +93,11 @@ func NewBadgerSegment(opts *BadgerSegmentOpts) (*BadgerSegment, error) {
 	return seg, nil
 }
 
-func NewBadgerSegmentWithMetadata(opts *BadgerSegmentOpts, sm SegmentMetadata) (*BadgerSegment, error) {
+func NewKVStoreSegmentWithMetadata(opts *KVStoreSegmentOpts, sm SegmentMetadata) (*KVStoreSegment, error) {
 	if err := os.MkdirAll(path.Join(opts.RootDir, dataDirName), 0774); err != nil {
 		return nil, err
 	}
-	seg := new(BadgerSegment)
+	seg := new(KVStoreSegment)
 	seg.rootDir = opts.RootDir
 	seg.topicName = opts.Topic
 	seg.partitionID = opts.PartitionID
@@ -119,8 +119,8 @@ func NewBadgerSegmentWithMetadata(opts *BadgerSegmentOpts, sm SegmentMetadata) (
 }
 
 // Initialize implements the Segment interface. It initializes the segment.
-func (seg *BadgerSegment) initialize() {
-	seg.logger.Infof("Initializing badger segment located at: %s", seg.rootDir)
+func (seg *KVStoreSegment) initialize() {
+	seg.logger.Infof("Initializing segment located at: %s", seg.rootDir)
 	// Initialize metadata ddb.
 	if seg.metadataDB == nil {
 		seg.metadataDB = NewSegmentMetadataDB(seg.rootDir)
@@ -137,12 +137,12 @@ func (seg *BadgerSegment) initialize() {
 }
 
 // ID returns the segment id.
-func (seg *BadgerSegment) ID() int {
+func (seg *KVStoreSegment) ID() int {
 	return int(seg.metadata.ID)
 }
 
 // Open opens the segment.
-func (seg *BadgerSegment) Open() {
+func (seg *KVStoreSegment) Open() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
 	seg.logger.Infof("Opening segment")
@@ -156,7 +156,7 @@ func (seg *BadgerSegment) Open() {
 
 // Close implements the Segment interface. It closes the connection to the underlying
 // BadgerDB database as well as invoking the context's cancel function.
-func (seg *BadgerSegment) Close() error {
+func (seg *KVStoreSegment) Close() error {
 	if seg.closed {
 		return nil
 	}
@@ -175,13 +175,13 @@ func (seg *BadgerSegment) Close() error {
 }
 
 // IsEmpty implements the Segment interface. Returns true if the segment is empty. False otherwise.
-func (seg *BadgerSegment) IsEmpty() bool {
+func (seg *KVStoreSegment) IsEmpty() bool {
 	nextOff := seg.getNextOffset()
 	return nextOff == seg.metadata.StartOffset
 }
 
 // Append appends the given entries to the segment.
-func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *AppendEntriesRet {
+func (seg *KVStoreSegment) Append(ctx context.Context, arg *AppendEntriesArg) *AppendEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	var ret AppendEntriesRet
@@ -277,7 +277,7 @@ func (seg *BadgerSegment) Append(ctx context.Context, arg *AppendEntriesArg) *Ap
 
 // Scan attempts to fetch the requested number of messages sequentially starting from the entry with the given
 // StartOffset or StartTimestamp. Only one of StartOffset or StartTimestamp must be provided.
-func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEntriesRet {
+func (seg *KVStoreSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEntriesRet {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	var ret ScanEntriesRet
@@ -298,7 +298,7 @@ func (seg *BadgerSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanEn
 }
 
 // MarkImmutable marks the segment as immutable.
-func (seg *BadgerSegment) MarkImmutable() {
+func (seg *KVStoreSegment) MarkImmutable() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
 	seg.logger.Infof("Marking segment as immutable")
@@ -318,7 +318,7 @@ func (seg *BadgerSegment) MarkImmutable() {
 }
 
 // MarkExpired marks the segment as expired.
-func (seg *BadgerSegment) MarkExpired() {
+func (seg *KVStoreSegment) MarkExpired() {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
 	seg.logger.Infof("Marking segment as expired")
@@ -328,7 +328,7 @@ func (seg *BadgerSegment) MarkExpired() {
 }
 
 // GetMetadata returns a copy of the metadata associated with the segment.
-func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
+func (seg *KVStoreSegment) GetMetadata() SegmentMetadata {
 	seg.segLock.RLock()
 	metadata := *seg.metadata
 	seg.segLock.RUnlock()
@@ -349,7 +349,7 @@ func (seg *BadgerSegment) GetMetadata() SegmentMetadata {
 }
 
 // GetRange returns the range(start and end offset) of the segment.
-func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
+func (seg *KVStoreSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 	startOff := seg.getStartOffset()
 	nextOff := seg.getNextOffset()
 	if nextOff == startOff {
@@ -359,7 +359,7 @@ func (seg *BadgerSegment) GetRange() (sOff base.Offset, eOff base.Offset) {
 }
 
 // GetMsgTimestampRange returns the first and last message unix timestamps(in nanoseconds).
-func (seg *BadgerSegment) GetMsgTimestampRange() (int64, int64) {
+func (seg *KVStoreSegment) GetMsgTimestampRange() (int64, int64) {
 	if seg.IsEmpty() {
 		return -1, -1
 	}
@@ -378,7 +378,7 @@ func (seg *BadgerSegment) GetMsgTimestampRange() (int64, int64) {
 }
 
 // SetMetadata sets the metadata for the segment.
-func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
+func (seg *KVStoreSegment) SetMetadata(sm SegmentMetadata) {
 	seg.segLock.Lock()
 	defer seg.segLock.Unlock()
 	seg.metadataDB.PutMetadata(&sm)
@@ -390,56 +390,56 @@ func (seg *BadgerSegment) SetMetadata(sm SegmentMetadata) {
 }
 
 // Stats returns the stats of the segment.
-func (seg *BadgerSegment) Stats() {
+func (seg *KVStoreSegment) Stats() {
 
 }
 
 // Size returns the stats of the segment.
-func (seg *BadgerSegment) Size() int64 {
+func (seg *KVStoreSegment) Size() int64 {
 	seg.segLock.RLock()
 	defer seg.segLock.RUnlock()
 	return seg.dataDB.Size()
 }
 
-func (seg *BadgerSegment) getStartOffset() base.Offset {
+func (seg *KVStoreSegment) getStartOffset() base.Offset {
 	return base.Offset(atomic.LoadInt64(&seg.startOffset))
 }
 
-func (seg *BadgerSegment) setStartOffset(off base.Offset) {
+func (seg *KVStoreSegment) setStartOffset(off base.Offset) {
 	atomic.StoreInt64(&seg.startOffset, int64(off))
 }
 
 // Returns the current nextOffset of the segment.
-func (seg *BadgerSegment) getNextOffset() base.Offset {
+func (seg *KVStoreSegment) getNextOffset() base.Offset {
 	return base.Offset(atomic.LoadInt64(&seg.nextOffset))
 }
 
 // Returns the current nextOffset of the segment.
-func (seg *BadgerSegment) setNextOffset(val base.Offset) {
+func (seg *KVStoreSegment) setNextOffset(val base.Offset) {
 	atomic.StoreInt64(&seg.nextOffset, int64(val))
 }
 
-func (seg *BadgerSegment) getFirstMsgTs() int64 {
+func (seg *KVStoreSegment) getFirstMsgTs() int64 {
 	return atomic.LoadInt64(&seg.firstMsgTs)
 }
 
-func (seg *BadgerSegment) setFirstMsgTs(ts int64) {
+func (seg *KVStoreSegment) setFirstMsgTs(ts int64) {
 	atomic.StoreInt64(&seg.firstMsgTs, ts)
 }
 
-func (seg *BadgerSegment) getLastMsgTs() int64 {
+func (seg *KVStoreSegment) getLastMsgTs() int64 {
 	return atomic.LoadInt64(&seg.lastMsgTs)
 }
 
-func (seg *BadgerSegment) setLastMsgTs(ts int64) {
+func (seg *KVStoreSegment) setLastMsgTs(ts int64) {
 	atomic.StoreInt64(&seg.lastMsgTs, ts)
 }
 
-func (seg *BadgerSegment) getNextIndexKey() int {
+func (seg *KVStoreSegment) getNextIndexKey() int {
 	return seg.nextTimestampIndexKey
 }
 
-func (seg *BadgerSegment) setNextIndexKey(key int) {
+func (seg *KVStoreSegment) setNextIndexKey(key int) {
 	if key <= seg.nextTimestampIndexKey {
 		seg.logger.Fatalf("Key: %d must be greater than the next index key: %d", key, seg.nextTimestampIndexKey)
 	}
@@ -448,7 +448,7 @@ func (seg *BadgerSegment) setNextIndexKey(key int) {
 
 // sanitizeScanArg is a helper method to Scan that checks if the arguments provided are fine. If not, it populates
 // ret and returns an error. This method assumes that the segLock has been acquired.
-func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesRet) error {
+func (seg *KVStoreSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesRet) error {
 	ret.Error = nil
 	if arg.StartOffset == -1 && arg.StartTimestamp == -1 {
 		seg.logger.Fatalf("Both StartOffset and StartTimestamp cannot be undefined")
@@ -482,7 +482,7 @@ func (seg *BadgerSegment) sanitizeScanArg(arg *ScanEntriesArg, ret *ScanEntriesR
 // populate ret and return early and avoid re-reading this message again), this method  will return an error.
 // Otherwise, it will return the start offset from where the scan should start. This method assumes that the segLock
 // has been acquired.
-func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *ScanEntriesRet) (base.Offset, error) {
+func (seg *KVStoreSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *ScanEntriesRet) (base.Offset, error) {
 	now := time.Now()
 	firstUnexpiredMsgTs := now.UnixNano() - int64(seg.ttlSeconds)*(1e9)
 	firstMsgTs := seg.getFirstMsgTs()
@@ -556,7 +556,7 @@ func (seg *BadgerSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *Sc
 // scanMessages is a helper method for Scan which scans messages from the segment from the given startOffset. It ends
 // the scan when arg.NumMessages is reached or arg.ScanSizeBytes is exceeded or if the requested timestamp is lesser
 // than arg.EndTimestamp.
-func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet, startOffset base.Offset) {
+func (seg *KVStoreSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet, startOffset base.Offset) {
 	var tmpNumMsgs base.Offset
 	var endOffset base.Offset
 	var sk []byte
@@ -613,7 +613,7 @@ func (seg *BadgerSegment) scanMessages(arg *ScanEntriesArg, ret *ScanEntriesRet,
 }
 
 // getMsgAtOffset fetches a single offset from the backend.
-func (seg *BadgerSegment) getMsgAtOffset(offset base.Offset) (*Message, error) {
+func (seg *KVStoreSegment) getMsgAtOffset(offset base.Offset) (*Message, error) {
 	entry, err := seg.dataDB.Get(&kv_store.KVStoreKey{
 		Key:          seg.offsetToKey(offset),
 		ColumnFamily: kOffsetColumnFamily,
@@ -629,7 +629,7 @@ func (seg *BadgerSegment) getMsgAtOffset(offset base.Offset) (*Message, error) {
 
 // findFirstOffsetWithTimestampGE finds the first offset in the segment whose timestamp >= given ts. This method
 // assumes that segLock has been acquired.
-func (seg *BadgerSegment) findFirstOffsetWithTimestampGE(ts int64) (base.Offset, error) {
+func (seg *KVStoreSegment) findFirstOffsetWithTimestampGE(ts int64) (base.Offset, error) {
 	startOffsetHint := seg.getNearestSmallerOffsetFromIndex(ts)
 	if startOffsetHint == -1 {
 		return -1, ErrSegmentInvalidTimestamp
@@ -658,7 +658,7 @@ func (seg *BadgerSegment) findFirstOffsetWithTimestampGE(ts int64) (base.Offset,
 }
 
 // generateKeys generates keys based on the given startOffset and numMessages.
-func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base.Offset) [][]byte {
+func (seg *KVStoreSegment) generateKeys(startOffset base.Offset, numMessages base.Offset) [][]byte {
 	lastOffset := startOffset + numMessages
 	var keys [][]byte
 	for ii := startOffset; ii < lastOffset; ii++ {
@@ -668,12 +668,12 @@ func (seg *BadgerSegment) generateKeys(startOffset base.Offset, numMessages base
 }
 
 // offsetToKey converts the given offset to a key representation for dataDB.
-func (seg *BadgerSegment) offsetToKey(offset base.Offset) []byte {
+func (seg *KVStoreSegment) offsetToKey(offset base.Offset) []byte {
 	return util.UintToBytes(uint64(offset))
 }
 
 // keyToOffset converts the key representation of the offset(from dataDB) to base.Offset type.
-func (seg *BadgerSegment) keyToOffset(key []byte) base.Offset {
+func (seg *KVStoreSegment) keyToOffset(key []byte) base.Offset {
 	if len(key) != 8 {
 		seg.logger.Fatalf("Given key: %s is not an offset key", string(key))
 	}
@@ -681,12 +681,12 @@ func (seg *BadgerSegment) keyToOffset(key []byte) base.Offset {
 }
 
 // numToIndexKey converts the given number to a key representation for dataDB.
-func (seg *BadgerSegment) numToIndexKey(num int) []byte {
+func (seg *KVStoreSegment) numToIndexKey(num int) []byte {
 	return util.UintToBytes(uint64(num))
 }
 
 // indexKeyToNum converts the given index key to its numeric representation.
-func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
+func (seg *KVStoreSegment) indexKeyToNum(key []byte) int {
 	if len(key) != 8 {
 		seg.logger.Fatalf("Expected timestamp index key. Got: %s", string(key))
 	}
@@ -694,7 +694,7 @@ func (seg *BadgerSegment) indexKeyToNum(key []byte) int {
 }
 
 // A helper method that lets us know if a key has started with the given prefix.
-func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool {
+func (seg *KVStoreSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool {
 	if len(key) < len(prefix) {
 		return false
 	}
@@ -705,7 +705,7 @@ func (seg *BadgerSegment) doesKeyStartWithPrefix(key []byte, prefix []byte) bool
 }
 
 // hasValueExpired returns true if the value has expired. False otherwise.
-func (seg *BadgerSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
+func (seg *KVStoreSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
 	if (nowNano-tsNano)/(1e9) >= int64(seg.ttlSeconds) {
 		return true
 	}
@@ -715,7 +715,7 @@ func (seg *BadgerSegment) hasValueExpired(tsNano int64, nowNano int64) bool {
 // indexer is a background goroutine that is started when the segment is first opened. It scans dataDB and
 // rebuilds an in memory timestamp index. It then waits for new indexes that were created and updates the
 // in memory timestamp index.
-func (seg *BadgerSegment) indexer() {
+func (seg *KVStoreSegment) indexer() {
 	seg.rebuildIndexes()
 	for {
 		select {
@@ -729,12 +729,12 @@ func (seg *BadgerSegment) indexer() {
 }
 
 // notifyIndexer is called by Append when a new index entry needs to be added to the timestamp index.
-func (seg *BadgerSegment) notifyIndexer(entries []TimestampIndexEntry) {
+func (seg *KVStoreSegment) notifyIndexer(entries []TimestampIndexEntry) {
 	seg.timestampIndexChan <- entries
 }
 
 // updateTimestampIndex is called by the indexer when it receives an index entry on timestampIndexChan.
-func (seg *BadgerSegment) updateTimestampIndex(entries []TimestampIndexEntry) {
+func (seg *KVStoreSegment) updateTimestampIndex(entries []TimestampIndexEntry) {
 	// Acquire write lock on the timestamp index as we are about to modify it.
 	seg.timestampIndexLock.Lock()
 	defer seg.timestampIndexLock.Unlock()
@@ -748,7 +748,7 @@ func (seg *BadgerSegment) updateTimestampIndex(entries []TimestampIndexEntry) {
 
 // getNearestSmallerOffsetFromIndex returns the first offset that is smaller than the given timestamp. This method
 // assumes that segLock has been acquired.
-func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset {
+func (seg *KVStoreSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset {
 	seg.timestampIndexLock.RLock()
 	defer seg.timestampIndexLock.RUnlock()
 	if len(seg.timestampBRI) == 0 {
@@ -785,7 +785,7 @@ func (seg *BadgerSegment) getNearestSmallerOffsetFromIndex(ts int64) base.Offset
 }
 
 // rebuildIndexes is called by the indexer when the segment is opened for the first time.
-func (seg *BadgerSegment) rebuildIndexes() {
+func (seg *KVStoreSegment) rebuildIndexes() {
 	seg.rebuildIndexOnce.Do(func() {
 		seg.logger.VInfof(1, "Rebuilding segment indexes")
 		startIdxKey := seg.numToIndexKey(0)
@@ -833,7 +833,7 @@ func (seg *BadgerSegment) rebuildIndexes() {
 }
 
 // Opens the segment. This method assumes that segLock has been acquired.
-func (seg *BadgerSegment) open() {
+func (seg *KVStoreSegment) open() {
 	segEmpty := false
 	// Initialize KV store.
 	opts := badger.DefaultOptions(path.Join(seg.rootDir, dataDirName))

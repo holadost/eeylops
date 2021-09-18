@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"eeylops/server/base"
-	sbase "eeylops/server/storage/base"
+	storagebase "eeylops/server/storage/base"
 	"github.com/golang/glog"
 	"math/rand"
 	"time"
@@ -78,7 +78,7 @@ func (psw *partitionStressWorkload) producer(partitionID int) {
 			return
 		default:
 			now := time.Now().UnixNano()
-			arg := sbase.AppendEntriesArg{
+			arg := storagebase.AppendEntriesArg{
 				Entries:   entries,
 				Timestamp: now,
 				RLogIdx:   now,
