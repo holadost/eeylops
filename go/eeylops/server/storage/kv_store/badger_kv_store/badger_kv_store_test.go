@@ -33,7 +33,7 @@ func TestBadgerKVStoreAddColumnFamily(t *testing.T) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 	if err := store.AddColumnFamily("cf1"); err != nil {
 		glog.Fatalf("Unable to add column family due to err: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestBadgerKVStoreAddColumnFamily(t *testing.T) {
 		glog.Fatalf("Unable to close the store due to err: %v", err)
 	}
 
-	store = NewBadgerKVStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts, nil)
 	err = store.AddColumnFamily(kDefaultCFName)
 	if err != kv_store.ErrKVStoreReservedColumnFamilyNames {
 		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
@@ -56,7 +56,7 @@ func TestBadgerKVStoreAddColumnFamily(t *testing.T) {
 		glog.Fatalf("Unable to close the store due to err: %v", err)
 	}
 
-	store = NewBadgerKVStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts, nil)
 	err = store.AddColumnFamily(kAllColumnFamiliesCFName)
 	if err != kv_store.ErrKVStoreReservedColumnFamilyNames {
 		glog.Fatalf("Tried to create reserved column family. Got err: %v", err)
@@ -66,7 +66,7 @@ func TestBadgerKVStoreAddColumnFamily(t *testing.T) {
 		glog.Fatalf("Unable to close the store due to err: %v", err)
 	}
 
-	store = NewBadgerKVStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts, nil)
 	err = store.AddColumnFamily("default-1") // - not allowed in CF names. Only letters, digits and underscores.
 	if err != kv_store.ErrKVStoreInvalidColumnFamilyName {
 		glog.Fatalf("Tried to create invalid column family. Got err: %v", err)
@@ -103,7 +103,7 @@ func TestBadgerKVStoreTxn(t *testing.T) {
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
 	opts.SyncWrites = true
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 
 	// Testing discard transaction.
 	glog.Infof("Testing batch put failures")
@@ -309,7 +309,7 @@ func TestBadgerKVStoreTxnIO(t *testing.T) {
 	opts.SyncWrites = true
 	cfName := "cf1"
 	createColumnFamily(testDir, cfName)
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 	doTransactionIO(store, cfName)
 }
 
@@ -324,7 +324,7 @@ func TestBadgerKVStoreConcurrentTxnIO(t *testing.T) {
 	opts.NumCompactors = 2
 	opts.SyncWrites = true
 	var cfNames []string
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 	numWorkers := 8
 	for ii := 0; ii < numWorkers; ii++ {
 		cfName := fmt.Sprintf("cf_%d", ii)
@@ -354,7 +354,7 @@ func TestBadgerKVStoreTxnConflict(t *testing.T) {
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
 	opts.SyncWrites = true
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 	ax := []byte("x")
 	ay := []byte("y")
 
@@ -443,7 +443,7 @@ func TestBadgerKVStore_BatchPutAndScan(t *testing.T) {
 	opts.CompactL0OnClose = false
 	opts.LoadBloomsOnOpen = false
 	var store kv_store.KVStore
-	store = NewBadgerKVStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts, nil)
 	cfName := "offset"
 	err := store.AddColumnFamily(cfName)
 	if err != nil {
@@ -485,7 +485,7 @@ func TestBadgerKVStore_BatchPutAndScan(t *testing.T) {
 
 	// Benchmark batch gets!
 	glog.Infof("Benchmarking batch gets")
-	store = NewBadgerKVStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts, nil)
 	var sk []byte
 	startTime := time.Now()
 	for ii := 0; ii < numIters; ii++ {
@@ -509,7 +509,7 @@ func TestBadgerKVStore_BatchPutAndScan(t *testing.T) {
 
 	// Benchmark scans!
 	glog.Infof("Benchmarking scans")
-	store = NewBadgerKVStore(testDir, opts)
+	store = NewBadgerKVStore(testDir, opts, nil)
 	startTime = time.Now()
 	for ii := 0; ii < numIters; ii++ {
 		scanner, err := store.NewScanner(cfName, sk, false)
@@ -541,7 +541,7 @@ func doStoreSingleActorIO(testDir string, cf string) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 	defer store.Close()
 	doStoreIO(store, cf)
 }
@@ -553,7 +553,7 @@ func doStoreMultiConcurrentActorIO(testDir string, numWorkers int) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 	defer store.Close()
 	wg := sync.WaitGroup{}
 	workload := func(idx int) {
@@ -891,7 +891,7 @@ func createColumnFamily(testDir string, cfname string) {
 	opts.SyncWrites = true
 	opts.VerifyValueChecksum = true
 	opts.NumCompactors = 2
-	store := NewBadgerKVStore(testDir, opts)
+	store := NewBadgerKVStore(testDir, opts, nil)
 	defer store.Close()
 	if err := store.AddColumnFamily(cfname); err != nil {
 		glog.Fatalf("Unable to add column family due to err: %v", err)

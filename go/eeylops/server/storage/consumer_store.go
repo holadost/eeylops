@@ -64,7 +64,7 @@ func (cs *ConsumerStore) initialize() {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.LoadBloomsOnOpen = false
-	cs.kvStore = bkv.NewBadgerKVStore(cs.csDir, opts)
+	cs.kvStore = bkv.NewBadgerKVStore(cs.csDir, opts, cs.logger)
 	cs.addCfsIfNotExists()
 
 	// Find the last replicated log index.

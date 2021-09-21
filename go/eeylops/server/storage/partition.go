@@ -777,7 +777,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 		}
 		opts := segments.KVStoreSegmentOpts{
 			RootDir:     p.getSegmentDirectory(segmentID),
-			Logger:      p.logger,
+			Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("Segment: %d", segmentID), p.logger),
 			Topic:       p.topicName,
 			PartitionID: uint(p.partitionID),
 			TTLSeconds:  p.ttlSeconds,
@@ -808,7 +808,7 @@ func (p *Partition) createNewSegmentUnsafe() {
 
 	opts := segments.KVStoreSegmentOpts{
 		RootDir:     p.getSegmentDirectory(int(segID)),
-		Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("segment-%d", segID), p.logger),
+		Logger:      logging.NewPrefixLoggerWithParent(fmt.Sprintf("Segment: %d", segID), p.logger),
 		Topic:       p.topicName,
 		PartitionID: uint(p.partitionID),
 		TTLSeconds:  p.ttlSeconds,

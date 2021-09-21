@@ -78,7 +78,7 @@ func NewKVStoreSegment(opts *KVStoreSegmentOpts) (*KVStoreSegment, error) {
 	seg.rootDir = opts.RootDir
 	// Set segment ID as root directory for now since we still haven't initialized the segment metadata.
 	if opts.Logger == nil {
-		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment:%s", opts.RootDir))
+		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment-%s", opts.RootDir))
 	} else {
 		seg.logger = opts.Logger
 	}
@@ -88,7 +88,7 @@ func NewKVStoreSegment(opts *KVStoreSegmentOpts) (*KVStoreSegment, error) {
 	seg.initialize()
 	// Reinitialize logger with correct segment id.
 	if opts.Logger == nil {
-		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment:%d", seg.ID()))
+		seg.logger = logging.NewPrefixLogger(fmt.Sprintf("segment: %d", seg.ID()))
 	}
 	return seg, nil
 }
@@ -848,13 +848,11 @@ func (seg *KVStoreSegment) open() {
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.CompactL0OnClose = false
 	opts.LoadBloomsOnOpen = true
-	opts.Logger = seg.logger
 	if seg.metadata.Immutable {
 		opts.ReadOnly = true
 		opts.NumMemtables = 0
 	}
-	opts.Logger = seg.logger
-	seg.dataDB = bkv.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts)
+	seg.dataDB = bkv.NewBadgerKVStore(path.Join(seg.rootDir, dataDirName), opts, seg.logger)
 
 	// Create column families.
 	cfs := []string{kOffsetColumnFamily, kTimestampIndexColumnFamily, kMiscColumnFamily}
@@ -944,6 +942,6 @@ func (seg *KVStoreSegment) open() {
 		}
 		itr.Close()
 	}
-	seg.logger.Infof("First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
+	seg.logger.VInfof(1, "First Message Timestamp: %d, Last Message Timestamp: %d, Next Offset: %d, "+
 		"Last RLog Index: %d", seg.firstMsgTs, seg.lastMsgTs, seg.nextOffset, seg.lastRLogIdx)
 }

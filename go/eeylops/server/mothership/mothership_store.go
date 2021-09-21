@@ -67,7 +67,8 @@ func (mss *MothershipStore) initialize() {
 	opts.Compression = 0
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
-	mss.kvStore = bkv.NewBadgerKVStore(mss.tsDir, opts)
+	mss.kvStore = bkv.NewBadgerKVStore(mss.tsDir, opts,
+		logging.NewPrefixLoggerWithParent("MothershipStore", mss.logger))
 	mss.addCfsIfNotExists()
 
 	// Initialize replicated log index, next topic ID and last logical timestamp.

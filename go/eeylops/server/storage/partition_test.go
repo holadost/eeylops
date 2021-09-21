@@ -229,6 +229,54 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 	glog.Infof("TestPartitionNewSegmentCreation finished successfully")
 }
 
+func TestPartitionNewSegmentCreationSizeThreshold(t *testing.T) {
+	testutil.LogTestMarker("TestPartitionNewSegmentCreationSizeThreshold")
+	testDir := testutil.CreateFreshTestDir("TestPartitionNewSegmentCreationSizeThreshold")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationSizeStrategy))
+	flag.Set("segment_size_threshold_bytes", strconv.Itoa(1024*1024*1024))
+	expiredSegIntervalSecs := time.Second
+	opts := PartitionOpts{
+		TopicName:                      "topic1",
+		PartitionID:                    1,
+		RootDirectory:                  testDir,
+		ExpiredSegmentPollIntervalSecs: int(expiredSegIntervalSecs / time.Second),
+		LiveSegmentPollIntervalSecs:    0,
+		NumRecordsPerSegmentThreshold:  0,
+		MaxScanSizeBytes:               0,
+		SegmentSizeThreshold:           1024 * 100, // 100MB
+		TTLSeconds:                     86400 * 7,
+	}
+	p := NewPartition(opts)
+	batchSize := 10
+	numIters := 150
+	numSegs := 5
+	data := make([]byte, 1024*1024)
+	rand.Read(data)
+	var values [][]byte
+	for ii := 0; ii < batchSize; ii++ {
+		values = append(values, data)
+	}
+	for ii := 0; ii < numSegs; ii++ {
+		time.Sleep(3 * time.Second)
+		glog.Infof("Appending entries to partition. This should be one segment. Seg Iter: %d", ii)
+		for jj := 0; jj < numIters; jj++ {
+			now := time.Now().UnixNano()
+			parg := storagebase.AppendEntriesArg{
+				Entries:   values,
+				Timestamp: now,
+				RLogIdx:   now / (1000),
+			}
+			pret := p.Append(context.Background(), &parg)
+			if pret.Error != nil {
+				glog.Fatalf("Append failed due to err: %s", pret.Error.Error())
+			}
+		}
+	}
+	if len(p.segments) != numSegs && len(p.segments) != (numSegs+1) {
+		glog.Fatalf("Expected to find %d-%d segments but got %d segments", numSegs, numSegs+1, len(p.segments))
+	}
+}
+
 func TestPartitionScan(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionScan")
 	testDir := testutil.CreateTestDir(t, "TestPartitionScan")

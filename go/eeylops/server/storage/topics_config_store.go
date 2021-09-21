@@ -62,7 +62,7 @@ func (tcs *TopicsConfigStore) initialize() {
 	opts.TableLoadingMode = options.FileIO
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.LoadBloomsOnOpen = false
-	tcs.kvStore = bkv.NewBadgerKVStore(tcs.tsDir, opts)
+	tcs.kvStore = bkv.NewBadgerKVStore(tcs.tsDir, opts, tcs.logger)
 	tcs.addCfsIfNotExists()
 
 	// Initialize internal maps.

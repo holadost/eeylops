@@ -6,6 +6,7 @@ import (
 	"eeylops/util/logging"
 	"github.com/dgraph-io/badger/v2"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -22,8 +23,13 @@ type BadgerKVStore struct {
 	internalStore *internalBadgerKVStore
 }
 
-func NewBadgerKVStore(rootDir string, opts badger.Options) *BadgerKVStore {
-	logger := logging.NewPrefixLogger("badger_cf_store")
+func NewBadgerKVStore(rootDir string, opts badger.Options, logger *logging.PrefixLogger) *BadgerKVStore {
+	if logger == nil {
+		logger = logging.NewPrefixLogger("BadgerKVStore")
+		if opts.Logger == nil {
+			opts.Logger = logger
+		}
+	}
 	return newBadgerKVStore(rootDir, logger, opts)
 }
 
@@ -185,8 +191,24 @@ func (ikvStore *internalBadgerKVStore) GetDataDir() string {
 
 // Size returns the size of the KV store in bytes.
 func (ikvStore *internalBadgerKVStore) Size() int64 {
-	a, b := ikvStore.db.Size()
-	return a + b
+	var lsmSize, vlogSize int64
+	err := filepath.Walk(ikvStore.rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		ext := filepath.Ext(path)
+		switch ext {
+		case ".sst":
+			lsmSize += info.Size()
+		case ".vlog":
+			vlogSize += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		ikvStore.logger.Fatalf("Unable to get size of database due to err: %v", err)
+	}
+	return lsmSize + vlogSize
 }
 
 // AddColumnFamily adds the column family(if it does not exist) to the KV store.
