@@ -11,7 +11,6 @@ import (
 	"eeylops/util/logging"
 	"flag"
 	"fmt"
-	"github.com/golang/glog"
 	"github.com/hashicorp/raft"
 	"path"
 	"time"
@@ -369,7 +368,7 @@ func (broker *Broker) internalCommit(ctx context.Context, cm base.CommitMessage)
 	}
 	tmpResp := broker.fsm.Apply(&log)
 	if tmpResp == nil {
-		glog.Fatalf("Fatal")
+		broker.logger.Fatalf("Got nil response from FSM. Expected FSM response!")
 	}
 	fsmResp, ok := tmpResp.(*base.FSMResponse)
 	if !ok {
