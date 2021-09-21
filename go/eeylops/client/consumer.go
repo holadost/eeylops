@@ -22,7 +22,7 @@ type ConsumerConfig struct {
 	// Consumer ID. This is a compulsory parameter.
 	ConsumerID string
 	// Name of the topic. This is a compulsory parameter.
-	TopicName string
+	TopicID base.TopicIDType
 	// Partition ID. This is a compulsory parameter.
 	PartitionID int
 	// Flag to indicate whether the consumer must perform auto commit. Defaults to false.
@@ -39,9 +39,6 @@ type ConsumerConfig struct {
 	// strictly < EndEpochNs.
 	EndEpochNs int64
 
-	// Internal fields.
-	// Topic ID.
-	topicID base.TopicIDType
 	// RPC client.
 	rpcClient comm.EeylopsServiceClient
 }
@@ -50,8 +47,8 @@ func (cc *ConsumerConfig) WithConsumerID(id string) {
 	cc.ConsumerID = id
 }
 
-func (cc *ConsumerConfig) WithTopicName(name string) {
-	cc.TopicName = name
+func (cc *ConsumerConfig) WithTopicID(id base.TopicIDType) {
+	cc.TopicID = id
 }
 
 func (cc *ConsumerConfig) WithPartitionID(id int) {
@@ -75,10 +72,10 @@ func (cc *ConsumerConfig) WithEndEpochNs(ts int64) {
 }
 
 // DefaultConsumerConfig is a helper function that returns the default consumer config with the given parameters.
-func DefaultConsumerConfig(consumerID string, topicName string, partitionID int) ConsumerConfig {
+func DefaultConsumerConfig(consumerID string, topicID base.TopicIDType, partitionID int) ConsumerConfig {
 	cc := ConsumerConfig{
 		ConsumerID:              consumerID,
-		TopicName:               topicName,
+		TopicID:                 topicID,
 		PartitionID:             partitionID,
 		AutoCommit:              false,
 		ResumeFromLastCommitted: true,
@@ -110,7 +107,7 @@ type Consumer struct {
 
 func newConsumer(cfg *ConsumerConfig) *Consumer {
 	consumer := &Consumer{
-		topicID:                 cfg.topicID,
+		topicID:                 cfg.TopicID,
 		partitionID:             cfg.PartitionID,
 		rpcClient:               cfg.rpcClient,
 		autoCommit:              cfg.AutoCommit,

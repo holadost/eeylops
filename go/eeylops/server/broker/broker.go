@@ -102,6 +102,23 @@ func (broker *Broker) Produce(ctx context.Context, req *comm.ProduceRequest) *co
 		broker.logger.VInfof(0, "Invalid partition ID: %d. Req: %v", req.GetPartitionId(), req)
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "invalid partition ID")
 	}
+
+	// Check if topic and partition exist.
+	tpc, err := broker.brokerStore.GetTopicByID(topicID)
+	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return makeResponse(comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("did not find topic id: %d", topicID))
+		} else {
+			return makeResponse(comm.Error_KErrBackend, nil,
+				fmt.Sprintf("unable to get topic id: %d", topicID))
+		}
+	}
+	if !util.ContainsInt(tpc.PartitionIDs, int(req.GetPartitionId())) {
+		return makeResponse(comm.Error_KErrPartitionNotFound, nil,
+			fmt.Sprintf("did not find topic id: %d, partition id: %d", topicID, req.GetPartitionId()))
+	}
+
 	// TODO: Go through replication controller.
 	appendCmd := base.AppendMessage{
 		TopicID:     topicID,
@@ -188,6 +205,22 @@ func (broker *Broker) Consume(ctx context.Context, req *comm.ConsumeRequest) *co
 			"Either StartOffset, StartTimestamp or ResumeFromLastCommittedOffset must be provided")
 		return makeResponse(nil, comm.Error_KErrInvalidArg, nil,
 			"either StartOffset, StartTimestamp or ResumeFromLastCommittedOffset must be provided")
+	}
+
+	// Check if topic and partition exist.
+	tpc, err := broker.brokerStore.GetTopicByID(topicID)
+	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return makeResponse(nil, comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("did not find topic id: %d", topicID))
+		} else {
+			return makeResponse(nil, comm.Error_KErrBackend, nil,
+				fmt.Sprintf("unable to get topic id: %d", topicID))
+		}
+	}
+	if !util.ContainsInt(tpc.PartitionIDs, int(req.GetPartitionId())) {
+		return makeResponse(nil, comm.Error_KErrPartitionNotFound, nil,
+			fmt.Sprintf("did not find topic id: %d, partition id: %d", topicID, req.GetPartitionId()))
 	}
 
 	// Fetch partition.
@@ -295,8 +328,7 @@ func (broker *Broker) internalCommit(ctx context.Context, cm base.CommitMessage)
 		resp.Error = base.MakeErrorProto(ec, err, msg)
 		return &resp
 	}
-	topicID := cm.TopicID
-	if topicID == 0 {
+	if cm.TopicID == 0 {
 		broker.logger.VInfof(1, "Invalid topic name. Req: %v", cm)
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "invalid topic ID")
 	}
@@ -304,6 +336,23 @@ func (broker *Broker) internalCommit(ctx context.Context, cm base.CommitMessage)
 		broker.logger.VInfof(1, "Invalid partition ID: %d. Req: %v", cm.PartitionID, cm)
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "invalid partition ID")
 	}
+
+	// Check if topic and partition exist.
+	tpc, err := broker.brokerStore.GetTopicByID(cm.TopicID)
+	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return makeResponse(comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("did not find topic id: %d", cm.TopicID))
+		} else {
+			return makeResponse(comm.Error_KErrBackend, nil,
+				fmt.Sprintf("unable to get topic id: %d", cm.TopicID))
+		}
+	}
+	if !util.ContainsInt(tpc.PartitionIDs, int(cm.PartitionID)) {
+		return makeResponse(comm.Error_KErrPartitionNotFound, nil,
+			fmt.Sprintf("did not find topic id: %d, partition id: %d", cm.TopicID, cm.PartitionID))
+	}
+
 	// TODO: This must go through the replication controller and we must be the leader.
 	cmd := base.Command{
 		CommandType:   base.KCommitCommand,
@@ -369,6 +418,22 @@ func (broker *Broker) GetLastCommitted(ctx context.Context, req *comm.LastCommit
 		return makeResponse(-1, comm.Error_KErrInvalidArg, nil, "invalid partition")
 	}
 
+	// Check if topic and partition exist.
+	tpc, err := broker.brokerStore.GetTopicByID(topicID)
+	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return makeResponse(-1, comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("did not find topic id: %d", topicID))
+		} else {
+			return makeResponse(-1, comm.Error_KErrBackend, nil,
+				fmt.Sprintf("unable to get topic id: %d", topicID))
+		}
+	}
+	if !util.ContainsInt(tpc.PartitionIDs, int(req.GetPartitionId())) {
+		return makeResponse(-1, comm.Error_KErrPartitionNotFound, nil,
+			fmt.Sprintf("did not find topic id: %d, partition id: %d", topicID, req.GetPartitionId()))
+	}
+
 	// Sync if required.
 	if req.GetSync() {
 		err := broker.doSyncOp()
@@ -416,7 +481,8 @@ func (broker *Broker) GetLastCommitted(ctx context.Context, req *comm.LastCommit
 	return makeResponse(offset, comm.Error_KNoError, nil, "")
 }
 
-func (broker *Broker) RegisterConsumer(ctx context.Context, req *comm.RegisterConsumerRequest) *comm.RegisterConsumerResponse {
+func (broker *Broker) RegisterConsumer(ctx context.Context,
+	req *comm.RegisterConsumerRequest) *comm.RegisterConsumerResponse {
 	makeResponse := func(ec comm.Error_ErrorCodes, err error, msg string) *comm.RegisterConsumerResponse {
 		var resp comm.RegisterConsumerResponse
 		resp.Error = base.MakeErrorProto(ec, err, msg)
@@ -435,6 +501,22 @@ func (broker *Broker) RegisterConsumer(ctx context.Context, req *comm.RegisterCo
 	if req.GetPartitionId() <= 0 {
 		broker.logger.VInfof(1, "Invalid argument. Consumer ID must be provided")
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "invalid partition ID")
+	}
+
+	// Check if topic and partition exist.
+	tpc, err := broker.brokerStore.GetTopicByID(topicID)
+	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return makeResponse(comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("did not find topic id: %d", topicID))
+		} else {
+			return makeResponse(comm.Error_KErrBackend, nil,
+				fmt.Sprintf("unable to get topic id: %d", topicID))
+		}
+	}
+	if !util.ContainsInt(tpc.PartitionIDs, int(req.GetPartitionId())) {
+		return makeResponse(comm.Error_KErrPartitionNotFound, nil,
+			fmt.Sprintf("did not find topic id: %d, partition id: %d", topicID, req.GetPartitionId()))
 	}
 
 	// Populate command and log.
@@ -570,6 +652,18 @@ func (broker *Broker) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 		return makeResponse(comm.Error_KErrInvalidArg, nil, "Invalid topic ID")
 	}
 
+	// Check if topic exists.
+	_, err := broker.brokerStore.GetTopicByID(topicID)
+	if err != nil {
+		if err == storage.ErrTopicNotFound {
+			return makeResponse(comm.Error_KErrTopicNotFound, nil,
+				fmt.Sprintf("did not find topic id: %d", topicID))
+		} else {
+			return makeResponse(comm.Error_KErrBackend, nil,
+				fmt.Sprintf("unable to get topic id: %d", topicID))
+		}
+	}
+
 	// TODO: This must go through the replication controller and we must be the leader.
 	rmTopicMsg := base.RemoveTopicMessage{TopicID: topicID}
 	cmd := base.Command{
@@ -594,8 +688,8 @@ func (broker *Broker) RemoveTopic(ctx context.Context, req *comm.RemoveTopicRequ
 	}
 	if fsmResp.CommandType != base.KRemoveTopicCommand {
 		broker.logger.Fatalf("Got an unexpected command type for add topic. Expected: %s(%d), "+
-			"Got: %s(%d)", base.KRemoveTopicCommand.ToString(), base.KRemoveTopicCommand, fsmResp.CommandType.ToString(),
-			fsmResp.CommandType)
+			"Got: %s(%d)", base.KRemoveTopicCommand.ToString(), base.KRemoveTopicCommand,
+			fsmResp.CommandType.ToString(), fsmResp.CommandType)
 	}
 	if fsmResp.Error != nil {
 		if fsmResp.Error == storage.ErrTopicNotFound {

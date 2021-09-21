@@ -103,8 +103,8 @@ func TestClient_AddRemoveTopic(t *testing.T) {
 
 func TestClient_ProducerConsumer(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU() * 2)
-	testutil.LogTestMarker("TestClient_AddRemoveTopic")
-	testDirPath := testutil.CreateFreshTestDir("TestClient_AddRemoveTopic")
+	testutil.LogTestMarker("TestClient_ProducerConsumer")
+	testDirPath := testutil.CreateFreshTestDir("TestClient_ProducerConsumer")
 	addr := NodeAddress{
 		Host: "0.0.0.0",
 		Port: 25002,
@@ -133,9 +133,11 @@ func TestClient_ProducerConsumer(t *testing.T) {
 	// Produce and consume from non-existent topics and partitions.
 	produceNonExistentTopic := func() {
 		glog.Infof("Checking if producer for non existent topics return error")
-		_, err := client.NewProducer(generateTopicName(2), 1)
-		if err == nil {
-			glog.Fatalf("Expected an error but got nil")
+		producer, err := client.NewProducer(2, 1)
+		var data [][]byte
+		data = append(data, []byte("data"))
+		if err := producer.Produce(data); err == nil {
+			glog.Fatalf("Expected an error but got: %v", err)
 		}
 		glog.Infof("Received error while attempting to register producer to a non-existent topic: %v", err)
 	}
@@ -143,7 +145,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 		glog.Infof("Checking if consumer for non existent topics return error")
 		cfg := ConsumerConfig{
 			ConsumerID:              "foobar",
-			TopicName:               generateTopicName(2),
+			TopicID:                 2,
 			PartitionID:             1,
 			AutoCommit:              true,
 			ResumeFromLastCommitted: true,
@@ -152,18 +154,19 @@ func TestClient_ProducerConsumer(t *testing.T) {
 		}
 		_, err := client.NewConsumer(cfg)
 		if err == nil {
-			glog.Fatalf("Expected an error but got nil")
+			glog.Fatalf("expected error but got nil")
 		}
-		glog.Infof("Received error while attempting to register producer to a non-existent topic: %v", err)
 	}
 	produceNonExistentTopic()
 	consumeNonExistentTopic()
 
 	// Produce and consume from non-existent partitions.
 	produceNonExistentPartition := func() {
-		_, err := client.NewProducer(generateTopicName(1), 100)
-		if err == nil {
-			glog.Fatalf("Expected an error but got nil")
+		producer, _ := client.NewProducer(1, 100)
+		var data [][]byte
+		data = append(data, []byte("data"))
+		if err := producer.Produce(data); err == nil {
+			glog.Fatalf("Expected an error but got: %v", err)
 		}
 		glog.Infof("Received error while attempting to register producer to a non-existent topic: %v", err)
 	}
@@ -171,7 +174,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 		glog.Infof("Checking if consumer for non existent partition return error")
 		cfg := ConsumerConfig{
 			ConsumerID:              "foobar",
-			TopicName:               generateTopicName(1),
+			TopicID:                 1,
 			PartitionID:             100,
 			AutoCommit:              true,
 			ResumeFromLastCommitted: true,
@@ -203,7 +206,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 		wg.Add(1)
 		go func(prtID int) {
 			glog.Infof("Starting producer on partition: %d", prtID)
-			producer, err := client.NewProducer(testTopicName, prtID)
+			producer, err := client.NewProducer(1, prtID)
 			if err != nil {
 				glog.Fatalf("Unable to create producer due to err: %v", err)
 			}
@@ -234,7 +237,7 @@ func TestClient_ProducerConsumer(t *testing.T) {
 			glog.Infof("Starting consumer on partition: %d", prtID)
 			cfg := ConsumerConfig{
 				ConsumerID:              "foobar" + "-" + strconv.Itoa(prtID),
-				TopicName:               generateTopicName(1),
+				TopicID:                 1,
 				PartitionID:             prtID,
 				AutoCommit:              true,
 				ResumeFromLastCommitted: true,

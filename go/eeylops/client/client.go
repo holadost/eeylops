@@ -16,7 +16,7 @@ type NodeAddress struct {
 	Port int
 }
 
-// Eeylops client.
+// Client is the default eeylops client.
 type Client struct {
 	rpcClient comm.EeylopsServiceClient
 	cc        *grpc.ClientConn
@@ -34,18 +34,14 @@ func NewClient(addr NodeAddress) *Client {
 	return &client
 }
 
+// Close the client.
+func (client *Client) Close() {
+	client.cc.Close()
+}
+
 // NewProducer returns a new Producer instance that can be used to publish messages to a topic and partition.
-func (client *Client) NewProducer(topicName string, partitionID int) (*Producer, error) {
-	topicConfig, err := client.GetTopic(topicName)
-	if err != nil {
-		return nil, err
-	}
-	if !isPartitionPresentInTopicConfig(topicConfig, partitionID) {
-		return nil, newError(comm.Error_KErrPartitionNotFound,
-			fmt.Sprintf("[%s] : partition: %d is not present in topic partitions: %v",
-				comm.Error_KErrPartitionNotFound.String(), partitionID, topicConfig.PartitionIDs))
-	}
-	return newProducer(topicConfig.ID, partitionID, client.rpcClient), nil
+func (client *Client) NewProducer(topicID base.TopicIDType, partitionID int) (*Producer, error) {
+	return newProducer(topicID, partitionID, client.rpcClient), nil
 }
 
 // NewConsumer returns a new Consumer instance that can be used to subscribe to a topic and partition.
@@ -60,21 +56,10 @@ func (client *Client) NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 			glog.Fatalf("Either StartEpochNs or ResumeFromLastCommitted must be set")
 		}
 	}
-	topicConfig, err := client.GetTopic(cfg.TopicName)
-	if err != nil {
-		return nil, err
-	}
-	if !isPartitionPresentInTopicConfig(topicConfig, cfg.PartitionID) {
-		return nil, newError(comm.Error_KErrPartitionNotFound,
-			fmt.Sprintf("[%s] : partition: %d is not present in topic partitions: %v",
-				comm.Error_KErrPartitionNotFound.String(), cfg.PartitionID, topicConfig.PartitionIDs))
-	}
-	err = client.registerConsumer(cfg.ConsumerID, topicConfig.ID, cfg.PartitionID)
-	if err != nil {
+	if err := client.registerConsumer(cfg.ConsumerID, cfg.TopicID, cfg.PartitionID); err != nil {
 		return nil, err
 	}
 	cfg.rpcClient = client.rpcClient
-	cfg.topicID = topicConfig.ID
 	return newConsumer(&cfg), nil
 }
 
@@ -155,43 +140,6 @@ func (client *Client) RemoveTopic(topicName string) error {
 	return util.RetryWithContext(ctx, fn, createBackoffFn())
 }
 
-// Close the client.
-func (client *Client) Close() {
-	client.cc.Close()
-}
-
-// registerConsumer registers the given consumer for a topic and partition with eeylops.
-func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDType, partitionId int) error {
-	var req comm.RegisterConsumerRequest
-	req.ConsumerId = consumerId
-	req.TopicId = int32(topicId)
-	req.PartitionId = int32(partitionId)
-	// TODO: Perform RPC on leader
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
-	defer cancel()
-	fn := func(attempt int) (bool, error) {
-		resp, err := client.rpcClient.RegisterConsumer(ctx, &req)
-		if err != nil {
-			return true, newError(comm.Error_KErrTransport, err.Error())
-		}
-		if resp.GetError().GetErrorCode() != comm.Error_KNoError {
-			errProto := resp.GetError()
-			switch errProto.GetErrorCode() {
-			case comm.Error_KErrNotLeader:
-				// TODO: Find the correct leader here.
-				return true, newError(comm.Error_KErrNotLeader, "unable to determine leader")
-			case comm.Error_KErrBackend:
-				// TODO: Find the correct leader here.
-				return true, newError(comm.Error_KErrBackend, "backend error")
-			default:
-				return false, newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
-			}
-		}
-		return false, nil
-	}
-	return util.RetryWithContext(ctx, fn, createBackoffFn())
-}
-
 // GetTopic fetches the given topic configuration from eeylops.
 func (client *Client) GetTopic(topicName string) (base.TopicConfig, error) {
 	var req comm.GetTopicRequest
@@ -232,6 +180,38 @@ func (client *Client) GetTopic(topicName string) (base.TopicConfig, error) {
 	}
 	retErr := util.RetryWithContext(ctx, fn, createBackoffFn())
 	return topicConfig, retErr
+}
+
+// registerConsumer registers the given consumer for a topic and partition with eeylops.
+func (client *Client) registerConsumer(consumerId string, topicId base.TopicIDType, partitionId int) error {
+	var req comm.RegisterConsumerRequest
+	req.ConsumerId = consumerId
+	req.TopicId = int32(topicId)
+	req.PartitionId = int32(partitionId)
+	// TODO: Perform RPC on leader
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeoutSecs)*time.Second)
+	defer cancel()
+	fn := func(attempt int) (bool, error) {
+		resp, err := client.rpcClient.RegisterConsumer(ctx, &req)
+		if err != nil {
+			return true, newError(comm.Error_KErrTransport, err.Error())
+		}
+		if resp.GetError().GetErrorCode() != comm.Error_KNoError {
+			errProto := resp.GetError()
+			switch errProto.GetErrorCode() {
+			case comm.Error_KErrNotLeader:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrNotLeader, "unable to determine leader")
+			case comm.Error_KErrBackend:
+				// TODO: Find the correct leader here.
+				return true, newError(comm.Error_KErrBackend, "backend error")
+			default:
+				return false, newError(errProto.GetErrorCode(), errProto.GetErrorMsg())
+			}
+		}
+		return false, nil
+	}
+	return util.RetryWithContext(ctx, fn, createBackoffFn())
 }
 
 // getLastCommitted fetches the last committed offset by a consumer for a topic and partition.
