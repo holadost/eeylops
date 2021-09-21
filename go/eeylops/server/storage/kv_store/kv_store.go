@@ -36,6 +36,8 @@ type KVStore interface {
 	NewScanner(cf string, startKey []byte, reverse bool) (Scanner, error)
 	// NewTransaction returns a new Transaction.
 	NewTransaction() Transaction
+	// GC collects garbage and reclaims space(if possible).
+	GC() error
 }
 
 type Scanner interface {

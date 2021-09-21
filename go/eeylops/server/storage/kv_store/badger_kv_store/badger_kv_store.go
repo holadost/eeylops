@@ -108,6 +108,10 @@ func (kvStore *BadgerKVStore) NewTransaction() kv_store.Transaction {
 	return newBadgerKVStoreTransaction(kvStore.internalStore)
 }
 
+func (kvStore *BadgerKVStore) GC() error {
+	return kvStore.internalStore.GC()
+}
+
 /*************************************************** INTERNAL CF STORE ************************************************/
 type internalBadgerKVStore struct {
 	db        *badger.DB
@@ -183,6 +187,20 @@ func (ikvStore *internalBadgerKVStore) initialize(opts badger.Options) {
 		ikvStore.cfMap[cfName] = struct{}{}
 	}
 	ikvStore.logger.Infof("Found %d column families in KV store", len(ikvStore.cfMap))
+}
+
+func (ikvStore *internalBadgerKVStore) GC() error {
+	err := ikvStore.db.RunValueLogGC(0.5)
+	if err != nil {
+		// ErrNoRewrite is returned if no space was reclaimed. ErrRejected is returned if a ValueLogGC is already
+		// going on. Both can be safely ignored.
+		if (err == badger.ErrNoRewrite) || (err == badger.ErrRejected) {
+			return nil
+		}
+		ikvStore.logger.Errorf("Unable to perform value log GC due to err: %v", err)
+		return kv_store.ErrKVStoreBackend
+	}
+	return nil
 }
 
 func (ikvStore *internalBadgerKVStore) GetDataDir() string {

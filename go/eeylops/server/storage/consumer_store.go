@@ -232,6 +232,8 @@ func (cs *ConsumerStore) RemoveNonExistentTopicConsumers(existentTopicIds []base
 	}
 	if totalKeysRemoved > 0 {
 		cs.logger.Infof("Removed %d keys from the consumer store", totalKeysRemoved)
+		// Start a value log GC to see if any space can be reclaimed!
+		go cs.kvStore.GC()
 	}
 }
 
