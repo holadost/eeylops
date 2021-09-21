@@ -27,6 +27,10 @@ const KMaxScanSizeBytes = 15 * 1024 * 1024 // 15MB
 const KExpiredSegmentDirSuffix = "-expired"
 const KSegmentSizeThreshold = 40 * (1024 * 1024 * 1024) // 40GB
 
+const KSegmentCreationCountStrategy = 1
+const KSegmentCreationSizeStrategy = 2
+const KSegmentCreationCountAndSizeStrategy = 3
+
 var (
 	FlagExpiredSegmentMonitorIntervalSecs = flag.Int("partition_exp_segment_monitor_interval_seconds", 600,
 		"Expired segment monitor interval seconds")
@@ -38,6 +42,10 @@ var (
 		"Max scan size in bytes. Defaults to 15MB")
 	FlagSegmentSizeThreshold = flag.Int64("segment_size_threshold_bytes", KSegmentSizeThreshold,
 		"Segment size threshold. Defaults to 40GB")
+	FlagSegmentCreationStrategy = flag.Int64("segment_creation_strategy", KSegmentCreationSizeStrategy,
+		fmt.Sprintf("The strategy to use for segment creation. The supported options are: Count(%d), "+
+			"Size(%d), Count and Size(%d)", KSegmentCreationCountStrategy, KSegmentCreationSizeStrategy,
+			KSegmentCreationCountAndSizeStrategy))
 )
 
 type Partition struct {
@@ -98,6 +106,9 @@ type PartitionOpts struct {
 
 	// The number of records per segment. This is an optional parameter.
 	NumRecordsPerSegmentThreshold int
+
+	// Segment size threshold
+	SegmentSizeThreshold int64
 
 	// Size threshold bytes.
 	SizeThresholdBytes int64
@@ -160,6 +171,15 @@ func NewPartition(opts PartitionOpts) *Partition {
 		p.numRecordsPerSegment = *FlagNumRecordsInSegment
 	} else {
 		p.numRecordsPerSegment = opts.NumRecordsPerSegmentThreshold
+	}
+
+	if opts.SegmentSizeThreshold <= 0 {
+		if *FlagSegmentSizeThreshold <= 0 {
+			p.logger.Fatalf("Segment size threshold must be > 0 bytes")
+		}
+		p.segmentSizeThresholdBytes = *FlagSegmentSizeThreshold
+	} else {
+		p.segmentSizeThresholdBytes = opts.SegmentSizeThreshold
 	}
 
 	if opts.MaxScanSizeBytes <= 0 {
@@ -685,21 +705,43 @@ func (p *Partition) shouldCreateNewSegment() bool {
 	if p.closed {
 		return false
 	}
+	countStrategy := func(seg segments.Segment) bool {
+		metadata := seg.GetMetadata()
+		numRecords := metadata.EndOffset - metadata.StartOffset + 1
+		if numRecords >= base.Offset(p.numRecordsPerSegment) {
+			p.logger.Infof("Current live segment records(%d) has reached/exceeded threshold(%d). "+
+				"New segment is required", numRecords, p.numRecordsPerSegment)
+			return true
+		}
+		return false
+	}
+	sizeStrategy := func(seg segments.Segment) bool {
+		size := seg.Size()
+		if seg.Size() >= p.segmentSizeThresholdBytes {
+			p.logger.Infof("Current live segment size(%d) has reached/exceeded threshold(%d). "+
+				"New segment is required", size, p.segmentSizeThresholdBytes)
+			return true
+		}
+		return false
+	}
 	seg := p.segments[len(p.segments)-1]
-	metadata := seg.GetMetadata()
-	numRecords := metadata.EndOffset - metadata.StartOffset + 1
-	if numRecords >= base.Offset(p.numRecordsPerSegment) {
-		p.logger.Infof("Current live segment records(%d) has reached/exceeded threshold(%d). "+
-			"New segment is required", numRecords, p.numRecordsPerSegment)
-		return true
+	switch *FlagSegmentCreationStrategy {
+	case KSegmentCreationCountStrategy:
+		return countStrategy(seg)
+	case KSegmentCreationSizeStrategy:
+		return sizeStrategy(seg)
+	case KSegmentCreationCountAndSizeStrategy:
+		if countStrategy(seg) {
+			return true
+		}
+		if sizeStrategy(seg) {
+			return true
+		}
+		return false
+	default:
+		p.logger.Fatalf("Invalid segment creation strategy: %d", *FlagSegmentCreationStrategy)
+		return false
 	}
-	size := seg.Size()
-	if seg.Size() >= p.segmentSizeThresholdBytes {
-		p.logger.Infof("Current live segment size(%d) has reached/exceeded threshold(%d). "+
-			"New segment is required", size, p.segmentSizeThresholdBytes)
-		return true
-	}
-	return false
 }
 
 // createNewSegmentSafe creates a new segment after acquiring the partitionCfgLock.

@@ -6,10 +6,12 @@ import (
 	storagebase "eeylops/server/storage/base"
 	"eeylops/server/storage/segments"
 	"eeylops/util/testutil"
+	"flag"
 	"fmt"
 	"github.com/golang/glog"
 	"math/rand"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -74,6 +76,7 @@ func loadDataBasicWithNewSegments(p *Partition, numSegments int, numValuesPerSeg
 
 func TestPartitionInitialize(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionInitialize")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationCountStrategy))
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -93,6 +96,7 @@ func TestPartitionInitialize(t *testing.T) {
 
 func TestPartitionReInitialize(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionReInitialize")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationCountStrategy))
 	for ii := 0; ii < 5; ii++ {
 		glog.Infof("\n\n\nIteration: %d", ii)
 		opts := PartitionOpts{
@@ -115,6 +119,7 @@ func TestPartitionReInitialize(t *testing.T) {
 
 func TestPartitionAppend(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionAppend")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationCountStrategy))
 	testDir := "/tmp/eeylops/TestPartitionAppend"
 	defer func() { _ = os.RemoveAll(testDir) }()
 	opts := PartitionOpts{
@@ -134,6 +139,7 @@ func TestPartitionAppend(t *testing.T) {
 
 func TestPartitionNewSegmentCreation(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionNewSegmentCreation")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationCountStrategy))
 	testDir := "/tmp/eeylops/TestPartitionNewSegmentCreation"
 	_ = os.RemoveAll(testDir)
 	opts := PartitionOpts{
@@ -226,6 +232,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 func TestPartitionScan(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionScan")
 	testDir := testutil.CreateTestDir(t, "TestPartitionScan")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationCountStrategy))
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
 		PartitionID:                    1,
@@ -350,6 +357,7 @@ func TestPartitionScan(t *testing.T) {
 func TestPartitionManager(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionManager")
 	testDir := testutil.CreateTestDir(t, "TestPartitionManager")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationCountStrategy))
 	totalValues := 500
 	numValuesPerBatch := 50
 	valueSizeBytes := 100
@@ -466,6 +474,7 @@ func TestPartitionManager(t *testing.T) {
 func TestPartitionScanTimestamp(t *testing.T) {
 	testutil.LogTestMarker("TestPartitionScanTimestamp")
 	testDir := testutil.CreateTestDir(t, "TestPartitionScanTimestamp")
+	flag.Set("segment_creation_strategy", strconv.Itoa(KSegmentCreationCountStrategy))
 	ttlSeconds := 30
 	opts := PartitionOpts{
 		TopicName:                      "topic1",
