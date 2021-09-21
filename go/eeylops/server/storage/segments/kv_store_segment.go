@@ -293,7 +293,11 @@ func (seg *KVStoreSegment) Scan(ctx context.Context, arg *ScanEntriesArg) *ScanE
 	}
 
 	// Scan the segment for all messages between start and end offset.
-	seg.scanMessages(arg, &ret, startOffset)
+	if arg.NumMessages > 100 {
+		seg.scanMessages(arg, &ret, startOffset)
+	} else {
+		seg.batchGetMessages(arg, &ret, startOffset)
+	}
 	return &ret
 }
 
@@ -551,6 +555,55 @@ func (seg *KVStoreSegment) computeStartOffsetForScan(arg *ScanEntriesArg, ret *S
 			arg.StartOffset, arg.StartTimestamp)
 	}
 	return startOffset, nil
+}
+
+// batchGetMessages is a helper method for Scan which scans messages from the segment from the given startOffset.
+// It ends the scan when arg.NumMessages is reached or arg.ScanSizeBytes is exceeded or if the requested timestamp is
+// lesser than arg.EndTimestamp.
+func (seg *KVStoreSegment) batchGetMessages(arg *ScanEntriesArg, ret *ScanEntriesRet, startOffset base.Offset) {
+	var tmpNumMsgs base.Offset
+	var endOffset base.Offset
+	tmpNumMsgs = base.Offset(arg.NumMessages)
+	nextOff := seg.getNextOffset()
+	if startOffset+tmpNumMsgs >= nextOff {
+		tmpNumMsgs = nextOff - startOffset
+	}
+	endOffset = startOffset + tmpNumMsgs - 1
+	txn := seg.dataDB.NewTransaction()
+	defer txn.Discard()
+	bytesScannedSoFar := int64(0)
+	for ii := startOffset; ii <= endOffset; ii++ {
+		val, err := txn.Get(&kv_store.KVStoreKey{
+			Key:          seg.offsetToKey(ii),
+			ColumnFamily: kOffsetColumnFamily,
+		})
+		if err != nil {
+			seg.logger.Errorf("Failed to scan offset due to scan backend err: %s", err.Error())
+			ret.Error = ErrSegmentBackend
+			ret.Values = nil
+			ret.NextOffset = -1
+			return
+		}
+		var msg Message
+		msg.InitializeFromRaw(val.Value)
+		if arg.ScanSizeBytes > 0 {
+			bytesScannedSoFar += int64(msg.GetBodySize())
+			if bytesScannedSoFar > arg.ScanSizeBytes {
+				break
+			}
+		}
+		if arg.EndTimestamp > 0 {
+			if msg.GetTimestamp() >= arg.EndTimestamp {
+				break
+			}
+		}
+		ret.Values = append(ret.Values, &storagebase.ScanValue{
+			Offset:    ii,
+			Value:     msg.GetBody(),
+			Timestamp: msg.GetTimestamp(),
+		})
+		ret.NextOffset = ii + 1
+	}
 }
 
 // scanMessages is a helper method for Scan which scans messages from the segment from the given startOffset. It ends

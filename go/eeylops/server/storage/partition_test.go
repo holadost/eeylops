@@ -133,6 +133,7 @@ func TestPartitionAppend(t *testing.T) {
 		TTLSeconds:                     86400 * 7,
 	}
 	p := NewPartition(opts)
+	defer p.Close()
 	loadDataBasic(p, 25, 0, 5)
 	glog.Infof("TestPartitionAppend finished successfully")
 }
@@ -153,6 +154,7 @@ func TestPartitionNewSegmentCreation(t *testing.T) {
 		TTLSeconds:                     86400 * 7,
 	}
 	p := NewPartition(opts)
+	defer p.Close()
 	loadDataBasicWithNewSegments(p, 10, 100)
 	segs := p.testOnlyFetchSegments(p.getSegmentsByOffset(10, 50))
 	if segs == nil || len(segs) != 1 {
@@ -247,6 +249,7 @@ func TestPartitionNewSegmentCreationSizeThreshold(t *testing.T) {
 		TTLSeconds:                     86400 * 7,
 	}
 	p := NewPartition(opts)
+	defer p.Close()
 	batchSize := 10
 	numIters := 150
 	numSegs := 5
@@ -292,6 +295,7 @@ func TestPartitionScan(t *testing.T) {
 		TTLSeconds:                     86400 * 7,
 	}
 	p := NewPartition(opts)
+	defer p.Close()
 	numSegs := 10
 	numValsPerSeg := 100
 	loadDataBasicWithNewSegments(p, numSegs, numValsPerSeg)
@@ -535,6 +539,7 @@ func TestPartitionScanTimestamp(t *testing.T) {
 		TTLSeconds:                     ttlSeconds,
 	}
 	p := NewPartition(opts)
+	defer p.Close()
 	numIters := 5000
 	batchSize := 10
 	var timestamps []int64
