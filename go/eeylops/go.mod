@@ -9,10 +9,11 @@ require (
 	github.com/golang/glog v0.0.0-20210429001901-424d2337a529
 	github.com/golang/snappy v0.0.3 // indirect
 	github.com/hashicorp/raft v1.3.1
+	github.com/hashicorp/raft-boltdb v0.0.0-20210422161416-485fa74b0b01
 	github.com/jinzhu/gorm v1.9.16
 	github.com/lib/pq v1.10.1
 	github.com/mattn/go-sqlite3 v1.14.7 // indirect
-	github.com/stretchr/testify v1.6.1 // indirect
+	github.com/stretchr/testify v1.6.1
 	golang.org/x/net v0.0.0-20210726213435-c6fcb2dbf985 // indirect
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c // indirect
 	google.golang.org/genproto v0.0.0-20210728212813-7823e685a01f // indirect
