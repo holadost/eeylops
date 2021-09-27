@@ -35,7 +35,7 @@ const (
 	Unknown
 )
 
-func NewController(localID string, bindAddr string, rootDir string, fsm raft.FSM) *RaftController {
+func NewRaftController(localID string, bindAddr string, rootDir string, fsm raft.FSM) *RaftController {
 	controller := new(RaftController)
 	controller.rootDir = rootDir
 	controller.controllerID = localID
