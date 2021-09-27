@@ -45,6 +45,21 @@ func NewController(localID string, bindAddr string, rootDir string, fsm raft.FSM
 	return controller
 }
 
+// RootDir returns the path to the controller's storage directory.
+func (rc *RaftController) RootDir() string {
+	return rc.rootDir
+}
+
+// Addr returns the address of the controller.
+func (rc *RaftController) Addr() string {
+	return rc.localAddr
+}
+
+// ID returns the controller ID.
+func (rc *RaftController) ID() string {
+	return rc.controllerID
+}
+
 // IsLeader returns true if this controller is the leader. false otherwise.
 func (rc *RaftController) IsLeader() bool {
 	return false
@@ -65,21 +80,6 @@ func (rc *RaftController) State() RaftControllerState {
 	default:
 		return Unknown
 	}
-}
-
-// RootDir returns the path to the controller's storage directory.
-func (rc *RaftController) RootDir() string {
-	return rc.rootDir
-}
-
-// Addr returns the address of the controller.
-func (rc *RaftController) Addr() string {
-	return rc.localAddr
-}
-
-// ID returns the controller ID.
-func (rc *RaftController) ID() string {
-	return rc.controllerID
 }
 
 // LeaderAddr returns the address of the current leader. Returns an empty string if there is no leader.
