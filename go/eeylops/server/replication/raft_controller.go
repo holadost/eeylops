@@ -13,7 +13,7 @@ import (
 )
 
 const kRaftDir = "raft"
-const kRaftSnapshotDir = "snapshots"
+const kRaftSnapshotDir = "snapshot_store"
 const kRaftLogStoreDir = "log_store"
 
 type RaftController struct {
